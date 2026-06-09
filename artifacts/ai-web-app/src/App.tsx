@@ -11,6 +11,7 @@ import Training from "@/pages/training";
 import ApiDocs from "@/pages/api-docs";
 import ModelsPage from "@/pages/models";
 import Generate from "@/pages/generate";
+import ApiKeys from "@/pages/api-keys";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -37,6 +38,7 @@ function Router() {
         <Route path="/api-docs" component={ApiDocs} />
         <Route path="/models" component={ModelsPage} />
         <Route path="/generate" component={Generate} />
+        <Route path="/api-keys" component={ApiKeys} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

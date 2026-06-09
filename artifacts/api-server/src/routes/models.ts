@@ -13,8 +13,8 @@
  *   GET  /api/ollama-models         — Alias used by Training Hub page
  */
 
-import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
-import { writeFileSync, mkdirSync, unlinkSync, accessSync, constants } from "fs";
+import { Router, type IRouter, type Request, type Response } from "express";
+import { writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { execSync } from "child_process";
 import {
   listOllamaModels,
@@ -29,29 +29,6 @@ import {
 import { listHFModels } from "../huggingface";
 
 const router: IRouter = Router();
-
-// ─── API Key middleware ───────────────────────────────────────────────────────
-const API_KEY = process.env.NEXUS_API_KEY || "";
-
-function requireApiKey(req: Request, res: Response, next: NextFunction): void {
-  if (!API_KEY) {
-    console.warn("NEXUS_API_KEY not set — model mutation endpoints are open");
-    return next();
-  }
-  const key =
-    (req.headers["x-api-key"] as string) ||
-    (req.headers["x-nexus-key"] as string) ||
-    (req.headers["x-dlavie-key"] as string) ||
-    (req.headers["authorization"] as string)?.replace(/^Bearer\s+/i, "");
-  if (!key || key !== API_KEY) {
-    res.status(401).json({
-      error: "Unauthorized",
-      message: "Valid API key required. Pass it as X-API-Key, X-DLavie-Key, or Authorization: Bearer <key>",
-    });
-    return;
-  }
-  next();
-}
 
 /** SSE helper */
 function sse(res: Response, payload: object) {

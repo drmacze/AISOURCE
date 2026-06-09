@@ -11,6 +11,7 @@ import autoTrainingRouter from "./autotraining";
 import modelsRouter from "./models";
 import imageRouter from "./image";
 import kimiRouter from "./kimi";
+import apiKeysRouter from "./apikeys";
 
 const router: IRouter = Router();
 
@@ -19,6 +20,9 @@ router.use(conversationsRouter);
 router.use(documentsRouter);
 router.use(trainingRouter);
 router.use(dashboardRouter);
+
+// API Key management — generate/revoke/list keys for external integrations
+router.use(apiKeysRouter);
 
 // Ollama CLI — secure terminal interface for model management
 router.use(cliRouter);

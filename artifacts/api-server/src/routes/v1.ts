@@ -28,6 +28,7 @@ import {
   listOllamaModels,
   OllamaError,
 } from "../ollama";
+import { requireAuth } from "../lib/auth";
 
 const router: IRouter = Router();
 
@@ -87,30 +88,9 @@ setInterval(() => {
   }
 }, 5 * 60_000).unref();
 
-// ─── API Key Auth ─────────────────────────────────────────────────────────────
-const API_KEY = process.env.NEXUS_API_KEY || "";
-
-function requireApiKey(req: Request, res: Response, next: NextFunction): void {
-  if (!API_KEY) {
-    console.warn("[v1] NEXUS_API_KEY not set — API is open");
-    return next();
-  }
-  const key =
-    (req.headers["x-api-key"] as string) ||
-    (req.headers["x-nexus-key"] as string) ||
-    (req.headers["x-dlavie-key"] as string) ||
-    (req.headers["authorization"] as string)?.replace(/^Bearer\s+/i, "");
-
-  if (!key || key !== API_KEY) {
-    res.status(401).json({
-      error: "Unauthorized",
-      message: "Valid API key required.",
-      hint: "Pass it as: X-API-Key, X-DLavie-Key, or Authorization: Bearer <key>",
-    });
-    return;
-  }
-  next();
-}
+// ─── API Key Auth (DB-backed) ─────────────────────────────────────────────────
+// requireAuth is imported from ../lib/auth — validates against DB or NEXUS_API_KEY master key
+const requireApiKey = requireAuth("write");
 
 // ─── Multi-model router ───────────────────────────────────────────────────────
 
