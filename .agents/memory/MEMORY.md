@@ -1,0 +1,4 @@
+- [AISOURCE / NEXUS_OS](aisource-project.md) — DLavie OS AI Command Center with local Ollama + HuggingFace fallback, chat, RAG, training hub
+- [HF_TOKEN setup](aisource-project.md#hf-token) — HF_TOKEN set as secret, HuggingFace API used as fallback when Ollama is down
+- [Database schema push](aisource-project.md#db-push) — `pnpm --filter @workspace/db run push` needed after fresh import or schema changes
+- [Workflow config](aisource-project.md#workflows) — API Server on port 8080, web app on port 5000 via configureWorkflow
