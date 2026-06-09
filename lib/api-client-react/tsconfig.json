@@ -1,12 +1,21 @@
 {
-  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "composite": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "declaration": true,
     "declarationMap": true,
-    "emitDeclarationOnly": true,
-    "outDir": "dist",
-    "rootDir": "src",
-    "lib": ["dom", "es2022"]
+    "sourceMap": true,
+    "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo",
+    "jsx": "preserve",
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

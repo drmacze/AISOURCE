@@ -7,9 +7,13 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@tanstack/react-query": "catalog:"
+    "@tanstack/react-query": "catalog:",
+    "react": "catalog:",
+    "zod": "catalog:"
   },
-  "peerDependencies": {
-    "react": ">=18"
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:"
   }
 }

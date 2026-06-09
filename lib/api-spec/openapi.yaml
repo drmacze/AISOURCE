@@ -3,13 +3,21 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Web App API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: chat
+    description: Chat and conversation management
+  - name: rag
+    description: RAG (Retrieval-Augmented Generation) operations
+  - name: training
+    description: Training data pipeline and model management
+  - name: dashboard
+    description: Dashboard and system statistics
 paths:
   /healthz:
     get:
@@ -24,6 +32,445 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /conversations:
+    get:
+      operationId: listConversations
+      tags: [chat]
+      summary: List all conversations
+      description: Returns a list of all chat conversations
+      responses:
+        "200":
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+    post:
+      operationId: createConversation
+      tags: [chat]
+      summary: Create a new conversation
+      description: Creates a new chat conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationInput"
+      responses:
+        "201":
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+
+  /conversations/{id}:
+    get:
+      operationId: getConversation
+      tags: [chat]
+      summary: Get conversation by ID
+      description: Returns a single conversation with its messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteConversation
+      tags: [chat]
+      summary: Delete conversation
+      description: Deletes a conversation and its messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted successfully
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /conversations/{id}/messages:
+    get:
+      operationId: listMessages
+      tags: [chat]
+      summary: List messages in a conversation
+      description: Returns all messages for a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+    post:
+      operationId: sendMessage
+      tags: [chat]
+      summary: Send a message
+      description: Sends a message and gets AI response
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageInput"
+      responses:
+        "201":
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+
+  /documents:
+    get:
+      operationId: listDocuments
+      tags: [rag]
+      summary: List all uploaded documents
+      description: Returns all documents in the knowledge base
+      responses:
+        "200":
+          description: List of documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Document"
+    post:
+      operationId: uploadDocument
+      tags: [rag]
+      summary: Upload a document
+      description: Uploads a document for indexing and RAG
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentInput"
+      responses:
+        "201":
+          description: Document uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+
+  /documents/{id}:
+    get:
+      operationId: getDocument
+      tags: [rag]
+      summary: Get document details
+      description: Returns a single document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteDocument
+      tags: [rag]
+      summary: Delete a document
+      description: Removes a document from the knowledge base
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted successfully
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /documents/search:
+    post:
+      operationId: searchDocuments
+      tags: [rag]
+      summary: Search knowledge base
+      description: Searches documents using semantic or keyword search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchQuery"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SearchResult"
+
+  /training-datasets:
+    get:
+      operationId: listTrainingDatasets
+      tags: [training]
+      summary: List training datasets
+      description: Returns all training datasets
+      responses:
+        "200":
+          description: List of datasets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TrainingDataset"
+    post:
+      operationId: createTrainingDataset
+      tags: [training]
+      summary: Create a training dataset
+      description: Creates a new training dataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingDatasetInput"
+      responses:
+        "201":
+          description: Dataset created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingDataset"
+
+  /training-datasets/{id}:
+    get:
+      operationId: getTrainingDataset
+      tags: [training]
+      summary: Get dataset details
+      description: Returns a dataset with its samples
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Dataset details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingDatasetDetail"
+        "404":
+          description: Dataset not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /training-datasets/{id}/samples:
+    post:
+      operationId: addTrainingSample
+      tags: [training]
+      summary: Add a training sample
+      description: Adds a sample to a training dataset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingSampleInput"
+      responses:
+        "201":
+          description: Sample added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingSample"
+
+  /training-jobs:
+    get:
+      operationId: listTrainingJobs
+      tags: [training]
+      summary: List training jobs
+      description: Returns all training jobs
+      responses:
+        "200":
+          description: List of training jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TrainingJob"
+    post:
+      operationId: startTrainingJob
+      tags: [training]
+      summary: Start a training job
+      description: Starts a new model training job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingJobInput"
+      responses:
+        "201":
+          description: Training job started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+
+  /training-jobs/{id}:
+    get:
+      operationId: getTrainingJob
+      tags: [training]
+      summary: Get training job details
+      description: Returns training job progress
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Training job details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /ai-models:
+    get:
+      operationId: listModels
+      tags: [training]
+      summary: List available AI models
+      description: Returns all registered models
+      responses:
+        "200":
+          description: List of models
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AiModel"
+    post:
+      operationId: registerModel
+      tags: [training]
+      summary: Register a new model
+      description: Registers a new AI model
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiModelInput"
+      responses:
+        "201":
+          description: Model registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiModel"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get dashboard statistics
+      description: Returns system overview stats
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Get recent activity
+      description: Returns recent activity feed
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Activity"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +481,449 @@ components:
       required:
         - status
 
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        model:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messageCount:
+          type: integer
+      required:
+        - id
+        - title
+        - createdAt
+        - updatedAt
+        - messageCount
+
+    ConversationInput:
+      type: object
+      properties:
+        title:
+          type: string
+        model:
+          type: string
+      required:
+        - title
+
+    ConversationDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        model:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+      required:
+        - id
+        - title
+        - createdAt
+        - updatedAt
+        - messages
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        tokens:
+          type: ["integer", "null"]
+      required:
+        - id
+        - conversationId
+        - role
+        - content
+        - createdAt
+
+    MessageInput:
+      type: object
+      properties:
+        content:
+          type: string
+        model:
+          type: string
+      required:
+        - content
+
+    Document:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        content:
+          type: string
+        fileType:
+          type: string
+        size:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        indexed:
+          type: boolean
+        chunkCount:
+          type: integer
+      required:
+        - id
+        - title
+        - createdAt
+        - indexed
+        - chunkCount
+
+    DocumentInput:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        fileType:
+          type: string
+      required:
+        - title
+        - content
+
+    SearchQuery:
+      type: object
+      properties:
+        query:
+          type: string
+        topK:
+          type: integer
+        searchType:
+          type: string
+          enum: [semantic, keyword, hybrid]
+      required:
+        - query
+
+    SearchResult:
+      type: object
+      properties:
+        documentId:
+          type: integer
+        title:
+          type: string
+        content:
+          type: string
+        score:
+          type: number
+        rank:
+          type: integer
+      required:
+        - documentId
+        - title
+        - content
+        - score
+        - rank
+
+    TrainingDataset:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        taskType:
+          type: string
+          enum: [classification, generation, summarization, qa, translation]
+        sampleCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - taskType
+        - sampleCount
+        - createdAt
+        - updatedAt
+
+    TrainingDatasetInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        taskType:
+          type: string
+          enum: [classification, generation, summarization, qa, translation]
+      required:
+        - name
+        - taskType
+
+    TrainingDatasetDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        taskType:
+          type: string
+        sampleCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrainingSample"
+      required:
+        - id
+        - name
+        - taskType
+        - sampleCount
+        - createdAt
+        - updatedAt
+        - samples
+
+    TrainingSample:
+      type: object
+      properties:
+        id:
+          type: integer
+        datasetId:
+          type: integer
+        input:
+          type: string
+        output:
+          type: ["string", "null"]
+        label:
+          type: ["string", "null"]
+        metadata:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - datasetId
+        - input
+        - createdAt
+
+    TrainingSampleInput:
+      type: object
+      properties:
+        input:
+          type: string
+        output:
+          type: string
+        label:
+          type: string
+        metadata:
+          type: string
+      required:
+        - input
+
+    TrainingJob:
+      type: object
+      properties:
+        id:
+          type: integer
+        modelId:
+          type: integer
+        datasetId:
+          type: integer
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        progress:
+          type: number
+        epochs:
+          type: integer
+        currentEpoch:
+          type: integer
+        loss:
+          type: ["number", "null"]
+        accuracy:
+          type: ["number", "null"]
+        startedAt:
+          type: ["string", "null"]
+          format: date-time
+        completedAt:
+          type: ["string", "null"]
+          format: date-time
+        error:
+          type: ["string", "null"]
+      required:
+        - id
+        - modelId
+        - datasetId
+        - status
+        - progress
+        - epochs
+        - currentEpoch
+
+    TrainingJobInput:
+      type: object
+      properties:
+        modelId:
+          type: integer
+        datasetId:
+          type: integer
+        epochs:
+          type: integer
+        hyperparameters:
+          type: ["string", "null"]
+      required:
+        - modelId
+        - datasetId
+
+    AiModel:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        type:
+          type: string
+          enum: [llm, embedding, classification, summarization, custom]
+        status:
+          type: string
+          enum: [active, training, inactive]
+        version:
+          type: string
+        architecture:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - type
+        - status
+        - version
+        - createdAt
+        - updatedAt
+
+    AiModelInput:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [llm, embedding, classification, summarization, custom]
+        version:
+          type: string
+        architecture:
+          type: string
+        description:
+          type: string
+      required:
+        - name
+        - type
+        - version
+
+    DashboardStats:
+      type: object
+      properties:
+        totalConversations:
+          type: integer
+        totalMessages:
+          type: integer
+        totalDocuments:
+          type: integer
+        totalModels:
+          type: integer
+        activeTrainingJobs:
+          type: integer
+        totalDatasets:
+          type: integer
+        systemStatus:
+          type: string
+          enum: [online, offline, maintenance]
+        lastUpdated:
+          type: string
+          format: date-time
+      required:
+        - totalConversations
+        - totalMessages
+        - totalDocuments
+        - totalModels
+        - activeTrainingJobs
+        - totalDatasets
+        - systemStatus
+        - lastUpdated
+
+    Activity:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [conversation, document, training, model]
+        title:
+          type: string
+        description:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - type
+        - title
+        - description
+        - createdAt
