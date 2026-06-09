@@ -1,6 +1,6 @@
 /**
- * DLavie OS — Auto-Training Control API
- * Endpoints to manage the 24/7 live learning system.
+ * DLavie OS — Auto-Training Control API v2
+ * Endpoints to manage and inspect the 24/7 live learning system.
  */
 
 import { Router, type IRouter } from "express";
@@ -11,39 +11,105 @@ import {
   getAutoTrainingStatus,
   scrapeUrlForTraining,
 } from "../autotraining";
+import { checkGitHubRateLimit, isGitHubConfigured } from "../github-datasets";
+import { db } from "@workspace/db";
+import { trainingSamplesTable, trainingDatasetsTable } from "@workspace/db";
+import { count, desc } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-/** GET /api/autotraining/status */
+/** GET /api/autotraining/status — Full engine status */
 router.get("/autotraining/status", (_req, res) => {
   res.json(getAutoTrainingStatus());
 });
 
-/** GET /api/autotraining/sources — active data source stats */
+/** GET /api/autotraining/sources — Per-source stats */
 router.get("/autotraining/sources", (_req, res) => {
   const status = getAutoTrainingStatus();
   res.json({
     sources: status.sources,
     stats: status.sourceStats,
     hfConnected: status.hfConnected,
+    githubConnected: status.githubConnected,
+    githubToken: status.githubToken,
     totalSamplesAdded: status.totalSamplesAdded,
+    deduplication: {
+      active: status.deduplicationActive,
+      cacheSize: status.totalDedupCacheSize,
+    },
+    languages: status.languages,
   });
 });
 
-/** POST /api/autotraining/start — Start the scheduler */
+/** GET /api/autotraining/github-status — GitHub token and rate limit */
+router.get("/autotraining/github-status", async (_req, res) => {
+  const rateLimit = await checkGitHubRateLimit();
+  res.json({
+    configured: isGitHubConfigured(),
+    tokenPrefix: process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.slice(0, 8) + "..." : null,
+    rateLimit,
+    features: [
+      "Trending repos with README (5000 repos/hr)",
+      "Real dataset files (JSONL/CSV/JSON)",
+      "GitHub issue Q&A discussions",
+      "Code examples and tutorials",
+      "Dataset repo search by tag",
+    ],
+  });
+});
+
+/** GET /api/autotraining/dataset-stats — DB training data stats */
+router.get("/autotraining/dataset-stats", async (_req, res) => {
+  try {
+    const [totalSamples] = await db.select({ c: count() }).from(trainingSamplesTable);
+    const datasets = await db.select().from(trainingDatasetsTable).orderBy(desc(trainingDatasetsTable.updatedAt)).limit(5);
+
+    // Source breakdown from metadata
+    const samples = await db.select({ metadata: trainingSamplesTable.metadata }).from(trainingSamplesTable).limit(5000);
+    const sourceBreakdown: Record<string, number> = {};
+    for (const s of samples) {
+      try {
+        const meta = JSON.parse(s.metadata || "{}") as { source?: string };
+        const src = meta.source || "unknown";
+        sourceBreakdown[src] = (sourceBreakdown[src] || 0) + 1;
+      } catch { /* skip */ }
+    }
+
+    res.json({
+      totalSamples: totalSamples.c,
+      datasets: datasets.map((d) => ({
+        id: d.id,
+        name: d.name,
+        sampleCount: d.sampleCount,
+        updatedAt: d.updatedAt,
+      })),
+      sourceBreakdown,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "DatabaseError", message: String(err) });
+  }
+});
+
+/** POST /api/autotraining/start */
 router.post("/autotraining/start", (req, res) => {
   const intervalMinutes = Number(req.body?.intervalMinutes) || 180;
   startAutoTraining(intervalMinutes * 60 * 1000);
-  res.json({ ok: true, message: `Auto-training started (every ${intervalMinutes} min)`, intervalMinutes });
+  res.json({
+    ok: true,
+    message: `Auto-training v2 started (every ${intervalMinutes} min, 12+ sources, multilingual)`,
+    intervalMinutes,
+    sources: 12,
+    languages: ["en", "id", "ar", "fr", "es"],
+  });
 });
 
-/** POST /api/autotraining/stop — Stop the scheduler */
+/** POST /api/autotraining/stop */
 router.post("/autotraining/stop", (_req, res) => {
   stopAutoTraining();
   res.json({ ok: true, message: "Auto-training stopped" });
 });
 
-/** POST /api/autotraining/run — Trigger a full cycle immediately */
+/** POST /api/autotraining/run — Trigger full cycle immediately */
 router.post("/autotraining/run", async (_req, res) => {
   const result = await runAutoTrainingCycle();
   res.json({ ok: result.success, ...result });
@@ -58,7 +124,6 @@ router.post("/autotraining/scrape-url", async (req, res) => {
     return;
   }
 
-  // Basic URL validation
   try {
     new URL(url);
   } catch {
@@ -68,6 +133,16 @@ router.post("/autotraining/scrape-url", async (req, res) => {
 
   const result = await scrapeUrlForTraining(url, datasetId);
   res.json({ ok: result.success, ...result });
+});
+
+/** GET /api/autotraining/activity — Latest activity log */
+router.get("/autotraining/activity", (_req, res) => {
+  const status = getAutoTrainingStatus();
+  res.json({
+    log: status.activityLog,
+    currentCycle: status.currentCycleLog,
+    running: status.currentlyCycling,
+  });
 });
 
 export default router;

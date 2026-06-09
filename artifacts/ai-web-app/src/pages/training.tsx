@@ -25,9 +25,237 @@ import {
   Network, Cpu, Database, Play, Loader2, AlertCircle, CheckCircle2,
   Plus, Download, Trash2, RefreshCw, Zap, Square, Terminal,
   ChevronRight, Package, Brain, Code2, Globe, Sparkles, X,
+  Github, BookOpen, Newspaper, FlaskConical, MessageSquare, Activity,
+  HardDrive, Languages, Shield,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { format } from "date-fns";
+
+// ── Auto-Training Live Panel ──────────────────────────────────────────────────
+interface AutoTrainingStatus {
+  running: boolean;
+  currentlyCycling: boolean;
+  totalCyclesCompleted: number;
+  totalSamplesAdded: number;
+  lastCycleAt: string | null;
+  nextCycleAt: string | null;
+  activityLog: Array<{ at: string; msg: string; type: "info" | "success" | "error" }>;
+  sourceStats: Record<string, number>;
+  hfConnected: boolean;
+  githubConnected: boolean;
+  githubToken: string;
+  deduplicationActive: boolean;
+  totalDedupCacheSize: number;
+  languages: string[];
+}
+
+interface DatasetStats {
+  totalSamples: number;
+  datasets: Array<{ id: number; name: string; sampleCount: number; updatedAt: string }>;
+  sourceBreakdown: Record<string, number>;
+}
+
+const SOURCE_META: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
+  "wikipedia-en":           { icon: <BookOpen className="w-3 h-3" />, label: "Wikipedia EN",       color: "text-blue-400" },
+  "wikipedia-multilingual": { icon: <Languages className="w-3 h-3" />, label: "Wikipedia Multi",   color: "text-cyan-400" },
+  "wikipedia":              { icon: <BookOpen className="w-3 h-3" />, label: "Wikipedia",           color: "text-blue-400" },
+  hackernews:               { icon: <Newspaper className="w-3 h-3" />, label: "HackerNews",        color: "text-orange-400" },
+  reddit:                   { icon: <MessageSquare className="w-3 h-3" />, label: "Reddit",        color: "text-orange-500" },
+  arxiv:                    { icon: <FlaskConical className="w-3 h-3" />, label: "arXiv Papers",   color: "text-purple-400" },
+  rss:                      { icon: <Newspaper className="w-3 h-3" />, label: "RSS Feeds",         color: "text-yellow-400" },
+  huggingface:              { icon: <Brain className="w-3 h-3" />, label: "HuggingFace",           color: "text-yellow-300" },
+  openassistant:            { icon: <MessageSquare className="w-3 h-3" />, label: "OpenAssistant", color: "text-pink-400" },
+  curated:                  { icon: <Shield className="w-3 h-3" />, label: "Curated AI Q&A",       color: "text-green-400" },
+  github:                   { icon: <Github className="w-3 h-3" />, label: "GitHub Trending",       color: "text-white" },
+  "github-datasets":        { icon: <Database className="w-3 h-3" />, label: "GitHub Datasets",    color: "text-green-300" },
+  "github-issues":          { icon: <MessageSquare className="w-3 h-3" />, label: "GitHub Issues", color: "text-gray-300" },
+  devto:                    { icon: <Code2 className="w-3 h-3" />, label: "DEV.to Articles",       color: "text-indigo-400" },
+};
+
+function AutoTrainingPanel() {
+  const [status, setStatus] = useState<AutoTrainingStatus | null>(null);
+  const [dbStats, setDbStats] = useState<DatasetStats | null>(null);
+  const [running, setRunning] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const BASE = (window as Window & { _apiBase?: string })._apiBase || getApiBase();
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const [s, d] = await Promise.all([
+        fetch(`${BASE}/api/autotraining/status`).then((r) => r.json()) as Promise<AutoTrainingStatus>,
+        fetch(`${BASE}/api/autotraining/dataset-stats`).then((r) => r.json()) as Promise<DatasetStats>,
+      ]);
+      setStatus(s);
+      setDbStats(d);
+    } catch { /* ignore */ }
+  }, [BASE]);
+
+  useEffect(() => {
+    fetchStatus();
+    const id = setInterval(fetchStatus, 5000);
+    return () => clearInterval(id);
+  }, [fetchStatus]);
+
+  const handleRunCycle = async () => {
+    setRunning(true);
+    try {
+      await fetch(`${BASE}/api/autotraining/run`, { method: "POST" });
+      setTimeout(() => { fetchStatus(); setRunning(false); }, 2000);
+    } catch { setRunning(false); }
+  };
+
+  const handleToggle = async () => {
+    if (status?.running) {
+      await fetch(`${BASE}/api/autotraining/stop`, { method: "POST" });
+    } else {
+      await fetch(`${BASE}/api/autotraining/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ intervalMinutes: 180 }) });
+    }
+    setTimeout(fetchStatus, 500);
+  };
+
+  const totalFromBreakdown = dbStats ? Object.values(dbStats.sourceBreakdown).reduce((a, b) => a + b, 0) : 0;
+
+  return (
+    <Card className="glass-panel border-primary/30">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Activity className="w-4 h-4 text-primary animate-pulse" />
+            Live Auto-Training Engine
+            <span className="text-xs font-mono font-normal text-muted-foreground ml-1">
+              — 24/7 knowledge acquisition
+            </span>
+            {status?.currentlyCycling && (
+              <span className="flex items-center gap-1 text-xs font-mono px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+                <Loader2 className="w-3 h-3 animate-spin" /> cycling…
+              </span>
+            )}
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline" size="sm"
+              className="gap-1.5 font-mono text-xs h-7"
+              onClick={handleRunCycle}
+              disabled={running || status?.currentlyCycling}
+            >
+              {running ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+              Run Cycle
+            </Button>
+            <Button
+              size="sm"
+              variant={status?.running ? "destructive" : "default"}
+              className="gap-1.5 font-mono text-xs h-7"
+              onClick={handleToggle}
+            >
+              {status?.running ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+              {status?.running ? "Stop" : "Start"}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Stats row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: "Total Samples", value: dbStats?.totalSamples?.toLocaleString() ?? "—", sub: "in database", color: "text-green-400" },
+            { label: "Cycles Done", value: status?.totalCyclesCompleted ?? "—", sub: "full cycles", color: "text-primary" },
+            { label: "Sources Active", value: "13", sub: "data streams", color: "text-blue-400" },
+            { label: "Dedup Cache", value: status?.totalDedupCacheSize?.toLocaleString() ?? "—", sub: "unique hashes", color: "text-purple-400" },
+          ].map((s) => (
+            <div key={s.label} className="p-3 rounded-lg border border-border bg-background/50 text-center">
+              <div className={`text-xl font-bold font-mono ${s.color}`}>{String(s.value)}</div>
+              <div className="text-[10px] font-mono text-muted-foreground mt-0.5">{s.label}</div>
+              <div className="text-[9px] text-muted-foreground/60">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Connection badges */}
+        <div className="flex flex-wrap gap-2 text-[10px] font-mono">
+          <span className={`flex items-center gap-1 px-2 py-1 rounded border ${status?.githubConnected ? "border-green-500/40 bg-green-500/10 text-green-400" : "border-yellow-500/40 bg-yellow-500/10 text-yellow-400"}`}>
+            <Github className="w-3 h-3" />
+            {status?.githubToken ?? "GitHub"}
+          </span>
+          <span className={`flex items-center gap-1 px-2 py-1 rounded border ${status?.hfConnected ? "border-yellow-400/40 bg-yellow-400/10 text-yellow-300" : "border-border text-muted-foreground"}`}>
+            <Brain className="w-3 h-3" />
+            {status?.hfConnected ? "HuggingFace connected" : "HF not configured"}
+          </span>
+          {(status?.languages || []).map((lang) => (
+            <span key={lang} className="flex items-center gap-1 px-2 py-1 rounded border border-cyan-500/30 bg-cyan-500/10 text-cyan-400">
+              <Globe className="w-3 h-3" />
+              {lang.toUpperCase()}
+            </span>
+          ))}
+          <span className="flex items-center gap-1 px-2 py-1 rounded border border-purple-500/30 bg-purple-500/10 text-purple-400">
+            <Shield className="w-3 h-3" />
+            dedup active
+          </span>
+          <span className="flex items-center gap-1 px-2 py-1 rounded border border-border text-muted-foreground">
+            <HardDrive className="w-3 h-3" />
+            disk: /workspace/.ollama-models
+          </span>
+        </div>
+
+        {/* Source breakdown */}
+        {dbStats?.sourceBreakdown && Object.keys(dbStats.sourceBreakdown).length > 0 && (
+          <div>
+            <p className="text-xs font-mono text-muted-foreground mb-2">Sample distribution by source ({totalFromBreakdown} total)</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+              {Object.entries(dbStats.sourceBreakdown)
+                .sort(([, a], [, b]) => b - a)
+                .map(([src, cnt]) => {
+                  const meta = SOURCE_META[src] || { icon: <Database className="w-3 h-3" />, label: src, color: "text-muted-foreground" };
+                  const pct = totalFromBreakdown > 0 ? Math.round((cnt / totalFromBreakdown) * 100) : 0;
+                  return (
+                    <div key={src} className="flex items-center gap-2 p-2 rounded border border-border bg-background/40 text-[10px] font-mono">
+                      <span className={meta.color}>{meta.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-baseline gap-1">
+                          <span className="truncate text-foreground/80">{meta.label}</span>
+                          <span className={`shrink-0 font-bold ${meta.color}`}>{cnt}</span>
+                        </div>
+                        <div className="mt-0.5 h-0.5 rounded-full bg-border overflow-hidden">
+                          <div className="h-full bg-primary/50 rounded-full" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
+        {/* Schedule info */}
+        <div className="flex flex-wrap gap-4 text-[10px] font-mono text-muted-foreground border-t border-border pt-3">
+          <span>Last cycle: <span className="text-foreground">{status?.lastCycleAt ? format(new Date(status.lastCycleAt), "HH:mm:ss") : "—"}</span></span>
+          <span>Next cycle: <span className="text-foreground">{status?.nextCycleAt ? format(new Date(status.nextCycleAt), "HH:mm:ss") : "—"}</span></span>
+          <span>Status: <span className={status?.running ? "text-green-400" : "text-yellow-400"}>{status?.running ? "● RUNNING" : "○ PAUSED"}</span></span>
+          <button
+            className="ml-auto text-primary hover:text-primary/80 underline-offset-2 hover:underline"
+            onClick={() => setShowLog(!showLog)}
+          >
+            {showLog ? "hide log" : "show activity log"}
+          </button>
+        </div>
+
+        {/* Activity log */}
+        {showLog && status?.activityLog && status.activityLog.length > 0 && (
+          <div className="bg-black/60 rounded-lg p-3 font-mono text-[10px] max-h-40 overflow-y-auto space-y-0.5 border border-border">
+            {status.activityLog.slice(0, 30).map((entry, i) => (
+              <div key={i} className={`flex gap-2 ${
+                entry.type === "success" ? "text-green-400/90" :
+                entry.type === "error" ? "text-red-400/90" : "text-muted-foreground"
+              }`}>
+                <span className="text-muted-foreground/50 shrink-0">{entry.at.slice(11, 19)}</span>
+                <span>{entry.msg}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 import { getApiBase } from "./models";
 const BASE = getApiBase();
@@ -676,6 +904,9 @@ export default function Training() {
           </Dialog>
         </div>
       </div>
+
+      {/* ── Live Auto-Training Engine ────────────────────────────────────── */}
+      <AutoTrainingPanel />
 
       {/* ── Main grid ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

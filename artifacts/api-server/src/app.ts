@@ -70,7 +70,31 @@ app.options("/{*path}", cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+// ─── Health check (for Replit deployment probe) ───────────────────────────────
+app.get("/api/healthz", (_req, res) => {
+  res.json({
+    status: "ok",
+    uptime: Math.round(process.uptime()),
+    memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    ts: new Date().toISOString(),
+  });
+});
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api", router);
+
+// ─── 404 handler ─────────────────────────────────────────────────────────────
+app.use((_req, res) => {
+  res.status(404).json({ error: "Not Found", message: "Route not found. Check /api/health for status." });
+});
+
+// ─── Error handler ────────────────────────────────────────────────────────────
+app.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
+  const status = (err as { status?: number }).status ?? 500;
+  res.status(status).json({
+    error: err.name || "InternalError",
+    message: err.message || "An unexpected error occurred.",
+  });
+});
 
 export default app;
