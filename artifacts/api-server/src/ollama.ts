@@ -2,6 +2,7 @@ import { spawn, execSync } from "child_process";
 import { Response } from "express";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { freemem } from "os";
 
 export const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
 export const OLLAMA_PATH =
@@ -157,10 +158,10 @@ export async function startOllamaServer(): Promise<void> {
       ...extraEnv,
       OLLAMA_ORIGINS: "*",
       OLLAMA_HOST: "127.0.0.1:11434",
-      OLLAMA_CONTEXT_LENGTH: "4096",
-      OLLAMA_KEEP_ALIVE: "10m0s",
-      OLLAMA_MAX_LOADED_MODELS: "2",
+      OLLAMA_KEEP_ALIVE: "5m0s",
+      OLLAMA_MAX_LOADED_MODELS: "1",
       OLLAMA_NUM_PARALLEL: "1",
+      OLLAMA_FLASH_ATTENTION: "1",
       OLLAMA_DEBUG: "INFO",
     },
   });
@@ -213,11 +214,37 @@ async function resolveModel(model: string): Promise<string> {
       ERROR_HINTS.NO_MODELS
     );
   }
+
+  // Find requested model (exact or partial match)
   const names = installed.map((m) => m.name);
-  if (names.includes(model)) return model;
-  const partial = names.find((n) => n.startsWith(model.split(":")[0]));
-  if (partial) return partial;
-  return names[0];
+  let candidate = names.includes(model)
+    ? model
+    : names.find((n) => n.startsWith(model.split(":")[0])) ?? names[0];
+
+  // RAM check: model needs ~1.25× its file size in memory
+  const available = freemem();
+  const modelInfo = installed.find((m) => m.name === candidate);
+  if (modelInfo && modelInfo.size * 1.25 > available) {
+    // Fall back to the smallest installed model that fits
+    const fitting = installed
+      .slice()
+      .sort((a, b) => a.size - b.size)
+      .find((m) => m.size * 1.25 <= available);
+    if (fitting) {
+      console.warn(
+        `[Ollama] ${candidate} needs ${(modelInfo.size * 1.25 / 1e9).toFixed(1)} GB but only ${(available / 1e9).toFixed(1)} GB free — falling back to ${fitting.name}`
+      );
+      candidate = fitting.name;
+    } else {
+      throw new OllamaError(
+        "INSUFFICIENT_MEMORY",
+        `Not enough RAM to run any installed model. Free memory: ${(available / 1e9).toFixed(1)} GB. Try installing a smaller model (e.g. tinyllama).`,
+        "Install a smaller model via the Model Manager, or free up system memory."
+      );
+    }
+  }
+
+  return candidate;
 }
 
 // ─── Invalidate model cache (call after pull/delete/create) ────────────────
@@ -250,7 +277,7 @@ export async function generateOllamaResponse(
           model: resolvedModel,
           prompt: fullPrompt,
           stream: false,
-          options: { temperature: 0.7, top_p: 0.9, num_predict: 512 },
+          options: { temperature: 0.7, top_p: 0.9, num_predict: 512, num_ctx: 2048 },
         }),
       })
     );
@@ -354,7 +381,7 @@ export async function streamOllamaResponse(
           model,
           prompt: fullPrompt,
           stream: true,
-          options: { temperature: 0.7, top_p: 0.9, num_predict: 512 },
+          options: { temperature: 0.7, top_p: 0.9, num_predict: 512, num_ctx: 2048 },
         }),
       })
     );

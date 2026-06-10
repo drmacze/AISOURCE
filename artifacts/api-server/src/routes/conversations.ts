@@ -424,8 +424,9 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
   // Merge contexts: knowledge base + web search
   const combinedContext = [ragContext, webContext].filter(Boolean).join("\n\n---\n\n") || undefined;
 
-  // Accumulate full text from SSE tokens + final fullText event
+  // Accumulate full text from SSE tokens + final fullText event; track any error
   let fullText = "";
+  let streamError = "";
 
   const origWrite = res.write.bind(res);
   const origEnd = res.end.bind(res);
@@ -433,14 +434,12 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
   res.write = function (chunk: unknown, ...args: unknown[]) {
     try {
       const raw = typeof chunk === "string" ? chunk : chunk instanceof Buffer ? chunk.toString() : String(chunk);
-      // Each write is one SSE line: "data: {...}\n\n" — strip prefix + trailing whitespace
       const dataLine = raw.trim().replace(/^data:\s*/, "");
       if (dataLine) {
-        const parsed = JSON.parse(dataLine) as { token?: string; done?: boolean; fullText?: string };
-        // Accumulate tokens as they arrive
+        const parsed = JSON.parse(dataLine) as { token?: string; done?: boolean; fullText?: string; error?: string };
         if (parsed.token) fullText += parsed.token;
-        // Final event carries the authoritative fullText
         if (parsed.fullText) fullText = parsed.fullText;
+        if (parsed.error) streamError = parsed.error;
       }
     } catch {
       // malformed chunk — ignore, still forward
@@ -449,13 +448,14 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
   } as typeof res.write;
 
   res.end = function (...args: unknown[]) {
-    if (fullText) {
+    const saveContent = fullText || (streamError ? `⚠️ AI Error: ${streamError}` : "");
+    if (saveContent) {
       db.insert(messagesTable)
         .values({
           conversationId: idNum,
           role: "assistant",
-          content: fullText,
-          tokens: Math.round(fullText.length / 4),
+          content: saveContent,
+          tokens: fullText ? Math.round(fullText.length / 4) : 0,
         })
         .then(() =>
           db

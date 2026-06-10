@@ -402,6 +402,7 @@ router.get("/health", async (_req, res) => {
   const { isOllamaOnline } = await import("../ollama");
   const { isHFConfigured } = await import("../huggingface");
   const { isKimiConfigured } = await import("../kimi");
+  const { freemem, totalmem } = await import("os");
   const ollamaOnline = await isOllamaOnline();
   res.json({
     status: "online",
@@ -415,6 +416,10 @@ router.get("/health", async (_req, res) => {
     rateLimit: { windowMs: RATE_WINDOW_MS, maxRequests: RATE_MAX },
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
+    memory: {
+      freeGB: parseFloat((freemem() / 1e9).toFixed(2)),
+      totalGB: parseFloat((totalmem() / 1e9).toFixed(2)),
+    },
   });
 });
 

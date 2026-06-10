@@ -59,6 +59,19 @@ function useOllamaModels() {
   });
 }
 
+function useSystemMemory() {
+  return useQuery<{ freeGB: number; totalGB: number }>({
+    queryKey: ["system-memory"],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/api/v1/health`);
+      if (!res.ok) return { freeGB: 4, totalGB: 8 };
+      const data = await res.json() as { memory?: { freeGB: number; totalGB: number } };
+      return data.memory ?? { freeGB: 4, totalGB: 8 };
+    },
+    refetchInterval: 30000,
+  });
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)}MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
@@ -160,6 +173,7 @@ export default function Chat() {
     { query: { enabled: !!activeId, queryKey: getGetConversationQueryKey(activeId || 0) } }
   );
   const { data: ollamaModels, isLoading: loadingModels } = useOllamaModels();
+  const { data: systemMemory } = useSystemMemory();
 
   const allModels = React.useMemo(() => {
     const local = (ollamaModels || []).map((m) => ({ ...m, provider: "local" as const }));
@@ -336,7 +350,7 @@ export default function Chat() {
         queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(activeId) });
         queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
         // Keep streaming text visible briefly while the message is saved to the DB
-        setTimeout(() => setStreamingText(""), 800);
+        setTimeout(() => setStreamingText(""), 1500);
       }
       return;
     }
@@ -372,7 +386,7 @@ export default function Chat() {
         queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(activeId) });
         queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
         // Keep streaming text visible briefly while the message is saved to the DB
-        setTimeout(() => setStreamingText(""), 800);
+        setTimeout(() => setStreamingText(""), 1500);
       }
       return;
     }
@@ -440,7 +454,7 @@ export default function Chat() {
       queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(activeId) });
       queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
       // Keep streaming text visible briefly while the message is saved to the DB
-      setTimeout(() => setStreamingText(""), 800);
+      setTimeout(() => setStreamingText(""), 1500);
     }
   };
 
@@ -732,12 +746,15 @@ export default function Chat() {
                               </div>
                               {(ollamaModels || []).map((m) => {
                                 const isActive = m.name === activeModel;
+                                const freeGB = systemMemory?.freeGB ?? 4;
+                                const needsGB = parseFloat((m.size * 1.25 / 1e9).toFixed(1));
+                                const tooLarge = needsGB > freeGB;
                                 return (
                                   <button
                                     key={m.name}
                                     onClick={() => handleSwitchModel(m.name)}
                                     className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-accent/50 transition-colors ${
-                                      isActive ? "bg-accent text-primary" : "text-foreground"
+                                      isActive ? "bg-accent text-primary" : tooLarge ? "text-muted-foreground" : "text-foreground"
                                     }`}
                                   >
                                     <div className="flex flex-col">
@@ -746,13 +763,21 @@ export default function Chat() {
                                         {m.family} · {m.parameterSize} · {m.quantization}
                                       </span>
                                     </div>
-                                    <div className="flex flex-col items-end ml-2">
+                                    <div className="flex flex-col items-end ml-2 shrink-0">
                                       <span className="text-xs font-mono text-muted-foreground">
                                         {formatBytes(m.size)}
                                       </span>
-                                      {isActive && (
+                                      {tooLarge ? (
+                                        <span className="text-[10px] font-mono mt-0.5 px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/30">
+                                          needs {needsGB}GB
+                                        </span>
+                                      ) : isActive ? (
                                         <span className="text-[10px] text-primary font-mono mt-0.5">
                                           ACTIVE
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-mono mt-0.5 text-green-400">
+                                          fits
                                         </span>
                                       )}
                                     </div>
