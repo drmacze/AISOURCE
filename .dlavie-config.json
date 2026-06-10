@@ -1,9 +1,4 @@
 {
   "updatedAt": "2026-06-10T13:28:15.500Z",
-  "secrets": {
-    "MOONSHOT_API_KEY": "sk-s2AP0BToaO6RxSlNQUNciV0k6T6ZZ3mkRTyx9TIew1SHs2So",
-    "NEXUS_API_KEY": "nxs_33fdfe5d530cc90b8d49caba7612770f04cf00c236c489fd",
-    "GITHUB_TOKEN": "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",
-    "HF_TOKEN": "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"
-  }
+  "secrets": {}
 }
