@@ -377,7 +377,7 @@ router.post("/agent/run", async (req: Request, res: Response) => {
       // Call LLM
       let raw = "";
       try {
-        raw = await generateOllamaResponse(fullPrompt, { timeout: 45000 });
+        raw = await generateOllamaResponse(fullPrompt);
       } catch (llmErr) {
         sendEvent(res, {
           type: "error",
