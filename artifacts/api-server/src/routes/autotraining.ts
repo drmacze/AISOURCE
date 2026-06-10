@@ -13,6 +13,8 @@ import {
   registerSSEClient,
   unregisterSSEClient,
   allocateClientId,
+  getAutoTrainingConfig,
+  updateAutoTrainingConfig,
   type TrainingEvent,
 } from "../autotraining";
 import { checkGitHubRateLimit, isGitHubConfigured } from "../github-datasets";
@@ -183,6 +185,34 @@ router.get("/autotraining/activity", (_req, res) => {
     currentCycle: status.currentCycleLog,
     running: status.currentlyCycling,
   });
+});
+
+/** GET /api/autotraining/config — Get current engine config */
+router.get("/autotraining/config", (_req, res) => {
+  res.json(getAutoTrainingConfig());
+});
+
+/** POST /api/autotraining/config — Update engine config */
+router.post("/autotraining/config", (req, res) => {
+  const { intervalMinutes, microIntervalSeconds, sourceEnabled, autoTrigger } = req.body as {
+    intervalMinutes?: number;
+    microIntervalSeconds?: number;
+    sourceEnabled?: Record<string, boolean>;
+    autoTrigger?: { enabled?: boolean; threshold?: number };
+  };
+  updateAutoTrainingConfig({ intervalMinutes, microIntervalSeconds, sourceEnabled, autoTrigger });
+  res.json({ ok: true, config: getAutoTrainingConfig() });
+});
+
+/** POST /api/autotraining/toggle-source — Toggle one source on/off */
+router.post("/autotraining/toggle-source", (req, res) => {
+  const { source, enabled } = req.body as { source?: string; enabled?: boolean };
+  if (!source || typeof enabled !== "boolean") {
+    res.status(400).json({ error: "source (string) and enabled (boolean) required" });
+    return;
+  }
+  updateAutoTrainingConfig({ sourceEnabled: { [source]: enabled } });
+  res.json({ ok: true, source, enabled, config: getAutoTrainingConfig() });
 });
 
 export default router;

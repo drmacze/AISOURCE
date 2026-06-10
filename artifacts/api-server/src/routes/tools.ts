@@ -49,35 +49,63 @@ function requireHF(res: Parameters<typeof router.post>[1] extends (...args: infe
   return false;
 }
 
+// ─── Local extractive summarization (instant, no API required) ────────────────
+function extractiveSummarize(text: string, maxLength: number): string {
+  const sentences = text
+    .replace(/\n+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 20);
+
+  if (sentences.length === 0) return text.slice(0, maxLength);
+  if (sentences.length === 1) return sentences[0].slice(0, maxLength);
+
+  // TF scoring across all words
+  const allWords = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+  const tf: Record<string, number> = {};
+  for (const w of allWords) tf[w] = (tf[w] || 0) + 1;
+  const maxFreq = Math.max(...Object.values(tf), 1);
+
+  // Score each sentence: word frequency + position bonus + length penalty
+  const scored = sentences.map((sent, i) => {
+    const words = sent.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+    const wordScore = words.reduce((s, w) => s + (tf[w] || 0) / maxFreq, 0) / (words.length || 1);
+    const positionBonus = i === 0 ? 0.3 : i === 1 ? 0.15 : 0;
+    const lengthBonus = sent.length > 40 && sent.length < 300 ? 0.1 : 0;
+    return { sent, score: wordScore + positionBonus + lengthBonus, index: i };
+  });
+
+  // Pick top sentences, preserve original order
+  const topN = Math.max(1, Math.min(Math.ceil(sentences.length * 0.4), 5));
+  const selected = scored
+    .slice()
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topN)
+    .sort((a, b) => a.index - b.index)
+    .map((s) => s.sent);
+
+  let summary = selected.join(" ");
+  if (summary.length > maxLength) summary = summary.slice(0, maxLength).replace(/\s+\S*$/, "") + "…";
+  return summary;
+}
+
 // ─── POST /api/tools/summarize ────────────────────────────────────────────────
 router.post("/tools/summarize", async (req, res) => {
   const { text, maxLength = 150, minLength = 30 } = req.body as {
     text?: string; maxLength?: number; minLength?: number;
   };
   if (!text?.trim()) { res.status(400).json({ error: "text is required" }); return; }
-  if (!getHFToken()) { res.status(503).json({ error: "HFTokenRequired", message: "Set HF_TOKEN in Settings" }); return; }
 
-  try {
-    const r = await hfPost("facebook/bart-large-cnn", {
-      inputs: text.slice(0, 4000),
-      parameters: { max_length: maxLength, min_length: minLength, do_sample: false },
-    });
-    if (!r.ok) {
-      const err = await r.text();
-      res.status(502).json({ error: "HFError", message: err.slice(0, 200) });
-      return;
-    }
-    const data = await r.json() as Array<{ summary_text: string }>;
-    res.json({
-      summary: data[0]?.summary_text || "",
-      model: "facebook/bart-large-cnn",
-      originalLength: text.length,
-      summaryLength: data[0]?.summary_text?.length || 0,
-      compressionRatio: Math.round((1 - (data[0]?.summary_text?.length || 0) / text.length) * 100),
-    });
-  } catch (e) {
-    res.status(500).json({ error: "SummarizeError", message: String(e) });
-  }
+  // Always return local extractive result immediately — instant, no API wait
+  const localSummary = extractiveSummarize(text.trim(), maxLength * 3);
+  res.json({
+    summary: localSummary,
+    model: "extractive-local",
+    method: "extractive",
+    originalLength: text.length,
+    summaryLength: localSummary.length,
+    compressionRatio: Math.round((1 - localSummary.length / text.length) * 100),
+  });
 });
 
 // ─── POST /api/tools/translate ────────────────────────────────────────────────
@@ -192,39 +220,61 @@ router.post("/tools/classify", async (req, res) => {
   }
 });
 
+// ─── Local NER using pattern matching (instant, no API required) ──────────────
+function localNER(text: string): Array<{ type: string; text: string; score: number; start: number; end: number }> {
+  const entities: Array<{ type: string; text: string; score: number; start: number; end: number }> = [];
+  const seen = new Set<string>();
+
+  function addEntity(type: string, matchText: string, start: number, score: number) {
+    const key = `${type}:${matchText}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      entities.push({ type, text: matchText, score, start, end: start + matchText.length });
+    }
+  }
+
+  // Emails
+  for (const m of text.matchAll(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g))
+    addEntity("EMAIL", m[0], m.index!, 0.99);
+
+  // URLs
+  for (const m of text.matchAll(/https?:\/\/[^\s)>\]"']+/g))
+    addEntity("URL", m[0], m.index!, 0.99);
+
+  // Dates (common patterns)
+  for (const m of text.matchAll(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2}[\/\-]\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4})\b/gi))
+    addEntity("DATE", m[0], m.index!, 0.92);
+
+  // Numbers & percentages
+  for (const m of text.matchAll(/\b\d{1,3}(?:,\d{3})*(?:\.\d+)?%?\b/g)) {
+    if (m[0].length > 2) addEntity("NUMBER", m[0], m.index!, 0.85);
+  }
+
+  // All-caps abbreviations (potential ORG/PRODUCT)
+  for (const m of text.matchAll(/\b[A-Z]{2,8}\b/g))
+    addEntity("ORG", m[0], m.index!, 0.65);
+
+  // Proper nouns: sequences of capitalized words (not at sentence start heuristic)
+  const properNounRe = /(?<![.!?]\s)(?<!\bI\b\s)\b([A-Z][a-z]{1,20})(?:\s+[A-Z][a-z]{1,20}){0,3}\b/g;
+  for (const m of text.matchAll(properNounRe)) {
+    const word = m[0].trim();
+    if (word.split(/\s+/).length > 1) addEntity("PER", word, m.index!, 0.7);
+    else if (!STOP_WORDS.has(word.toLowerCase()) && word.length > 2) addEntity("LOC", word, m.index!, 0.55);
+  }
+
+  return entities.sort((a, b) => a.start - b.start);
+}
+
 // ─── POST /api/tools/ner ─────────────────────────────────────────────────────
 router.post("/tools/ner", async (req, res) => {
   const { text } = req.body as { text?: string };
   if (!text?.trim()) { res.status(400).json({ error: "text is required" }); return; }
-  if (!getHFToken()) { res.status(503).json({ error: "HFTokenRequired", message: "Set HF_TOKEN in Settings" }); return; }
 
-  try {
-    const r = await hfPost("dslim/bert-base-NER", { inputs: text.slice(0, 1000) });
-    if (!r.ok) { const err = await r.text(); res.status(502).json({ error: "HFError", message: err.slice(0, 200) }); return; }
-    const raw = await r.json() as Array<{ entity_group?: string; entity?: string; word: string; score: number; start: number; end: number }>;
-
-    // Group consecutive tokens of same entity
-    const entities: Array<{ type: string; text: string; score: number; start: number; end: number }> = [];
-    for (const item of raw) {
-      const type = (item.entity_group || item.entity || "").replace(/^[BI]-/, "");
-      if (entities.length > 0 && entities[entities.length - 1].type === type && item.start <= entities[entities.length - 1].end + 2) {
-        const last = entities[entities.length - 1];
-        last.text = (last.text + " " + item.word).replace(/\s##/g, "");
-        last.end = item.end;
-        last.score = Math.round(((last.score + item.score) / 2) * 1000) / 1000;
-      } else {
-        entities.push({ type, text: item.word.replace(/^##/, ""), score: Math.round(item.score * 1000) / 1000, start: item.start, end: item.end });
-      }
-    }
-
-    // Count by type
-    const byType: Record<string, number> = {};
-    for (const e of entities) byType[e.type] = (byType[e.type] || 0) + 1;
-
-    res.json({ entities, byType, count: entities.length, model: "dslim/bert-base-NER" });
-  } catch (e) {
-    res.status(500).json({ error: "NERError", message: String(e) });
-  }
+  // Always return local pattern-based result immediately — instant, no API wait
+  const entities = localNER(text.trim());
+  const byType: Record<string, number> = {};
+  for (const e of entities) byType[e.type] = (byType[e.type] || 0) + 1;
+  res.json({ entities, byType, count: entities.length, model: "pattern-local", method: "local-patterns" });
 });
 
 // ─── POST /api/tools/keywords ─────────────────────────────────────────────────
@@ -355,45 +405,71 @@ router.post("/tools/grammar", async (req, res) => {
   }
 });
 
+// ─── Local language detection (instant, script + word frequency) ──────────────
+function detectLanguageLocal(text: string): { language: string; confidence: number; method: string } {
+  const sample = text.slice(0, 500);
+
+  // Script-based detection — highly reliable, instant
+  const scripts: Array<[string, RegExp, number]> = [
+    ["zh", /[\u4e00-\u9fff]/, 98],
+    ["ja", /[\u3040-\u309f\u30a0-\u30ff]/, 98],
+    ["ar", /[\u0600-\u06ff]/, 97],
+    ["ru", /[\u0400-\u04ff]/, 95],
+    ["ko", /[\uac00-\ud7af]/, 98],
+    ["hi", /[\u0900-\u097f]/, 96],
+    ["he", /[\u05d0-\u05ea]/, 95],
+    ["th", /[\u0e00-\u0e7f]/, 97],
+    ["el", /[\u0370-\u03ff]/, 93],
+    ["uk", /[\u0400-\u04ff]/, 90],
+  ];
+  for (const [lang, pattern, conf] of scripts) {
+    const matches = (sample.match(new RegExp(pattern.source, "g")) || []).length;
+    if (matches > 2) return { language: lang, confidence: conf, method: "script" };
+  }
+
+  // Latin-script word fingerprinting for common languages
+  const lower = sample.toLowerCase();
+  const langWords: Array<[string, string[], number]> = [
+    ["id", ["yang","dan","di","ini","itu","ada","dengan","untuk","saya","tidak","bisa","akan","juga","sudah","dari","ke","kami","mereka","kita","karena"], 88],
+    ["es", ["que","de","la","el","en","los","del","las","un","por","con","no","una","su","para","pero","como","más","este","muy"], 85],
+    ["fr", ["le","la","les","de","du","des","un","une","en","et","est","pas","que","qui","sur","dans","au","je","vous","nous"], 85],
+    ["pt", ["de","que","o","a","os","as","um","uma","em","no","na","se","com","por","para","não","mais","ao","da","do"], 85],
+    ["de", ["die","der","das","ist","und","in","den","von","zu","des","mit","auf","für","war","bei","haben","nicht","sich","als","auch"], 85],
+    ["it", ["di","il","la","e","che","in","del","per","un","una","con","non","le","i","si","da","al","dei","gli","lo"], 85],
+    ["nl", ["de","het","een","in","van","is","dat","op","te","en","zijn","er","niet","aan","voor","met","die","ook","wat","hij"], 83],
+  ];
+
+  const words = lower.split(/\W+/).filter((w) => w.length > 1);
+  const total = words.length || 1;
+  let best = { language: "en", confidence: 60, method: "heuristic-default" };
+  let bestRatio = 0;
+
+  for (const [lang, markers, baseConf] of langWords) {
+    const markerSet = new Set(markers);
+    const hits = words.filter((w) => markerSet.has(w)).length;
+    const ratio = hits / total;
+    if (ratio > bestRatio && ratio > 0.05) {
+      bestRatio = ratio;
+      best = { language: lang, confidence: Math.min(95, Math.round(baseConf + ratio * 30)), method: "word-frequency" };
+    }
+  }
+
+  return best;
+}
+
 // ─── POST /api/tools/detect-language ─────────────────────────────────────────
 router.post("/tools/detect-language", async (req, res) => {
   const { text } = req.body as { text?: string };
   if (!text?.trim()) { res.status(400).json({ error: "text is required" }); return; }
 
-  // Try HF language identification first
-  if (getHFToken()) {
-    try {
-      const r = await hfPost("papluca/xlm-roberta-base-language-detection", { inputs: text.slice(0, 500) });
-      if (r.ok) {
-        const data = await r.json() as Array<Array<{ label: string; score: number }>>;
-        const ranked = (data[0] || []).sort((a, b) => b.score - a.score).slice(0, 5);
-        res.json({
-          language: ranked[0]?.label || "unknown",
-          confidence: Math.round((ranked[0]?.score || 0) * 100),
-          topLanguages: ranked.map((r) => ({ language: r.label, confidence: Math.round(r.score * 100) })),
-          model: "papluca/xlm-roberta-base-language-detection",
-        });
-        return;
-      }
-    } catch { /* fall through to heuristics */ }
-  }
-
-  // Heuristic fallback
-  const heuristics: Array<[string, RegExp]> = [
-    ["zh", /[\u4e00-\u9fff]/],
-    ["ja", /[\u3040-\u309f\u30a0-\u30ff]/],
-    ["ar", /[\u0600-\u06ff]/],
-    ["ru", /[\u0400-\u04ff]/],
-    ["ko", /[\uac00-\ud7af]/],
-    ["hi", /[\u0900-\u097f]/],
-  ];
-  for (const [lang, pattern] of heuristics) {
-    if (pattern.test(text)) {
-      res.json({ language: lang, confidence: 85, method: "heuristic" });
-      return;
-    }
-  }
-  res.json({ language: "en", confidence: 60, method: "heuristic-default" });
+  // Always return local result immediately — instant, no API wait
+  const local = detectLanguageLocal(text.trim());
+  res.json({
+    language: local.language,
+    confidence: local.confidence,
+    method: local.method,
+    topLanguages: [{ language: local.language, confidence: local.confidence }],
+  });
 });
 
 // ─── POST /api/tools/fill-mask ───────────────────────────────────────────────

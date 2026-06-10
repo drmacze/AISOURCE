@@ -94,8 +94,73 @@ const activityLog: Array<{ at: Date; msg: string; type: "info" | "success" | "er
 let sourceStats: Record<string, number> = {
   wikipedia: 0, hackernews: 0, reddit: 0, arxiv: 0, rss: 0,
   huggingface: 0, curated: 0, github: 0, "github-datasets": 0,
-  "github-issues": 0, devto: 0, openassistant: 0,
+  "github-issues": 0, devto: 0, openassistant: 0, stackexchange: 0,
 };
+
+// ─── Source toggle config ─────────────────────────────────────────────────────
+export let sourceEnabled: Record<string, boolean> = {
+  "wikipedia-en": true,
+  "wikipedia-multilingual": true,
+  hackernews: true,
+  reddit: true,
+  arxiv: true,
+  rss: true,
+  huggingface: true,
+  openassistant: true,
+  curated: true,
+  github: true,
+  "github-datasets": true,
+  "github-issues": true,
+  devto: true,
+  stackexchange: true,
+};
+
+// ─── Global config state ──────────────────────────────────────────────────────
+let autoTrainIntervalMs    = 3 * 60 * 60 * 1000;
+let autoTrainMicroIntervalMs = 60_000;
+let autoTriggerEnabled     = false;
+let autoTriggerThreshold   = 500;
+let samplesAddedSinceLastTrigger = 0;
+
+export function getAutoTrainingConfig() {
+  return {
+    intervalMs: autoTrainIntervalMs,
+    intervalMinutes: Math.round(autoTrainIntervalMs / 60000),
+    microIntervalMs: autoTrainMicroIntervalMs,
+    microIntervalSeconds: Math.round(autoTrainMicroIntervalMs / 1000),
+    sourceEnabled: { ...sourceEnabled },
+    autoTrigger: {
+      enabled: autoTriggerEnabled,
+      threshold: autoTriggerThreshold,
+      samplesCollected: samplesAddedSinceLastTrigger,
+      samplesUntilTrigger: Math.max(0, autoTriggerThreshold - samplesAddedSinceLastTrigger),
+    },
+  };
+}
+
+export function updateAutoTrainingConfig(config: {
+  intervalMinutes?: number;
+  microIntervalSeconds?: number;
+  sourceEnabled?: Record<string, boolean>;
+  autoTrigger?: { enabled?: boolean; threshold?: number };
+}): void {
+  if (config.intervalMinutes && config.intervalMinutes >= 1) {
+    autoTrainIntervalMs = config.intervalMinutes * 60 * 1000;
+  }
+  if (config.microIntervalSeconds && config.microIntervalSeconds >= 10) {
+    autoTrainMicroIntervalMs = config.microIntervalSeconds * 1000;
+  }
+  if (config.sourceEnabled) {
+    Object.assign(sourceEnabled, config.sourceEnabled);
+  }
+  if (config.autoTrigger) {
+    if (config.autoTrigger.enabled !== undefined) autoTriggerEnabled = config.autoTrigger.enabled;
+    if (config.autoTrigger.threshold !== undefined && config.autoTrigger.threshold > 0) {
+      autoTriggerThreshold = config.autoTrigger.threshold;
+    }
+  }
+  log(`Config updated: interval=${Math.round(autoTrainIntervalMs / 60000)}min, micro=${Math.round(autoTrainMicroIntervalMs / 1000)}s, autoTrigger=${autoTriggerEnabled ? `ON (every ${autoTriggerThreshold} samples)` : "OFF"}`, "info");
+}
 
 // ─── Knowledge domains ────────────────────────────────────────────────────────
 const WIKIPEDIA_TOPICS_EN = [
@@ -730,6 +795,58 @@ async function fetchDevToData(dataset: { id: number }): Promise<number> {
   return added;
 }
 
+// ─── Source 13: StackExchange / Stack Overflow ────────────────────────────────
+const STACKEXCHANGE_TAGS = [
+  "machine-learning", "artificial-intelligence", "deep-learning", "python",
+  "tensorflow", "pytorch", "natural-language-processing", "neural-network",
+  "data-science", "algorithm", "javascript", "typescript", "api", "database",
+  "docker", "kubernetes", "linux", "git", "sql", "rest",
+];
+
+async function fetchStackExchangeData(dataset: { id: number }): Promise<number> {
+  let added = 0;
+  const tag = STACKEXCHANGE_TAGS[Math.floor(Math.random() * STACKEXCHANGE_TAGS.length)];
+  try {
+    const url = `https://api.stackexchange.com/2.3/questions?order=desc&sort=votes&tagged=${encodeURIComponent(tag)}&site=stackoverflow&filter=withbody&pagesize=10&key=`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "DLavieOS-AutoTraining/2.0", "Accept-Encoding": "gzip" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) return 0;
+    const data = await res.json() as {
+      items?: Array<{
+        title: string;
+        body?: string;
+        score: number;
+        answer_count: number;
+        is_answered: boolean;
+        accepted_answer_id?: number;
+      }>;
+    };
+
+    for (const q of (data.items || []).slice(0, 6)) {
+      if (!q.is_answered || q.score < 5 || !q.body) continue;
+      const cleanBody = q.body
+        .replace(/<code>[\s\S]*?<\/code>/gi, "[code]")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+        .slice(0, 600);
+      if (cleanBody.length < 50) continue;
+
+      added += await upsertSamples(dataset, [
+        { input: q.title, output: cleanBody, metadata: JSON.stringify({ source: "stackexchange", tag, score: q.score }) },
+        { input: `How do I ${q.title.toLowerCase()}?`, output: cleanBody, metadata: JSON.stringify({ source: "stackexchange", tag }) },
+      ], "stackexchange");
+    }
+    if (added > 0) log(`StackExchange [${tag}]: ${added} Q&A samples`, "success");
+  } catch (err) {
+    log(`StackExchange error for [${tag}]: ${String(err)}`, "error");
+  }
+  sourceStats.stackexchange = (sourceStats.stackexchange || 0) + added;
+  return added;
+}
+
 // ─── URL scraping ─────────────────────────────────────────────────────────────
 export async function scrapeUrlForTraining(
   url: string,
@@ -795,46 +912,50 @@ export async function runAutoTrainingCycle(): Promise<{
     broadcastEvent({ type: "cycle_start", cycleNumber: totalCyclesCompleted + 1, at: new Date().toISOString() });
     const dataset = await getLiveDataset();
 
-    // Run all sources, some in parallel where safe
+    // Run all sources (conditionally by toggle)
+    const se = sourceEnabled;
+
     const [wikiEN, wikiML] = await Promise.all([
-      fetchWikipediaEN(dataset),
-      fetchWikipediaMultilingual(dataset),
+      se["wikipedia-en"] ? fetchWikipediaEN(dataset) : Promise.resolve(0),
+      se["wikipedia-multilingual"] ? fetchWikipediaMultilingual(dataset) : Promise.resolve(0),
     ]);
     breakdown.wikipedia = wikiEN + wikiML;
     totalAdded += breakdown.wikipedia;
 
-    breakdown.hackernews = await fetchHackerNewsData(dataset);
+    breakdown.hackernews = se.hackernews ? await fetchHackerNewsData(dataset) : 0;
     totalAdded += breakdown.hackernews;
 
-    breakdown.reddit = await fetchRedditData(dataset);
+    breakdown.reddit = se.reddit ? await fetchRedditData(dataset) : 0;
     totalAdded += breakdown.reddit;
 
     const [arxivN, rssN] = await Promise.all([
-      fetchArxivData(dataset),
-      fetchRSSData(dataset),
+      se.arxiv ? fetchArxivData(dataset) : Promise.resolve(0),
+      se.rss ? fetchRSSData(dataset) : Promise.resolve(0),
     ]);
     breakdown.arxiv = arxivN;
     breakdown.rss = rssN;
     totalAdded += arxivN + rssN;
 
-    breakdown.huggingface = await fetchHFData(dataset);
+    breakdown.huggingface = se.huggingface ? await fetchHFData(dataset) : 0;
     totalAdded += breakdown.huggingface;
 
-    breakdown.curated = await generateAISamples(dataset);
+    breakdown.curated = se.curated ? await generateAISamples(dataset) : 0;
     totalAdded += breakdown.curated;
 
-    const [ghTrend, ghIssues, devtoN] = await Promise.all([
-      fetchGitHubTrending(dataset),
-      fetchGitHubIssues(dataset),
-      fetchDevToData(dataset),
+    const [ghTrend, ghIssues, devtoN, seN] = await Promise.all([
+      se.github ? fetchGitHubTrending(dataset) : Promise.resolve(0),
+      se["github-issues"] ? fetchGitHubIssues(dataset) : Promise.resolve(0),
+      se.devto ? fetchDevToData(dataset) : Promise.resolve(0),
+      se.stackexchange ? fetchStackExchangeData(dataset) : Promise.resolve(0),
     ]);
     breakdown.github = ghTrend;
     breakdown["github-issues"] = ghIssues;
     breakdown.devto = devtoN;
-    totalAdded += ghTrend + ghIssues + devtoN;
+    breakdown.stackexchange = seN;
+    totalAdded += ghTrend + ghIssues + devtoN + seN;
 
     // GitHub datasets (slower, run after main cycle)
-    breakdown["github-datasets"] = await fetchGitHubDatasets(dataset);
+    breakdown["github-datasets"] = se["github-datasets"] ? await fetchGitHubDatasets(dataset) : 0;
     totalAdded += breakdown["github-datasets"];
 
     const totalCount = await updateSampleCount(dataset.id);
@@ -849,6 +970,7 @@ export async function runAutoTrainingCycle(): Promise<{
 
     totalCyclesCompleted++;
     totalSamplesAdded += totalAdded;
+    samplesAddedSinceLastTrigger += totalAdded;
     lastCycleAt = new Date();
 
     broadcastEvent({
@@ -860,6 +982,13 @@ export async function runAutoTrainingCycle(): Promise<{
       at: new Date().toISOString(),
     });
 
+    // ─── Auto-trigger training if threshold reached ────────────────────────
+    if (autoTriggerEnabled && samplesAddedSinceLastTrigger >= autoTriggerThreshold) {
+      samplesAddedSinceLastTrigger = 0;
+      log(`🎯 Auto-trigger: ${autoTriggerThreshold} samples collected → queuing training job`, "success");
+      void autoTriggerTraining().catch((e) => log(`Auto-trigger error: ${e}`, "error"));
+    }
+
     return { samplesAdded: totalAdded, success: true, breakdown, cycleNumber: totalCyclesCompleted };
   } catch (err) {
     log(`Cycle error: ${String(err)}`, "error");
@@ -868,6 +997,32 @@ export async function runAutoTrainingCycle(): Promise<{
   } finally {
     autoTrainingRunning = false;
   }
+}
+
+// ─── Auto-trigger training ─────────────────────────────────────────────────────
+async function autoTriggerTraining(): Promise<void> {
+  const { db: dbInst } = await import("@workspace/db");
+  const { trainingJobsTable: jt, aiModelsTable: mt, trainingDatasetsTable: dt } = await import("@workspace/db");
+  const { desc: descFn } = await import("drizzle-orm");
+
+  const [model] = await dbInst.select().from(mt).orderBy(descFn(mt.updatedAt)).limit(1);
+  const [dataset] = await dbInst.select().from(dt).orderBy(descFn(dt.sampleCount)).limit(1);
+
+  if (!model || !dataset || dataset.sampleCount < 10) {
+    log("Auto-trigger skipped: no model or insufficient samples", "info");
+    return;
+  }
+
+  await dbInst.insert(jt).values({
+    modelId: model.id,
+    datasetId: dataset.id,
+    epochs: 3,
+    status: "pending",
+    progress: 0,
+    currentEpoch: 0,
+    hyperparameters: JSON.stringify({ autoTriggered: true, trigger: "sample-threshold" }),
+  });
+  log(`Auto-triggered training: model="${model.name}", dataset="${dataset.name}" (${dataset.sampleCount} samples)`, "success");
 }
 
 // ─── GitHub-only cycle (every 6h) ────────────────────────────────────────────
@@ -1010,14 +1165,16 @@ export function getAutoTrainingStatus() {
     hfConnected: isHFConfigured(),
     githubConnected: isGitHubConfigured(),
     sourceStats,
+    sourceEnabled: { ...sourceEnabled },
     sources: [
       "wikipedia-en", "wikipedia-multilingual", "hackernews", "reddit",
       "arxiv", "rss", "huggingface", "openassistant",
-      "curated", "github", "github-datasets", "github-issues", "devto",
+      "curated", "github", "github-datasets", "github-issues", "devto", "stackexchange",
     ],
     githubToken: isGitHubConfigured() ? "authenticated (5000 req/hr)" : "public (60 req/hr)",
     deduplicationActive: true,
     totalDedupCacheSize: seenHashes.size,
     languages: ["en", "id", "ar", "fr", "es"],
+    config: getAutoTrainingConfig(),
   };
 }

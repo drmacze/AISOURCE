@@ -26,7 +26,9 @@ import {
   Plus, Download, Trash2, RefreshCw, Zap, Square, Terminal,
   ChevronRight, Package, Brain, Code2, Globe, Sparkles, X,
   Github, BookOpen, Newspaper, FlaskConical, MessageSquare, Activity,
-  HardDrive, Languages, Shield,
+  HardDrive, Languages, Shield, Settings, Link,
+  BarChart2, RotateCcw, Filter, Clock, ChevronDown, ChevronUp,
+  Target, Gauge, TrendingUp, Eraser, Power, ExternalLink, Layers,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { format } from "date-fns";
@@ -41,12 +43,37 @@ interface AutoTrainingStatus {
   nextCycleAt: string | null;
   activityLog: Array<{ at: string; msg: string; type: "info" | "success" | "error" }>;
   sourceStats: Record<string, number>;
+  sourceEnabled: Record<string, boolean>;
   hfConnected: boolean;
   githubConnected: boolean;
   githubToken: string;
   deduplicationActive: boolean;
   totalDedupCacheSize: number;
   languages: string[];
+  config?: {
+    intervalMinutes: number;
+    microIntervalSeconds: number;
+    sourceEnabled: Record<string, boolean>;
+    autoTrigger: { enabled: boolean; threshold: number; samplesCollected: number; samplesUntilTrigger: number };
+  };
+}
+
+interface QualityReport {
+  total: number;
+  avgQuality: number;
+  distribution: { excellent: number; good: number; fair: number; poor: number };
+  avgInputLen: number;
+  avgOutputLen: number;
+  sourceCounts: Record<string, number>;
+  lowQualityCount: number;
+  recommendation: string;
+}
+
+interface BenchmarkResult {
+  model: string;
+  results: Array<{ id: string; prompt: string; response: string; latencyMs: number; tokensPerSec: number | null; passed: boolean | null }>;
+  summary: { accuracy: number | null; avgLatencyMs: number; totalTokens: number; passed: number; failed: number; grade: string };
+  ranAt: string;
 }
 
 interface DatasetStats {
@@ -77,6 +104,13 @@ function AutoTrainingPanel() {
   const [dbStats, setDbStats] = useState<DatasetStats | null>(null);
   const [running, setRunning] = useState(false);
   const [showLog, setShowLog] = useState(false);
+  const [showSources, setShowSources] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [configInterval, setConfigInterval] = useState("180");
+  const [configMicro, setConfigMicro] = useState("60");
+  const [autoTriggerEnabled, setAutoTriggerEnabled] = useState(false);
+  const [autoTriggerThreshold, setAutoTriggerThreshold] = useState("500");
+  const [configSaving, setConfigSaving] = useState(false);
   const BASE = (window as Window & { _apiBase?: string })._apiBase || getApiBase();
 
   const fetchStatus = useCallback(async () => {
@@ -114,6 +148,54 @@ function AutoTrainingPanel() {
   };
 
   const totalFromBreakdown = dbStats ? Object.values(dbStats.sourceBreakdown).reduce((a, b) => a + b, 0) : 0;
+
+  // Sync config state from status
+  useEffect(() => {
+    if (status?.config) {
+      setConfigInterval(String(status.config.intervalMinutes));
+      setConfigMicro(String(status.config.microIntervalSeconds));
+      setAutoTriggerEnabled(status.config.autoTrigger.enabled);
+      setAutoTriggerThreshold(String(status.config.autoTrigger.threshold));
+    }
+  }, [status?.config?.intervalMinutes]);
+
+  const handleToggleSource = async (source: string, enabled: boolean) => {
+    await fetch(`${BASE}/api/autotraining/toggle-source`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, enabled }),
+    });
+    fetchStatus();
+  };
+
+  const handleSaveConfig = async () => {
+    setConfigSaving(true);
+    try {
+      await fetch(`${BASE}/api/autotraining/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          intervalMinutes: parseInt(configInterval, 10),
+          microIntervalSeconds: parseInt(configMicro, 10),
+          autoTrigger: { enabled: autoTriggerEnabled, threshold: parseInt(autoTriggerThreshold, 10) },
+        }),
+      });
+      fetchStatus();
+    } finally {
+      setConfigSaving(false);
+    }
+  };
+
+  const ALL_SOURCES = [
+    "wikipedia-en", "wikipedia-multilingual", "hackernews", "reddit",
+    "arxiv", "rss", "huggingface", "openassistant", "curated",
+    "github", "github-datasets", "github-issues", "devto", "stackexchange",
+  ];
+  const SOURCE_EXTRA: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+    stackexchange:          { icon: <Layers className="w-3 h-3" />, label: "StackExchange",  color: "text-orange-300" },
+    openassistant:          { icon: <MessageSquare className="w-3 h-3" />, label: "OpenAssistant", color: "text-pink-400" },
+    ...Object.fromEntries(Object.entries(SOURCE_META)),
+  };
 
   return (
     <Card className="glass-panel border-primary/30">
@@ -159,7 +241,7 @@ function AutoTrainingPanel() {
           {[
             { label: "Total Samples", value: dbStats?.totalSamples?.toLocaleString() ?? "—", sub: "in database", color: "text-green-400" },
             { label: "Cycles Done", value: status?.totalCyclesCompleted ?? "—", sub: "full cycles", color: "text-primary" },
-            { label: "Sources Active", value: "13", sub: "data streams", color: "text-blue-400" },
+            { label: "Sources Active", value: status?.sourceEnabled ? Object.values(status.sourceEnabled).filter(Boolean).length : 14, sub: "data streams", color: "text-blue-400" },
             { label: "Dedup Cache", value: status?.totalDedupCacheSize?.toLocaleString() ?? "—", sub: "unique hashes", color: "text-purple-400" },
           ].map((s) => (
             <div key={s.label} className="p-3 rounded-lg border border-border bg-background/50 text-center">
@@ -225,23 +307,132 @@ function AutoTrainingPanel() {
           </div>
         )}
 
-        {/* Schedule info */}
-        <div className="flex flex-wrap gap-4 text-[10px] font-mono text-muted-foreground border-t border-border pt-3">
-          <span>Last cycle: <span className="text-foreground">{status?.lastCycleAt ? format(new Date(status.lastCycleAt), "HH:mm:ss") : "—"}</span></span>
-          <span>Next cycle: <span className="text-foreground">{status?.nextCycleAt ? format(new Date(status.nextCycleAt), "HH:mm:ss") : "—"}</span></span>
+        {/* Schedule info + controls */}
+        <div className="flex flex-wrap gap-3 text-[10px] font-mono text-muted-foreground border-t border-border pt-3">
+          <span>Last: <span className="text-foreground">{status?.lastCycleAt ? format(new Date(status.lastCycleAt), "HH:mm:ss") : "—"}</span></span>
+          <span>Next: <span className="text-foreground">{status?.nextCycleAt ? format(new Date(status.nextCycleAt), "HH:mm:ss") : "—"}</span></span>
           <span>Status: <span className={status?.running ? "text-green-400" : "text-yellow-400"}>{status?.running ? "● RUNNING" : "○ PAUSED"}</span></span>
-          <button
-            className="ml-auto text-primary hover:text-primary/80 underline-offset-2 hover:underline"
-            onClick={() => setShowLog(!showLog)}
-          >
-            {showLog ? "hide log" : "show activity log"}
-          </button>
+          <div className="ml-auto flex gap-2">
+            <button className="text-primary hover:text-primary/80 underline-offset-2 hover:underline" onClick={() => setShowSources(!showSources)}>
+              {showSources ? "▲ sources" : "▼ sources"}
+            </button>
+            <button className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline" onClick={() => setShowConfig(!showConfig)}>
+              {showConfig ? "▲ config" : "▼ config"}
+            </button>
+            <button className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline" onClick={() => setShowLog(!showLog)}>
+              {showLog ? "▲ log" : "▼ log"}
+            </button>
+          </div>
         </div>
+
+        {/* Source toggle panel */}
+        {showSources && (
+          <div className="border border-border rounded-lg bg-background/40 p-3 space-y-2">
+            <p className="text-xs font-mono font-medium text-muted-foreground flex items-center gap-1.5">
+              <Power className="w-3 h-3" /> Source Controls — toggle data streams on/off
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+              {ALL_SOURCES.map((src) => {
+                const meta = SOURCE_EXTRA[src] || { icon: <Database className="w-3 h-3" />, label: src, color: "text-muted-foreground" };
+                const enabled = status?.sourceEnabled?.[src] ?? true;
+                const samplesFromSrc = dbStats?.sourceBreakdown?.[src] || status?.sourceStats?.[src] || 0;
+                return (
+                  <button
+                    key={src}
+                    onClick={() => handleToggleSource(src, !enabled)}
+                    className={`flex items-center gap-2 p-2 rounded border text-[10px] font-mono transition-all ${
+                      enabled
+                        ? "border-primary/30 bg-primary/5 hover:bg-primary/10"
+                        : "border-border bg-background/20 opacity-50 hover:opacity-70"
+                    }`}
+                  >
+                    <span className={enabled ? meta.color : "text-muted-foreground/40"}>{meta.icon}</span>
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="truncate text-foreground/80">{meta.label}</div>
+                      <div className={`font-bold ${enabled ? meta.color : "text-muted-foreground/40"}`}>
+                        {samplesFromSrc > 0 ? `${samplesFromSrc} samples` : enabled ? "enabled" : "disabled"}
+                      </div>
+                    </div>
+                    <div className={`w-2 h-2 rounded-full shrink-0 ${enabled ? "bg-green-500" : "bg-muted-foreground/30"}`} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Config panel */}
+        {showConfig && (
+          <div className="border border-blue-500/20 rounded-lg bg-blue-500/5 p-3 space-y-3">
+            <p className="text-xs font-mono font-medium text-blue-400 flex items-center gap-1.5">
+              <Settings className="w-3 h-3" /> Engine Configuration
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Main cycle interval (minutes)
+                </label>
+                <input
+                  type="number" min="1" max="1440"
+                  value={configInterval}
+                  onChange={(e) => setConfigInterval(e.target.value)}
+                  className="w-full h-7 px-2 rounded border border-border bg-background text-xs font-mono text-foreground"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
+                  <Zap className="w-3 h-3" /> Micro cycle interval (seconds)
+                </label>
+                <input
+                  type="number" min="10" max="3600"
+                  value={configMicro}
+                  onChange={(e) => setConfigMicro(e.target.value)}
+                  className="w-full h-7 px-2 rounded border border-border bg-background text-xs font-mono text-foreground"
+                />
+              </div>
+            </div>
+            <div className="flex items-start gap-4">
+              <div className="space-y-1 flex-1">
+                <label className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
+                  <Target className="w-3 h-3" /> Auto-trigger training after N new samples
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setAutoTriggerEnabled(!autoTriggerEnabled)}
+                    className={`text-[10px] font-mono px-2 py-1 rounded border transition-colors ${
+                      autoTriggerEnabled
+                        ? "border-green-500/40 bg-green-500/10 text-green-400"
+                        : "border-border text-muted-foreground"
+                    }`}
+                  >
+                    {autoTriggerEnabled ? "● ENABLED" : "○ DISABLED"}
+                  </button>
+                  <input
+                    type="number" min="50" max="100000"
+                    value={autoTriggerThreshold}
+                    onChange={(e) => setAutoTriggerThreshold(e.target.value)}
+                    disabled={!autoTriggerEnabled}
+                    className="w-24 h-7 px-2 rounded border border-border bg-background text-xs font-mono text-foreground disabled:opacity-40"
+                  />
+                  {status?.config?.autoTrigger.enabled && (
+                    <span className="text-[10px] font-mono text-muted-foreground">
+                      {status.config.autoTrigger.samplesCollected}/{status.config.autoTrigger.threshold} collected
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <Button size="sm" className="h-7 text-xs font-mono gap-1.5" onClick={handleSaveConfig} disabled={configSaving}>
+              {configSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+              Save Config
+            </Button>
+          </div>
+        )}
 
         {/* Activity log */}
         {showLog && status?.activityLog && status.activityLog.length > 0 && (
-          <div className="bg-black/60 rounded-lg p-3 font-mono text-[10px] max-h-40 overflow-y-auto space-y-0.5 border border-border">
-            {status.activityLog.slice(0, 30).map((entry, i) => (
+          <div className="bg-black/60 rounded-lg p-3 font-mono text-[10px] max-h-48 overflow-y-auto space-y-0.5 border border-border">
+            {status.activityLog.slice(0, 50).map((entry, i) => (
               <div key={i} className={`flex gap-2 ${
                 entry.type === "success" ? "text-green-400/90" :
                 entry.type === "error" ? "text-red-400/90" : "text-muted-foreground"
@@ -710,6 +901,16 @@ export default function Training() {
   const [catalogueSearch, setCatalogueSearch] = useState("");
   const [cliOpen, setCliOpen] = useState(true);
 
+  // New feature state
+  const [qualityReport, setQualityReport] = useState<{ datasetId: number; datasetName: string; report: QualityReport } | null>(null);
+  const [importUrlDialogDatasetId, setImportUrlDialogDatasetId] = useState<number | null>(null);
+  const [importUrl, setImportUrl] = useState("");
+  const [importUrlLoading, setImportUrlLoading] = useState(false);
+  const [importUrlResult, setImportUrlResult] = useState<{ added: number; skipped: number } | null>(null);
+  const [benchmarkModel, setBenchmarkModel] = useState<string | null>(null);
+  const [benchmarkResult, setBenchmarkResult] = useState<BenchmarkResult | null>(null);
+  const [benchmarkLoading, setBenchmarkLoading] = useState(false);
+
   // Mutations
   const createDatasetMutation = useCreateTrainingDataset({
     mutation: {
@@ -967,6 +1168,16 @@ export default function Training() {
                               <Square className="w-3.5 h-3.5" />
                             </Button>
                           )}
+                          {job.status === "failed" && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary"
+                              title="Retry this job"
+                              onClick={async () => {
+                                await fetch(`${BASE}/api/training-jobs/${job.id}/retry`, { method: "POST" });
+                                queryClient.invalidateQueries({ queryKey: getListTrainingJobsQueryKey() });
+                              }}>
+                              <RotateCcw className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                       {job.status === "running" && (
@@ -1087,25 +1298,74 @@ export default function Training() {
                           )}
                         </p>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 flex-wrap justify-end">
                         <Button
                           variant="ghost" size="sm"
                           className="gap-1 font-mono text-xs h-7 text-muted-foreground hover:text-primary"
                           title="Download as JSONL (OpenAI fine-tuning format)"
-                          onClick={() => {
-                            const base = (window as Window & { _apiBase?: string })._apiBase || getApiBase();
-                            window.open(`${base}/api/training-datasets/${ds.id}/export`, "_blank");
-                          }}
+                          onClick={() => window.open(`${BASE}/api/training-datasets/${ds.id}/export`, "_blank")}
                           disabled={ds.sampleCount === 0}
                         >
                           <Download className="w-3 h-3" /> JSONL
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          className="gap-1 font-mono text-xs h-7 text-muted-foreground hover:text-amber-400"
+                          title="Quality report"
+                          disabled={ds.sampleCount === 0}
+                          onClick={async () => {
+                            const r = await fetch(`${BASE}/api/training-datasets/${ds.id}/quality`);
+                            if (r.ok) {
+                              const data = await r.json() as QualityReport;
+                              setQualityReport({ datasetId: ds.id, datasetName: ds.name, report: data });
+                            }
+                          }}
+                        >
+                          <BarChart2 className="w-3 h-3" /> Quality
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          className="gap-1 font-mono text-xs h-7 text-muted-foreground hover:text-orange-400"
+                          title="Clean low-quality samples"
+                          disabled={ds.sampleCount === 0}
+                          onClick={async () => {
+                            if (!confirm(`Clean low-quality samples from "${ds.name}"?`)) return;
+                            const r = await fetch(`${BASE}/api/training-datasets/${ds.id}/clean`, { method: "POST" });
+                            if (r.ok) {
+                              const d = await r.json() as { removed: number };
+                              alert(`Removed ${d.removed} low-quality samples.`);
+                              queryClient.invalidateQueries({ queryKey: getListTrainingDatasetsQueryKey() });
+                            }
+                          }}
+                        >
+                          <Eraser className="w-3 h-3" /> Clean
+                        </Button>
+                        <Button
+                          variant="ghost" size="sm"
+                          className="gap-1 font-mono text-xs h-7 text-muted-foreground hover:text-cyan-400"
+                          title="Import samples from a URL"
+                          onClick={() => setImportUrlDialogDatasetId(ds.id)}
+                        >
+                          <Link className="w-3 h-3" /> Import URL
+                        </Button>
+                        <Button
+                          variant="ghost" size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          title="Delete dataset"
+                          onClick={async () => {
+                            if (!confirm(`Delete dataset "${ds.name}"? This also deletes all its samples.`)) return;
+                            await fetch(`${BASE}/api/training-datasets/${ds.id}`, { method: "DELETE" });
+                            queryClient.invalidateQueries({ queryKey: getListTrainingDatasetsQueryKey() });
+                          }}
+                        >
+                          <Trash2 className="w-3 h-3" />
                         </Button>
                         <Button
                           variant="outline" size="sm"
                           className="gap-1 font-mono text-xs h-7"
                           onClick={() => { setAddSampleDatasetId(ds.id); setAddSampleOpen(true); }}
                         >
-                          <Plus className="w-3 h-3" /> Add Sample
+                          <Plus className="w-3 h-3" /> Sample
                         </Button>
                       </div>
                     </div>
@@ -1147,10 +1407,19 @@ export default function Training() {
                         </p>
                         <span className="text-[10px] font-mono text-green-500">● READY</span>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDeleteOllamaModel(m.name)}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="sm"
+                          className="h-7 px-2 text-xs font-mono text-muted-foreground hover:text-blue-400"
+                          title="Run benchmark on this model"
+                          onClick={() => { setBenchmarkModel(m.name); setBenchmarkResult(null); }}
+                        >
+                          <Gauge className="w-3.5 h-3.5 mr-1" /> Bench
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDeleteOllamaModel(m.name)}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1297,6 +1566,217 @@ export default function Training() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* ── Quality Report Modal ─────────────────────────────────────────────── */}
+      <Dialog open={!!qualityReport} onOpenChange={(o) => { if (!o) setQualityReport(null); }}>
+        <DialogContent className="border-border bg-card max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart2 className="w-4 h-4 text-amber-400" />
+              Quality Report — {qualityReport?.datasetName}
+            </DialogTitle>
+          </DialogHeader>
+          {qualityReport?.report && (
+            <div className="space-y-4 pt-2">
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: "Total Samples", value: qualityReport.report.total, color: "text-foreground" },
+                  { label: "Avg Quality", value: `${(qualityReport.report.avgQuality * 100).toFixed(0)}%`, color: qualityReport.report.avgQuality >= 0.7 ? "text-green-400" : qualityReport.report.avgQuality >= 0.4 ? "text-amber-400" : "text-red-400" },
+                  { label: "Low Quality", value: qualityReport.report.lowQualityCount, color: qualityReport.report.lowQualityCount > 0 ? "text-red-400" : "text-green-400" },
+                ].map((s) => (
+                  <div key={s.label} className="p-3 rounded border border-border bg-background/60 text-center">
+                    <div className={`text-xl font-bold font-mono ${s.color}`}>{String(s.value)}</div>
+                    <div className="text-[10px] font-mono text-muted-foreground">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-mono text-muted-foreground">Quality distribution</p>
+                {[
+                  { label: "Excellent (≥80%)", value: qualityReport.report.distribution.excellent, color: "bg-green-500" },
+                  { label: "Good (60–79%)", value: qualityReport.report.distribution.good, color: "bg-blue-500" },
+                  { label: "Fair (40–59%)", value: qualityReport.report.distribution.fair, color: "bg-amber-500" },
+                  { label: "Poor (<40%)", value: qualityReport.report.distribution.poor, color: "bg-red-500" },
+                ].map((b) => {
+                  const pct = qualityReport.report.total > 0 ? Math.round((b.value / qualityReport.report.total) * 100) : 0;
+                  return (
+                    <div key={b.label} className="flex items-center gap-2 text-xs font-mono">
+                      <span className="w-36 text-muted-foreground text-[10px]">{b.label}</span>
+                      <div className="flex-1 h-2 rounded-full bg-border overflow-hidden">
+                        <div className={`h-full rounded-full ${b.color}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="w-8 text-right text-muted-foreground">{b.value}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-muted-foreground">
+                <span>Avg input length: <span className="text-foreground">{qualityReport.report.avgInputLen} chars</span></span>
+                <span>Avg output length: <span className="text-foreground">{qualityReport.report.avgOutputLen} chars</span></span>
+              </div>
+              {qualityReport.report.recommendation && (
+                <div className="p-3 rounded border border-amber-500/20 bg-amber-500/5 text-xs font-mono text-amber-300">
+                  ⚡ {qualityReport.report.recommendation}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Import URL Dialog ────────────────────────────────────────────────── */}
+      <Dialog open={importUrlDialogDatasetId !== null} onOpenChange={(o) => { if (!o) { setImportUrlDialogDatasetId(null); setImportUrl(""); setImportUrlResult(null); } }}>
+        <DialogContent className="border-border bg-card max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link className="w-4 h-4 text-cyan-400" />
+              Import Samples from URL
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-xs text-muted-foreground font-mono">
+              Scrapes a webpage and imports its content as training samples into the selected dataset.
+            </p>
+            <div className="space-y-2">
+              <label className="text-xs font-mono text-muted-foreground">URL to scrape</label>
+              <Input
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="https://..."
+                className="font-mono text-sm bg-background"
+              />
+            </div>
+            {importUrlResult && (
+              <div className="p-3 rounded border border-green-500/20 bg-green-500/5 text-xs font-mono text-green-400">
+                ✓ Added {importUrlResult.added} samples · Skipped {importUrlResult.skipped} duplicates
+              </div>
+            )}
+            <Button
+              className="w-full gap-2"
+              disabled={importUrlLoading || !importUrl}
+              onClick={async () => {
+                if (!importUrlDialogDatasetId) return;
+                setImportUrlLoading(true);
+                setImportUrlResult(null);
+                try {
+                  const r = await fetch(`${BASE}/api/training-datasets/${importUrlDialogDatasetId}/import-url`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: importUrl }),
+                  });
+                  if (r.ok) {
+                    const d = await r.json() as { added: number; skipped: number };
+                    setImportUrlResult(d);
+                    queryClient.invalidateQueries({ queryKey: getListTrainingDatasetsQueryKey() });
+                  }
+                } finally {
+                  setImportUrlLoading(false);
+                }
+              }}
+            >
+              {importUrlLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+              {importUrlLoading ? "Importing…" : "Import"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Benchmark Dialog ─────────────────────────────────────────────────── */}
+      <Dialog open={benchmarkModel !== null} onOpenChange={(o) => { if (!o) { setBenchmarkModel(null); setBenchmarkResult(null); } }}>
+        <DialogContent className="border-border bg-card max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Gauge className="w-4 h-4 text-blue-400" />
+              Benchmark — {benchmarkModel}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            {!benchmarkResult && !benchmarkLoading && (
+              <div className="text-center py-6">
+                <p className="text-sm text-muted-foreground font-mono mb-4">
+                  Runs 5 real prompts through the model and measures accuracy, latency, and throughput.
+                </p>
+                <Button className="gap-2" onClick={async () => {
+                  if (!benchmarkModel) return;
+                  setBenchmarkLoading(true);
+                  try {
+                    const r = await fetch(`${BASE}/api/models/benchmark`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ model: benchmarkModel }),
+                    });
+                    if (r.ok) setBenchmarkResult(await r.json() as BenchmarkResult);
+                  } finally {
+                    setBenchmarkLoading(false);
+                  }
+                }}>
+                  <Play className="w-4 h-4" /> Run Benchmark
+                </Button>
+              </div>
+            )}
+            {benchmarkLoading && (
+              <div className="text-center py-10 space-y-3">
+                <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+                <p className="text-sm text-muted-foreground font-mono">Running 5 prompts… this may take 30–60 seconds</p>
+              </div>
+            )}
+            {benchmarkResult && (
+              <div className="space-y-4">
+                {/* Summary */}
+                <div className="grid grid-cols-4 gap-3">
+                  {[
+                    { label: "Grade", value: benchmarkResult.summary.grade, color: benchmarkResult.summary.grade === "A" ? "text-green-400" : benchmarkResult.summary.grade === "B" ? "text-blue-400" : benchmarkResult.summary.grade === "C" ? "text-amber-400" : "text-red-400" },
+                    { label: "Accuracy", value: benchmarkResult.summary.accuracy !== null ? `${benchmarkResult.summary.accuracy}%` : "N/A", color: "text-foreground" },
+                    { label: "Avg Latency", value: `${benchmarkResult.summary.avgLatencyMs}ms`, color: "text-purple-400" },
+                    { label: "Tokens", value: benchmarkResult.summary.totalTokens, color: "text-cyan-400" },
+                  ].map((s) => (
+                    <div key={s.label} className="p-3 rounded border border-border bg-background/60 text-center">
+                      <div className={`text-xl font-bold font-mono ${s.color}`}>{String(s.value)}</div>
+                      <div className="text-[10px] font-mono text-muted-foreground">{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Results */}
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {benchmarkResult.results.map((res) => (
+                    <div key={res.id} className={`p-2.5 rounded border text-xs font-mono ${
+                      res.passed === true ? "border-green-500/30 bg-green-500/5" :
+                      res.passed === false ? "border-red-500/30 bg-red-500/5" :
+                      "border-border bg-background/40"
+                    }`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[10px] text-muted-foreground mb-1 flex items-center gap-2">
+                            <span className="uppercase text-primary/70">{res.id}</span>
+                            <span>{res.latencyMs}ms</span>
+                            {res.tokensPerSec !== null && <span>{res.tokensPerSec} tok/s</span>}
+                          </div>
+                          <div className="text-muted-foreground mb-0.5 truncate">Q: {res.prompt}</div>
+                          <div className="text-foreground/80 line-clamp-2">A: {res.response || "(no response)"}</div>
+                        </div>
+                        <span className="shrink-0">
+                          {res.passed === true ? <CheckCircle2 className="w-4 h-4 text-green-500" /> :
+                           res.passed === false ? <AlertCircle className="w-4 h-4 text-red-500" /> :
+                           <span className="text-muted-foreground">—</span>}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="text-xs font-mono h-7 gap-1.5" onClick={() => { setBenchmarkResult(null); }}>
+                    <RotateCcw className="w-3 h-3" /> Run Again
+                  </Button>
+                  <span className="text-[10px] font-mono text-muted-foreground self-center">
+                    ran at {format(new Date(benchmarkResult.ranAt), "HH:mm:ss")}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

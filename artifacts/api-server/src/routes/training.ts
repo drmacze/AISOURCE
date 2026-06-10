@@ -6,7 +6,7 @@ import {
   trainingJobsTable,
   aiModelsTable,
 } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import {
   CreateTrainingDatasetBody,
   AddTrainingSampleParams,
@@ -754,6 +754,179 @@ router.delete("/training-datasets/:id/samples/:sampleId", async (req: Request, r
   const [deleted] = await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.id, sampleId)).returning();
   if (!deleted) { res.status(404).json({ error: "Sample not found" }); return; }
   res.status(204).send();
+});
+
+// ─── DELETE /training-datasets/:id — Delete dataset + all samples ─────────────
+router.delete("/training-datasets/:id", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+  // Delete samples first
+  await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
+  const [deleted] = await db.delete(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, id)).returning();
+  if (!deleted) { res.status(404).json({ error: "Dataset not found" }); return; }
+  res.json({ ok: true, deleted: deleted.id });
+});
+
+// ─── POST /training-datasets/:id/clean — Remove low-quality samples ───────────
+router.post("/training-datasets/:id/clean", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+
+  const minQuality = Number((req.body as { minQuality?: number }).minQuality ?? 30);
+  const minInputLen = Number((req.body as { minInputLen?: number }).minInputLen ?? 20);
+  const minOutputLen = Number((req.body as { minOutputLen?: number }).minOutputLen ?? 15);
+
+  const samples = await db.select().from(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
+
+  const toDelete: number[] = [];
+  for (const s of samples) {
+    const inputLen = (s.input || "").length;
+    const outputLen = (s.output || "").length;
+    const ratio = outputLen > 0 ? Math.min(outputLen / Math.max(inputLen, 1), 5) : 0;
+    const quality = Math.round((
+      0.3 * Math.min(inputLen / 100, 1) +
+      0.3 * Math.min(outputLen / 200, 1) +
+      0.2 * (ratio > 0.2 && ratio < 10 ? 1 : 0) +
+      0.2 * (s.source ? 1 : 0)
+    ) * 100);
+    if (quality < minQuality || inputLen < minInputLen || outputLen < minOutputLen) {
+      toDelete.push(s.id);
+    }
+  }
+
+  for (const sid of toDelete) {
+    await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.id, sid));
+  }
+
+  const [countRow] = await db.select({ c: sql<number>`COUNT(*)::int` }).from(trainingSamplesTable)
+    .where(eq(trainingSamplesTable.datasetId, id));
+  await db.update(trainingDatasetsTable)
+    .set({ sampleCount: countRow?.c ?? 0, updatedAt: new Date() })
+    .where(eq(trainingDatasetsTable.id, id));
+
+  res.json({ removed: toDelete.length, remaining: countRow?.c ?? 0, minQuality });
+});
+
+// ─── GET /training-datasets/:id/quality — Quality analysis report ─────────────
+router.get("/training-datasets/:id/quality", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+
+  const samples = await db.select().from(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
+
+  const scored = samples.map((s) => {
+    const inputLen = (s.input || "").length;
+    const outputLen = (s.output || "").length;
+    const ratio = outputLen > 0 ? Math.min(outputLen / Math.max(inputLen, 1), 5) : 0;
+    return Math.round((
+      0.3 * Math.min(inputLen / 100, 1) +
+      0.3 * Math.min(outputLen / 200, 1) +
+      0.2 * (ratio > 0.2 && ratio < 10 ? 1 : 0) +
+      0.2 * (s.source ? 1 : 0)
+    ) * 100);
+  });
+
+  const avgQuality = scored.length > 0 ? Math.round(scored.reduce((a, b) => a + b, 0) / scored.length) : 0;
+  const distribution = { excellent: 0, good: 0, fair: 0, poor: 0 };
+  for (const q of scored) {
+    if (q >= 80) distribution.excellent++;
+    else if (q >= 60) distribution.good++;
+    else if (q >= 40) distribution.fair++;
+    else distribution.poor++;
+  }
+
+  const sourceCounts: Record<string, number> = {};
+  for (const s of samples) {
+    const src = s.source || "unknown";
+    sourceCounts[src] = (sourceCounts[src] || 0) + 1;
+  }
+
+  const avgInputLen = samples.length > 0
+    ? Math.round(samples.reduce((a, s) => a + (s.input || "").length, 0) / samples.length) : 0;
+  const avgOutputLen = samples.length > 0
+    ? Math.round(samples.reduce((a, s) => a + (s.output || "").length, 0) / samples.length) : 0;
+
+  res.json({
+    total: samples.length,
+    avgQuality,
+    distribution,
+    avgInputLen,
+    avgOutputLen,
+    sourceCounts,
+    lowQualityCount: distribution.poor + distribution.fair,
+    recommendation: avgQuality < 50
+      ? "Clean recommended — many low-quality samples"
+      : avgQuality < 70
+      ? "Moderate quality — consider cleaning below 40"
+      : "Good quality — dataset looks healthy",
+  });
+});
+
+// ─── POST /training-jobs/:id/retry — Retry a failed job ──────────────────────
+router.post("/training-jobs/:id/retry", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid job id" }); return; }
+
+  const [job] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, id));
+  if (!job) { res.status(404).json({ error: "Job not found" }); return; }
+  if (job.status !== "failed") {
+    res.status(400).json({ error: `Job status is "${job.status}" — only failed jobs can be retried` });
+    return;
+  }
+
+  const [model] = await db.select().from(aiModelsTable).where(eq(aiModelsTable.id, job.modelId));
+  const [dataset] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, job.datasetId));
+  if (!model || !dataset) {
+    res.status(404).json({ error: "Original model or dataset no longer exists" });
+    return;
+  }
+
+  // Reset the existing job
+  const [updated] = await db.update(trainingJobsTable)
+    .set({
+      status: "pending",
+      progress: 0,
+      currentEpoch: 0,
+      error: null,
+      startedAt: null,
+      completedAt: null,
+      loss: null,
+      accuracy: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(trainingJobsTable.id, id))
+    .returning();
+
+  // Restart training asynchronously
+  runOllamaTraining(id, model, dataset).catch((e) => console.error("Retry training failed:", e));
+
+  res.json({ ok: true, job: updated });
+});
+
+// ─── POST /training-datasets/:id/import-url — Scrape URL into dataset ─────────
+router.post("/training-datasets/:id/import-url", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+
+  const { url } = req.body as { url?: string };
+  if (!url?.trim()) { res.status(400).json({ error: "url is required" }); return; }
+
+  try { new URL(url); } catch { res.status(400).json({ error: "Invalid URL" }); return; }
+
+  const [ds] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, id));
+  if (!ds) { res.status(404).json({ error: "Dataset not found" }); return; }
+
+  const { scrapeUrlForTraining } = await import("../autotraining");
+  const result = await scrapeUrlForTraining(url, id);
+
+  // Refresh count
+  const [countRow] = await db.select({ c: sql<number>`COUNT(*)::int` }).from(trainingSamplesTable)
+    .where(eq(trainingSamplesTable.datasetId, id));
+  await db.update(trainingDatasetsTable)
+    .set({ sampleCount: countRow?.c ?? 0, updatedAt: new Date() })
+    .where(eq(trainingDatasetsTable.id, id));
+
+  res.json({ ...result, newSampleCount: countRow?.c ?? 0 });
 });
 
 export default router;

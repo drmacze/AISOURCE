@@ -600,4 +600,92 @@ router.post("/models/show", async (req: Request, res: Response) => {
   }
 });
 
+/** POST /api/models/benchmark — Run real benchmark on an installed model */
+router.post("/models/benchmark", async (req: Request, res: Response) => {
+  const { model } = req.body as { model?: string };
+  if (!model) {
+    res.status(400).json({ code: "BAD_INPUT", message: "model name required", hint: "Provide the model name." });
+    return;
+  }
+
+  const OLLAMA_HOST_URL = "http://127.0.0.1:11434";
+  const BENCHMARK_PROMPTS = [
+    { id: "factual",   prompt: "What is the capital of France?",             expected: "Paris" },
+    { id: "math",      prompt: "What is 17 multiplied by 13?",               expected: "221" },
+    { id: "code",      prompt: "Write a Python function that adds two numbers.", expected: "def" },
+    { id: "reasoning", prompt: "If all cats are animals, and Whiskers is a cat, is Whiskers an animal?", expected: "yes" },
+    { id: "creative",  prompt: "Write a one-sentence description of an AI assistant.", expected: "" },
+  ];
+
+  const results: Array<{
+    id: string; prompt: string; response: string; latencyMs: number;
+    tokensPerSec: number | null; passed: boolean | null;
+  }> = [];
+
+  let totalLatency = 0;
+  let totalTokens = 0;
+  let passed = 0;
+
+  for (const bp of BENCHMARK_PROMPTS) {
+    const startMs = Date.now();
+    try {
+      const r = await fetch(`${OLLAMA_HOST_URL}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, prompt: bp.prompt, stream: false, options: { temperature: 0, num_predict: 80 } }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const latencyMs = Date.now() - startMs;
+
+      if (!r.ok) {
+        results.push({ id: bp.id, prompt: bp.prompt, response: `Error: HTTP ${r.status}`, latencyMs, tokensPerSec: null, passed: false });
+        continue;
+      }
+
+      const data = await r.json() as {
+        response?: string;
+        eval_count?: number;
+        eval_duration?: number;
+      };
+      const response = (data.response || "").trim();
+      const evalCount = data.eval_count || 0;
+      const evalDuration = data.eval_duration || 0;
+      const tokensPerSec = evalDuration > 0 ? Math.round((evalCount / (evalDuration / 1e9)) * 10) / 10 : null;
+      const testPassed = bp.expected ? response.toLowerCase().includes(bp.expected.toLowerCase()) : null;
+
+      if (testPassed) passed++;
+      totalLatency += latencyMs;
+      totalTokens += evalCount;
+
+      results.push({ id: bp.id, prompt: bp.prompt, response: response.slice(0, 300), latencyMs, tokensPerSec, passed: testPassed });
+    } catch (err) {
+      const latencyMs = Date.now() - startMs;
+      results.push({ id: bp.id, prompt: bp.prompt, response: `Error: ${String(err)}`, latencyMs, tokensPerSec: null, passed: false });
+    }
+  }
+
+  const checkedResults = results.filter((r) => r.passed !== null);
+  const accuracy = checkedResults.length > 0 ? Math.round((passed / checkedResults.length) * 100) : null;
+  const avgLatency = results.length > 0 ? Math.round(totalLatency / results.length) : 0;
+
+  res.json({
+    model,
+    prompts: BENCHMARK_PROMPTS.length,
+    results,
+    summary: {
+      accuracy,
+      avgLatencyMs: avgLatency,
+      totalTokens,
+      passed,
+      failed: checkedResults.length - passed,
+      grade:
+        accuracy === null ? "N/A" :
+        accuracy >= 80 ? "A" :
+        accuracy >= 60 ? "B" :
+        accuracy >= 40 ? "C" : "D",
+    },
+    ranAt: new Date().toISOString(),
+  });
+});
+
 export default router;
