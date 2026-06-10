@@ -13,6 +13,7 @@ import imageRouter from "./image";
 import kimiRouter from "./kimi";
 import apiKeysRouter from "./apikeys";
 import searchRouter from "./search";
+import settingsRouter from "./settings";
 
 const router: IRouter = Router();
 
@@ -48,5 +49,8 @@ router.use(searchRouter);
 
 // Public API v1 — for external integrations (e.g. dlavie.vercel.app)
 router.use("/v1", v1Router);
+
+// Settings — manage API keys and integrations
+router.use(settingsRouter);
 
 export default router;

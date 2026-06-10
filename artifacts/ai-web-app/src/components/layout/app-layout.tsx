@@ -15,6 +15,7 @@ import {
   Zap,
   ChevronRight,
   KeyRound,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { href: "/models",     label: "Models",         icon: Box,              color: "text-rose-400" },
   { href: "/generate",   label: "Image Gen",      icon: ImageIcon,        color: "text-pink-400" },
   { href: "/api-keys",   label: "API Keys",       icon: KeyRound,         color: "text-violet-400" },
+  { href: "/settings",   label: "Settings",       icon: Settings,         color: "text-slate-400" },
   { href: "/api-docs",   label: "API Docs",       icon: BookOpen,         color: "text-cyan-400" },
 ];
 
