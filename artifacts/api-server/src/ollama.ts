@@ -213,13 +213,16 @@ async function resolveModel(model: string): Promise<string> {
 export async function generateOllamaResponse(
   prompt: string,
   model: string = "tinyllama",
-  ragContext?: string
+  ragContext?: string,
+  systemPrompt?: string
 ): Promise<string> {
   const resolvedModel = await resolveModel(model);
   try {
+    const sysPrompt = systemPrompt ||
+      "You are NEXUS_OS, a powerful local AI assistant. Be helpful, accurate, and concise.";
     const fullPrompt = ragContext
-      ? `You are a helpful AI assistant. Use the following context from the knowledge base to answer the user's question accurately. If the context is relevant, use it. If not, answer from your general knowledge.\n\n--- KNOWLEDGE BASE CONTEXT ---\n${ragContext}\n--- END CONTEXT ---\n\nUser question: ${prompt}\n\nAnswer:`
-      : prompt;
+      ? `${sysPrompt}\n\nRelevant knowledge base context:\n\n${ragContext}\n\n---\nUser: ${prompt}\nAssistant:`
+      : `${sysPrompt}\n\nUser: ${prompt}\nAssistant:`;
 
     const response = await withRetry(() =>
       fetch(`${OLLAMA_HOST}/api/generate`, {
@@ -295,9 +298,10 @@ export async function streamOllamaResponse(
     }
   }
 
+  const sysPromptStream = "You are NEXUS_OS, a powerful local AI assistant. Be helpful, accurate, and concise.";
   const fullPrompt = ragContext
-    ? `You are a helpful AI assistant. Use the following context from the knowledge base to answer the user's question accurately. If the context is relevant, use it. If not, answer from your general knowledge.\n\n--- KNOWLEDGE BASE CONTEXT ---\n${ragContext}\n--- END CONTEXT ---\n\nUser question: ${prompt}\n\nAnswer:`
-    : prompt;
+    ? `${sysPromptStream}\n\nRelevant knowledge base context:\n\n${ragContext}\n\n---\nUser: ${prompt}\nAssistant:`
+    : `${sysPromptStream}\n\nUser: ${prompt}\nAssistant:`;
 
   const ollamaOnline = await isOllamaOnline();
   if (!ollamaOnline) {

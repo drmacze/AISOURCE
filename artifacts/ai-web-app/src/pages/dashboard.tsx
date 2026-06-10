@@ -210,8 +210,8 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard icon={MessageSquare} label="Conversations"    value={s?.totalConversations ?? "—"} sub="total sessions"           color="text-blue-400"    delay={0.1} />
         <StatCard icon={Activity}      label="Messages"         value={s?.totalMessages ?? "—"}      sub="across all chats"          color="text-violet-400"  delay={0.15} />
-        <StatCard icon={Database}      label="Knowledge Docs"   value={s?.totalDocuments ?? "—"}     sub="indexed in RAG"            color="text-amber-400"   delay={0.2} />
-        <StatCard icon={Brain}         label="Training Samples" value={a?.totalSamplesAdded?.toLocaleString() ?? "—"} sub="collected from web" color="text-emerald-400" delay={0.25} />
+        <StatCard icon={Database}      label="Knowledge Docs"   value={s?.totalDocuments ?? "—"}     sub={s?.embeddingCoverage != null ? `${s.embeddingCoverage}% vector-embedded` : "indexed in RAG"} color="text-amber-400"   delay={0.2} />
+        <StatCard icon={Brain}         label="Training Samples" value={s?.totalTrainingSamples?.toLocaleString() ?? a?.totalSamplesAdded?.toLocaleString() ?? "—"} sub="in database" color="text-emerald-400" delay={0.25} />
       </div>
 
       {/* Middle row */}
@@ -238,12 +238,15 @@ export default function Dashboard() {
                   ? <span className="text-emerald-400">● active · {a.totalCyclesCompleted} cycles</span>
                   : <span className="text-slate-500">○ paused</span> },
               { k: "HF Token",       v: h?.huggingface
-                  ? <span className="text-emerald-400">● connected</span>
+                  ? <span className="text-emerald-400">● connected (embeddings + images)</span>
                   : <span className="text-amber-400">○ not set</span> },
               { k: "Kimi K2",        v: h?.kimi
-                  ? <span className="text-emerald-400">● ready</span>
+                  ? <span className="text-emerald-400">● ready (1T MoE)</span>
                   : <span className="text-slate-500">○ no key</span> },
-              { k: "GitHub",         v: <span className="text-pink-400">● public api (auto-fallback)</span> },
+              { k: "Vector Search",  v: s?.embeddingCoverage != null
+                  ? <span className="text-emerald-400">● pgvector · {s.embeddingCoverage}% docs embedded</span>
+                  : <span className="text-slate-500">—</span> },
+              { k: "Ollama Models",  v: <span className="text-cyan-400">{s?.ollamaModels ?? h?.ollama ? "—" : "0"} installed</span> },
               { k: "Training Rate",  v: <span className="text-slate-300">{a?.totalCyclesCompleted ? `~${Math.round((a.totalSamplesAdded || 0) / a.totalCyclesCompleted)}/cycle` : "—"}</span> },
             ].map(({ k, v }) => (
               <div key={k} className="flex items-center justify-between py-1.5 border-b border-white/3 last:border-0">

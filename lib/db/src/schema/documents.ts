@@ -1,6 +1,14 @@
-import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, boolean, customType } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+
+const vector = customType<{ data: number[]; driverData: string }>({
+  dataType() { return "vector(384)"; },
+  toDriver(val: number[]): string { return "[" + val.join(",") + "]"; },
+  fromDriver(val: string): number[] {
+    return val.replace(/^\[|\]$/g, "").split(",").map(Number);
+  },
+});
 
 export const documentsTable = pgTable("documents", {
   id: serial("id").primaryKey(),
@@ -14,6 +22,8 @@ export const documentsTable = pgTable("documents", {
   chunkCount: integer("chunk_count").default(0).notNull(),
   storageUrl: text("storage_url"),
   storageObjectPath: text("storage_object_path"),
+  embeddingModel: text("embedding_model"),
+  embedding: vector("embedding"),
 });
 
 export const insertDocumentSchema = createInsertSchema(documentsTable).omit({ id: true, createdAt: true, indexed: true, chunkCount: true });

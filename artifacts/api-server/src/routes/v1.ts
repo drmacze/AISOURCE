@@ -161,30 +161,71 @@ async function streamUnified(
   await streamOllamaResponse(message, model || "tinyllama", ragContext, res);
 }
 
-// ─── RAG context helper ───────────────────────────────────────────────────────
+// ─── RAG context helper — pgvector cosine similarity → BM25 fallback ─────────
+const EMBED_DIMS_V1 = 384;
+function pgVectorV1(vec: number[]): string { return "[" + vec.join(",") + "]"; }
+
 async function retrieveRAGContext(query: string): Promise<string | undefined> {
   try {
+    // 1. Try real vector search via HuggingFace embeddings + pgvector
+    const { generateEmbedding } = await import("./documents");
+    const queryVec = await generateEmbedding(query);
+    if (queryVec && queryVec.length === EMBED_DIMS_V1) {
+      try {
+        const rows = await db.execute(sql`
+          SELECT id, title, content,
+                 CAST(1 - (embedding <=> ${pgVectorV1(queryVec)}::vector) AS FLOAT8) AS score
+          FROM documents
+          WHERE embedding IS NOT NULL
+            AND (1 - (embedding <=> ${pgVectorV1(queryVec)}::vector)) > 0.2
+          ORDER BY embedding <=> ${pgVectorV1(queryVec)}::vector
+          LIMIT 3
+        `) as unknown as Array<{ id: number; title: string; content: string; score: number }>;
+
+        if (rows.length > 0) {
+          return rows
+            .map((r) => {
+              const snippet = r.content?.length > 1000 ? r.content.slice(0, 1000) + "…" : r.content || "";
+              return `[Knowledge: ${r.title}]\n${snippet}`;
+            })
+            .join("\n\n");
+        }
+      } catch {
+        // pgvector query failed — fall through to BM25
+      }
+    }
+
+    // 2. BM25 keyword fallback
     const docs = await db.select().from(documentsTable);
     if (!docs.length) return undefined;
     const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
     if (!queryWords.length) return undefined;
-    const scored = docs.map((doc) => {
-      const text = `${doc.title} ${doc.content || ""}`.toLowerCase();
-      const matchCount = queryWords.filter((w) => text.includes(w)).length;
-      return { doc, score: matchCount / queryWords.length };
+    const N = docs.length;
+    const df: Record<string, number> = {};
+    const docData = docs.map((doc) => {
+      const tokens = `${doc.title} ${doc.content || ""}`.toLowerCase().split(/\s+/);
+      for (const t of new Set(tokens)) df[t] = (df[t] || 0) + 1;
+      return { doc, tokens };
     });
-    const relevant = scored
-      .filter((s) => s.score > 0.1)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
+    const avgDL = docData.reduce((s, d) => s + d.tokens.length, 0) / Math.max(N, 1);
+    const scored = docData.map(({ doc, tokens }) => {
+      const tf: Record<string, number> = {};
+      for (const t of tokens) tf[t] = (tf[t] || 0) + 1;
+      let score = 0;
+      for (const q of queryWords) {
+        const idf = Math.log((N - (df[q] || 0) + 0.5) / ((df[q] || 0) + 0.5) + 1);
+        const f = tf[q] || 0;
+        const k1 = 1.5, b = 0.75;
+        score += idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * tokens.length / avgDL));
+      }
+      return { doc, score };
+    });
+    const relevant = scored.filter((s) => s.score > 0.1).sort((a, b) => b.score - a.score).slice(0, 3);
     if (!relevant.length) return undefined;
     return relevant
       .map((r) => {
-        const snippet =
-          r.doc.content && r.doc.content.length > 800
-            ? r.doc.content.slice(0, 800) + "..."
-            : r.doc.content || "";
-        return `[${r.doc.title}]\n${snippet}`;
+        const snippet = r.doc.content && r.doc.content.length > 1000 ? r.doc.content.slice(0, 1000) + "…" : r.doc.content || "";
+        return `[Knowledge: ${r.doc.title}]\n${snippet}`;
       })
       .join("\n\n");
   } catch {
@@ -683,18 +724,22 @@ router.post("/embed", requireApiKey, rateLimit, async (req, res) => {
       return;
     }
 
-    // Fallback: simple hash-based pseudo-embedding (for compatibility)
-    const pseudoEmbedding = Array.from({ length: 384 }, (_, i) => {
-      let h = 0;
-      for (let j = 0; j < text.length; j++) h = (h * 31 + text.charCodeAt(j) + i) & 0xffffffff;
-      return (h / 0xffffffff) * 2 - 1;
-    });
-    res.json({
-      embedding: pseudoEmbedding,
-      dimensions: 384,
-      model: "fallback-hash",
-      note: "Ollama embedding model not available. Install nomic-embed-text for real embeddings.",
-      text: text.slice(0, 100),
+    // Fallback: HuggingFace real embeddings
+    const { generateEmbedding, } = await import("./documents");
+    const hfVec = await generateEmbedding(text);
+    if (hfVec) {
+      res.json({
+        embedding: hfVec,
+        dimensions: hfVec.length,
+        model: "sentence-transformers/all-MiniLM-L6-v2",
+        provider: "huggingface",
+        text: text.slice(0, 100) + (text.length > 100 ? "..." : ""),
+      });
+      return;
+    }
+    res.status(503).json({
+      error: "EmbeddingUnavailable",
+      message: "No embedding model available. Install nomic-embed-text via Ollama, or set HF_TOKEN for HuggingFace embeddings.",
     });
   } catch (error) {
     res.status(500).json({ error: "EmbeddingError", message: error instanceof Error ? error.message : "Unknown error" });
@@ -891,7 +936,7 @@ router.post("/chat/stream", requireApiKey, rateLimit, async (req: Request, res: 
   await streamUnified(message, resolvedModel, ragContext, res);
 });
 
-// ─── POST /api/v1/rag/search ──────────────────────────────────────────────────
+// ─── POST /api/v1/rag/search — real pgvector + BM25 hybrid ────────────────────
 router.post("/rag/search", requireApiKey, rateLimit, async (req, res) => {
   const { query, topK = 5, searchType = "hybrid" } = req.body as {
     query?: string;
@@ -901,42 +946,83 @@ router.post("/rag/search", requireApiKey, rateLimit, async (req, res) => {
 
   if (!query?.trim()) { res.status(400).json({ error: "query is required" }); return; }
 
-  const docs = await db.select().from(documentsTable);
-  const q = query.toLowerCase();
-  const queryWords = q.split(/\s+/);
+  try {
+    const { generateEmbedding } = await import("./documents");
+    let results: Array<{ documentId: number; title: string; snippet: string; score: number; rank: number; searchMethod: string }> = [];
 
-  const scored = docs.map((doc) => {
-    const title = doc.title?.toLowerCase() || "";
-    const content = doc.content?.toLowerCase() || "";
-    let score = 0;
+    // Vector search
+    if (searchType !== "keyword") {
+      const queryVec = await generateEmbedding(query);
+      if (queryVec && queryVec.length === EMBED_DIMS_V1) {
+        try {
+          const rows = await db.execute(sql`
+            SELECT id, title, content,
+                   CAST(1 - (embedding <=> ${pgVectorV1(queryVec)}::vector) AS FLOAT8) AS score
+            FROM documents
+            WHERE embedding IS NOT NULL
+            ORDER BY embedding <=> ${pgVectorV1(queryVec)}::vector
+            LIMIT ${topK}
+          `) as unknown as Array<{ id: number; title: string; content: string; score: number }>;
 
-    if (searchType === "keyword" || searchType === "hybrid") {
-      if (title.includes(q)) score += 0.5;
-      const occ = (content.match(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
-      score += Math.min(occ * 0.1, 0.4);
+          results = rows.map((r, i) => ({
+            documentId: r.id,
+            title: r.title,
+            snippet: r.content?.slice(0, 400) + (r.content?.length > 400 ? "…" : "") || "",
+            score: typeof r.score === "number" ? Math.round(r.score * 1000) / 1000 : 0,
+            rank: i + 1,
+            searchMethod: "vector",
+          }));
+        } catch { /* fall through */ }
+      }
     }
-    if (searchType === "semantic" || searchType === "hybrid") {
-      const docWords = (title + " " + content).split(/\s+/);
-      const overlap = queryWords.filter((w) => docWords.includes(w)).length;
-      score += overlap * 0.05;
+
+    // BM25 keyword search (fallback or hybrid supplement)
+    if (results.length === 0 || searchType === "hybrid") {
+      const docs = await db.select().from(documentsTable);
+      const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+      const N = docs.length;
+      const df: Record<string, number> = {};
+      const docData = docs.map((doc) => {
+        const tokens = `${doc.title} ${doc.content || ""}`.toLowerCase().split(/\s+/);
+        for (const t of new Set(tokens)) df[t] = (df[t] || 0) + 1;
+        return { doc, tokens };
+      });
+      const avgDL = docData.reduce((s, d) => s + d.tokens.length, 0) / Math.max(N, 1);
+      const bm25Results = docData.map(({ doc, tokens }) => {
+        const tf: Record<string, number> = {};
+        for (const t of tokens) tf[t] = (tf[t] || 0) + 1;
+        let score = 0;
+        for (const q of queryWords) {
+          const idf = Math.log((N - (df[q] || 0) + 0.5) / ((df[q] || 0) + 0.5) + 1);
+          const f = tf[q] || 0;
+          score += idf * (f * 2.5) / (f + 1.5 * (1 - 0.75 + 0.75 * tokens.length / avgDL));
+        }
+        return {
+          documentId: doc.id,
+          title: doc.title,
+          snippet: (doc.content || "").slice(0, 400) + ((doc.content || "").length > 400 ? "…" : ""),
+          score: Math.round(score * 1000) / 1000,
+          searchMethod: "bm25",
+        };
+      }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
+
+      if (searchType === "hybrid") {
+        const seenIds = new Set(results.map((r) => r.documentId));
+        for (const r of bm25Results) {
+          if (!seenIds.has(r.documentId)) {
+            results.push({ ...r, rank: 0 });
+            seenIds.add(r.documentId);
+          }
+        }
+      } else {
+        results = bm25Results.map((r) => ({ ...r, rank: 0 }));
+      }
     }
 
-    return {
-      documentId: doc.id,
-      title: doc.title,
-      snippet: content.length > 300 ? content.slice(0, 300) + "..." : content,
-      score,
-      rank: 0,
-    };
-  });
-
-  const results = scored
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
-    .map((s, i) => ({ ...s, rank: i + 1, score: Math.min(s.score, 1.0) }));
-
-  res.json(results);
+    res.json(results.slice(0, topK).map((r, i) => ({ ...r, rank: i + 1 })));
+  } catch (err) {
+    res.status(500).json({ error: "SearchError", message: String(err) });
+  }
 });
 
 // ─── Conversation endpoints ───────────────────────────────────────────────────

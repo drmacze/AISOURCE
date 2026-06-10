@@ -216,6 +216,7 @@ async function upsertSamples(
         input: s.input.trim(),
         output: s.output.trim(),
         metadata: s.metadata || JSON.stringify({ source }),
+        source,
       });
       added++;
     } catch { /* ignore duplicate key errors */ }

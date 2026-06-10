@@ -19,6 +19,7 @@ export const trainingSamplesTable = pgTable("training_samples", {
   output: text("output"),
   label: text("label"),
   metadata: text("metadata"),
+  source: text("source"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
 });
 
