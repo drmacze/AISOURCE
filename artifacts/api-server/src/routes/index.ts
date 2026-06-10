@@ -12,6 +12,7 @@ import modelsRouter from "./models";
 import imageRouter from "./image";
 import kimiRouter from "./kimi";
 import apiKeysRouter from "./apikeys";
+import searchRouter from "./search";
 
 const router: IRouter = Router();
 
@@ -41,6 +42,9 @@ router.use(imageRouter);
 
 // Kimi K2 — MoonshotAI 1T MoE via HF Router or official Moonshot API
 router.use(kimiRouter);
+
+// Web search (DuckDuckGo) + Ollama real-time metrics
+router.use(searchRouter);
 
 // Public API v1 — for external integrations (e.g. dlavie.vercel.app)
 router.use("/v1", v1Router);

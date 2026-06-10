@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { conversationsTable, messagesTable, documentsTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import {
   CreateConversationBody,
   SendMessageBody,
@@ -11,12 +11,60 @@ import {
   SendMessageParams,
 } from "@workspace/api-zod";
 import { generateOllamaResponse, streamOllamaResponse, OllamaError } from "../ollama";
+import { generateEmbedding } from "./documents";
+import { ddgSearch } from "./search";
 
 const router: IRouter = Router();
 
-// Retrieve relevant knowledge base context for RAG
+const EMBED_DIMS = 384;
+
+function pgVector(vec: number[]): string {
+  return "[" + vec.join(",") + "]";
+}
+
+// ─── Detect if query is a web-search-style question ───────────────────────────
+const WEB_SEARCH_PATTERNS = [
+  /\bsearch\s+for\b/i, /\blook\s+up\b/i, /\bwhat\s+is\s+the\s+(latest|current|recent|new)\b/i,
+  /\btoday['']?s?\b/i, /\bcurrent(ly)?\b/i, /\blatest\b/i, /\b(news|headline)s?\b/i,
+  /\bwho\s+(is|was|are)\b/i, /\bwhere\s+is\b/i, /\bwhen\s+(is|was|did)\b/i,
+  /\bhow\s+(much|many|old)\b/i, /\bwhat\s+happened\b/i, /\bdefine\b/i,
+];
+
+function looksLikeWebQuery(text: string): boolean {
+  return WEB_SEARCH_PATTERNS.some((p) => p.test(text));
+}
+
+// ─── RAG context: vector search → BM25 fallback ───────────────────────────────
 async function retrieveRAGContext(query: string): Promise<string | undefined> {
   try {
+    // 1. Try vector search first (if HF embeddings available)
+    const queryVec = await generateEmbedding(query);
+    if (queryVec && queryVec.length === EMBED_DIMS) {
+      try {
+        const rows = await db.execute(sql`
+          SELECT id, title, content,
+                 CAST(1 - (embedding <=> ${pgVector(queryVec)}::vector) AS FLOAT8) AS score
+          FROM documents
+          WHERE embedding IS NOT NULL
+            AND (1 - (embedding <=> ${pgVector(queryVec)}::vector)) > 0.25
+          ORDER BY embedding <=> ${pgVector(queryVec)}::vector
+          LIMIT 3
+        `) as unknown as Array<{ id: number; title: string; content: string; score: number }>;
+
+        if (rows.length > 0) {
+          return rows
+            .map((r) => {
+              const snippet = r.content && r.content.length > 800 ? r.content.slice(0, 800) + "..." : r.content || "";
+              return `[Knowledge: ${r.title}]\n${snippet}`;
+            })
+            .join("\n\n");
+        }
+      } catch {
+        // pgvector query failed — fall through to BM25
+      }
+    }
+
+    // 2. BM25 keyword fallback
     const docs = await db.select().from(documentsTable);
     if (!docs.length) return undefined;
 
@@ -42,9 +90,27 @@ async function retrieveRAGContext(query: string): Promise<string | undefined> {
           r.doc.content && r.doc.content.length > 800
             ? r.doc.content.slice(0, 800) + "..."
             : r.doc.content || "";
-        return `[${r.doc.title}]\n${snippet}`;
+        return `[Knowledge: ${r.doc.title}]\n${snippet}`;
       })
       .join("\n\n");
+  } catch {
+    return undefined;
+  }
+}
+
+// ─── Web search context injection ─────────────────────────────────────────────
+async function retrieveWebContext(query: string): Promise<string | undefined> {
+  try {
+    const results = await ddgSearch(query, 4);
+    if (!results.length) return undefined;
+
+    const snippets = results
+      .filter((r) => r.snippet.trim().length > 20)
+      .slice(0, 4)
+      .map((r) => `[Web: ${r.title}]\n${r.snippet.slice(0, 400)}`);
+
+    if (!snippets.length) return undefined;
+    return snippets.join("\n\n");
   } catch {
     return undefined;
   }
@@ -285,8 +351,17 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
     content: body.content,
   });
 
-  // Get RAG context
+  // Get RAG context (vector search → BM25 fallback)
   const ragContext = await retrieveRAGContext(body.content);
+
+  // Inject web search context for factual/current queries
+  let webContext: string | undefined;
+  if (looksLikeWebQuery(body.content)) {
+    webContext = await retrieveWebContext(body.content);
+  }
+
+  // Merge contexts: knowledge base + web search
+  const combinedContext = [ragContext, webContext].filter(Boolean).join("\n\n---\n\n") || undefined;
 
   // Accumulate full text from SSE tokens + final fullText event
   let fullText = "";
@@ -332,7 +407,7 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
     return (origEnd as (...a: unknown[]) => typeof res)(...args);
   } as typeof res.end;
 
-  await streamOllamaResponse(body.content, model, ragContext, res);
+  await streamOllamaResponse(body.content, model, combinedContext, res);
 });
 
 export default router;

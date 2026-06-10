@@ -1087,13 +1087,27 @@ export default function Training() {
                           )}
                         </p>
                       </div>
-                      <Button
-                        variant="outline" size="sm"
-                        className="gap-1 font-mono text-xs h-7"
-                        onClick={() => { setAddSampleDatasetId(ds.id); setAddSampleOpen(true); }}
-                      >
-                        <Plus className="w-3 h-3" /> Add Sample
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost" size="sm"
+                          className="gap-1 font-mono text-xs h-7 text-muted-foreground hover:text-primary"
+                          title="Download as JSONL (OpenAI fine-tuning format)"
+                          onClick={() => {
+                            const base = (window as Window & { _apiBase?: string })._apiBase || getApiBase();
+                            window.open(`${base}/api/training-datasets/${ds.id}/export`, "_blank");
+                          }}
+                          disabled={ds.sampleCount === 0}
+                        >
+                          <Download className="w-3 h-3" /> JSONL
+                        </Button>
+                        <Button
+                          variant="outline" size="sm"
+                          className="gap-1 font-mono text-xs h-7"
+                          onClick={() => { setAddSampleDatasetId(ds.id); setAddSampleOpen(true); }}
+                        >
+                          <Plus className="w-3 h-3" /> Add Sample
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -15,7 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Plus, Trash2, Send, Bot, User, Loader2, MessageSquare,
   ChevronDown, Cpu, Zap, StopCircle, Sparkles, Cloud,
-  Copy, Check, Download, Code2, ChevronRight,
+  Copy, Check, Download, Code2, ChevronRight, Mic, MicOff,
 } from "lucide-react";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
@@ -148,6 +148,8 @@ export default function Chat() {
   const [puterError, setPuterError] = React.useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
   const [copiedId, setCopiedId] = React.useState<number | string | null>(null);
+  const [voiceActive, setVoiceActive] = React.useState(false);
+  const recognitionRef = React.useRef<SpeechRecognition | null>(null);
 
   const { data: conversations, isLoading: loadingConvos } = useListConversations();
   const { data: activeConversation, isLoading: loadingActive } = useGetConversation(
@@ -163,9 +165,15 @@ export default function Chat() {
     return [...local, ...cloud, ...kimi];
   }, [ollamaModels]);
 
+  // Sync model state when conversation loads or model list changes
   React.useEffect(() => {
     if (activeConversation?.model) {
-      setSelectedModel(activeConversation.model);
+      const m = activeConversation.model;
+      setSelectedModel(m);
+      // CRITICAL: set provider flags so routing works on page load / refresh
+      const entry = allModels.find((x) => x.name === m);
+      setUsePuter(entry?.provider === "cloud");
+      setUseKimi(entry?.provider === "kimi");
     } else if (allModels.length > 0 && !selectedModel) {
       setSelectedModel(allModels[0].name);
     }
@@ -239,9 +247,11 @@ export default function Chat() {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // ── Kimi K2 path — HuggingFace Router or Moonshot API ───────────────────
+    // ── Route by model provider — derive from model entry, NOT from potentially-stale state ──
     const activeModelEntry = allModels.find((m) => m.name === selectedModel);
-    if (useKimi && activeModelEntry && activeModelEntry.provider === "kimi") {
+
+    // ── Kimi K2 path — HuggingFace Router or Moonshot API ───────────────────
+    if (activeModelEntry?.provider === "kimi") {
       try {
         const response = await fetch(`${BASE}/api/kimi/chat/stream`, {
           method: "POST",
@@ -289,7 +299,7 @@ export default function Chat() {
     }
 
     // ── Puter.js cloud AI path ───────────────────────────────────────────────
-    if (usePuter && activeModelEntry && activeModelEntry.provider === "cloud") {
+    if (activeModelEntry?.provider === "cloud") {
       try {
         if (typeof puter === "undefined") {
           throw new Error("Puter.js not loaded — make sure the script tag is present in index.html");
@@ -391,6 +401,51 @@ export default function Chat() {
 
   const handleStopStream = () => {
     abortRef.current?.abort();
+  };
+
+  // ── Voice Input via Web Speech API ─────────────────────────────────────────
+  const handleVoiceToggle = () => {
+    const SpeechRecognition =
+      (window as unknown as { SpeechRecognition?: typeof window.SpeechRecognition; webkitSpeechRecognition?: typeof window.SpeechRecognition }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: typeof window.SpeechRecognition }).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Voice input is not supported in this browser. Try Chrome or Edge.");
+      return;
+    }
+
+    if (voiceActive && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setVoiceActive(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognitionRef.current = recognition;
+
+    recognition.onstart = () => setVoiceActive(true);
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = Array.from(event.results)
+        .map((r) => r[0].transcript)
+        .join("");
+      setInput(transcript);
+    };
+
+    recognition.onend = () => {
+      setVoiceActive(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onerror = () => {
+      setVoiceActive(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.start();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -835,11 +890,24 @@ export default function Chat() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={isStreaming ? "AI is responding..." : "Query NEXUS_OS..."}
+                  placeholder={voiceActive ? "🎙 Listening..." : isStreaming ? "AI is responding..." : "Query NEXUS_OS..."}
                   className="pr-24 h-12 bg-card border-card-border focus-visible:ring-primary font-mono text-sm"
                   disabled={isStreaming}
                 />
                 <div className="absolute right-1 top-1 flex gap-1">
+                  {/* Voice input button */}
+                  {!isStreaming && (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant={voiceActive ? "destructive" : "ghost"}
+                      className="h-10 w-10"
+                      onClick={handleVoiceToggle}
+                      title={voiceActive ? "Stop recording" : "Voice input"}
+                    >
+                      {voiceActive ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                    </Button>
+                  )}
                   {isStreaming ? (
                     <Button
                       type="button"

@@ -9,7 +9,7 @@
 import { Router, type Request, type Response } from "express";
 import {
   streamKimi,
-  isKimiConfigured,
+  getKimiConfig,
   KIMI_HF_MODEL,
   MOONSHOT_API_KEY,
   type KimiMessage,
@@ -22,7 +22,7 @@ const router = Router();
 
 /** GET /api/kimi/status */
 router.get("/kimi/status", (_req: Request, res: Response) => {
-  const cfg = isKimiConfigured();
+  const cfg = getKimiConfig();
   res.json({
     configured: cfg.ok,
     via: cfg.via,
@@ -44,7 +44,7 @@ router.post("/kimi/chat/stream", async (req: Request, res: Response) => {
     return;
   }
 
-  const cfg = isKimiConfigured();
+  const cfg = getKimiConfig();
   if (!cfg.ok) {
     res.status(503).json({
       error: "Kimi K2 not available",
@@ -149,7 +149,7 @@ router.post("/kimi/chat", async (req: Request, res: Response) => {
     content?: string;
   };
 
-  const cfg = isKimiConfigured();
+  const cfg = getKimiConfig();
   if (!cfg.ok) {
     res.status(503).json({ error: "Kimi K2 not available", reason: cfg.reason });
     return;

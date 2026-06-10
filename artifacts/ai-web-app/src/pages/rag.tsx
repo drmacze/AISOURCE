@@ -91,27 +91,59 @@ export default function Rag() {
     uploadMutation.mutate({ data: { title: uploadTitle, content: uploadContent } });
   };
 
-  // Auto-upload file directly (no dialog needed)
+  // Upload any file — uses multipart endpoint for PDF/DOCX, JSON endpoint for text
   const uploadFile = useCallback(
-    (file: File) => {
+    async (file: File) => {
       if (!file) return;
-      // Only accept text files
-      const accepted = file.type.startsWith("text/") ||
-        file.name.endsWith(".txt") || file.name.endsWith(".md") ||
-        file.name.endsWith(".csv") || file.name.endsWith(".json");
+
+      const ext = file.name.split(".").pop()?.toLowerCase() || "";
+      const isBinary = ["pdf", "docx"].includes(ext) ||
+        file.type === "application/pdf" ||
+        file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+      const accepted = isBinary ||
+        file.type.startsWith("text/") ||
+        ["txt", "md", "csv", "json"].includes(ext);
+
       if (!accepted) {
         setDragStatus("error");
-        setDragMsg(`Unsupported file type: ${file.name}. Use .txt, .md, .csv`);
-        setTimeout(() => { setDragStatus("idle"); setDragMsg(""); }, 3000);
+        setDragMsg(`Unsupported: ${file.name}. Allowed: PDF, DOCX, TXT, MD, CSV, JSON`);
+        setTimeout(() => { setDragStatus("idle"); setDragMsg(""); }, 4000);
         return;
       }
+
       setDragStatus("uploading");
-      setDragMsg(`Reading ${file.name}...`);
+      setDragMsg(`Processing ${file.name}...`);
+
+      if (isBinary) {
+        // Use multipart upload — server extracts text from PDF/DOCX
+        const formData = new FormData();
+        formData.append("file", file);
+        try {
+          const res = await fetch(`${API_BASE}/api/documents/upload`, {
+            method: "POST",
+            body: formData,
+          });
+          const data = await res.json() as { title?: string; chunkCount?: number; wordCount?: number; error?: string };
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          setDragStatus("done");
+          setDragMsg(`✅ "${data.title || file.name}" — ${data.wordCount?.toLocaleString() ?? "?"} words, ${data.chunkCount} chunks`);
+          queryClient.invalidateQueries({ queryKey: getListDocumentsQueryKey() });
+          setTimeout(() => { setDragStatus("idle"); setDragMsg(""); }, 4000);
+        } catch (err) {
+          setDragStatus("error");
+          setDragMsg(`Error: ${String(err)}`);
+          setTimeout(() => { setDragStatus("idle"); setDragMsg(""); }, 4000);
+        }
+        return;
+      }
+
+      // Text files — read client-side and use JSON endpoint
       const reader = new FileReader();
       reader.onload = (ev) => {
         const content = ev.target?.result as string;
         const title = file.name.replace(/\.[^/.]+$/, "");
-        setDragMsg(`Uploading "${title}"...`);
+        setDragMsg(`Indexing "${title}"...`);
         uploadMutation.mutate(
           { data: { title, content } },
           {
@@ -135,11 +167,14 @@ export default function Rag() {
       };
       reader.readAsText(file);
     },
-    [uploadMutation]
+    [uploadMutation, queryClient]
   );
 
-  // Open dialog with file content for review before upload
+  // Open dialog with file content for review before upload (text files only)
   const previewFile = useCallback((file: File) => {
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const isBinary = ["pdf", "docx"].includes(ext);
+    if (isBinary) { uploadFile(file); return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       const content = ev.target?.result as string;
@@ -148,7 +183,7 @@ export default function Rag() {
       setIsUploadOpen(true);
     };
     reader.readAsText(file);
-  }, []);
+  }, [uploadFile]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
@@ -201,7 +236,7 @@ export default function Rag() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold font-sans tracking-tight mb-1.5">Knowledge Base</h1>
           <p className="text-muted-foreground font-mono text-sm">
-            RAG · BM25 search · Context injection · URL import
+            RAG · Vector search (HF embeddings) · BM25 fallback · PDF/DOCX parsing · URL import
           </p>
         </div>
         <div className="flex gap-2 flex-wrap sm:flex-nowrap">
@@ -347,7 +382,7 @@ export default function Rag() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".txt,.md,.csv,.json"
+              accept=".pdf,.docx,.txt,.md,.csv,.json"
               className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFile(f); e.target.value = ""; }}
             />
@@ -380,7 +415,7 @@ export default function Rag() {
                   <span className="text-primary font-medium underline">click to browse</span>
                 </p>
                 <p className="text-xs font-mono text-muted-foreground/60 mt-1">
-                  Supports .txt · .md · .csv · .json — uploads and indexes instantly
+                  PDF · DOCX · TXT · MD · CSV · JSON — real text extraction + vector indexing
                 </p>
               </>
             )}

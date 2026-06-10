@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import {
   trainingDatasetsTable,
@@ -15,7 +15,7 @@ import {
   GetTrainingDatasetParams,
   GetTrainingJobParams,
 } from "@workspace/api-zod";
-import { createOllamaModelfile, listOllamaModels } from "../ollama";
+import { OLLAMA_HOST, listOllamaModels } from "../ollama";
 
 const router: IRouter = Router();
 
@@ -58,6 +58,38 @@ router.get("/training-datasets/:id", async (req, res) => {
     .where(eq(trainingSamplesTable.datasetId, id))
     .orderBy(trainingSamplesTable.createdAt);
   res.json({ ...ds, samples });
+});
+
+/** GET /training-datasets/:id/export — Download dataset as JSONL (one JSON object per line) */
+router.get("/training-datasets/:id/export", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+
+  const [ds] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, id));
+  if (!ds) { res.status(404).json({ error: "Dataset not found" }); return; }
+
+  const samples = await db
+    .select()
+    .from(trainingSamplesTable)
+    .where(eq(trainingSamplesTable.datasetId, id))
+    .orderBy(trainingSamplesTable.createdAt);
+
+  // OpenAI fine-tuning compatible JSONL format
+  const lines = samples
+    .filter((s) => s.input && s.output)
+    .map((s) => JSON.stringify({
+      messages: [
+        { role: "system", content: `You are a specialized assistant trained on ${ds.name}.` },
+        { role: "user", content: s.input },
+        { role: "assistant", content: s.output },
+      ],
+      metadata: s.metadata ?? undefined,
+    }));
+
+  const filename = `${ds.name.replace(/[^a-z0-9_-]/gi, "_")}_${id}.jsonl`;
+  res.setHeader("Content-Type", "application/x-ndjson");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(lines.join("\n") + "\n");
 });
 
 router.post("/training-datasets/:id/samples", async (req, res) => {
@@ -308,6 +340,11 @@ router.delete("/ollama-models/:name", async (req, res) => {
 type ModelRow = { id: number; name: string; architecture?: string | null; description?: string | null };
 type DatasetRow = { id: number; name: string; taskType: string; description?: string | null };
 
+/**
+ * Build and register an Ollama custom model from training samples.
+ * Uses Ollama /api/create with stream:true for real progress tracking.
+ * No fake timeouts, no random metrics — everything is derived from actual operations.
+ */
 async function runOllamaTraining(
   jobId: number,
   model: ModelRow,
@@ -315,16 +352,11 @@ async function runOllamaTraining(
 ): Promise<void> {
   await db
     .update(trainingJobsTable)
-    .set({ status: "running", startedAt: new Date() })
-    .where(eq(trainingJobsTable.id, jobId));
-
-  const [job] = await db
-    .select()
-    .from(trainingJobsTable)
+    .set({ status: "running", startedAt: new Date(), progress: 0.05 })
     .where(eq(trainingJobsTable.id, jobId));
 
   try {
-    // Fetch training samples
+    // 1. Load training samples
     const samples = await db
       .select()
       .from(trainingSamplesTable)
@@ -335,80 +367,173 @@ async function runOllamaTraining(
       .map((s) => ({ input: s.input, output: s.output as string }));
 
     if (trainSamples.length === 0) {
-      throw new Error("No valid samples (input+output) found in dataset");
+      throw new Error("No valid samples (input + output pairs) found in dataset");
     }
 
-    // Determine base model from architecture or default
-    const baseModel = model.architecture?.includes(":") ? model.architecture : "tinyllama";
+    // 2. Check cancellation before heavy work
+    const [preCheck] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
+    if (preCheck.status === "failed") return;
 
-    // Build system prompt from dataset metadata
+    // 3. Determine base model
+    const installed = await listOllamaModels();
+    const installedNames = installed.map((m) => m.name);
+    const preferredBase = model.architecture?.includes(":") ? model.architecture : "tinyllama";
+    const baseModel =
+      installedNames.find((n) => n.startsWith(preferredBase.split(":")[0])) ||
+      installedNames[0] ||
+      "tinyllama:latest";
+
+    // 4. Build system prompt
     const taskSystemPrompts: Record<string, string> = {
-      qa: "You are an expert question-answering assistant. Answer questions accurately and concisely based on the training examples provided.",
-      generation: "You are a creative text generation assistant. Generate high-quality text following the style and patterns in the training examples.",
-      summarization: "You are an expert summarizer. Create concise, accurate summaries that capture the key information.",
-      classification: "You are a precise classification assistant. Classify inputs accurately based on the training examples.",
-      translation: "You are a translation expert. Provide accurate, natural-sounding translations.",
+      qa:             "You are an expert question-answering assistant. Answer questions accurately and concisely.",
+      generation:     "You are a creative text generation assistant. Generate high-quality text following the patterns in the training examples.",
+      summarization:  "You are an expert summarizer. Create concise, accurate summaries that capture key information.",
+      classification: "You are a precise classification assistant. Classify inputs accurately.",
+      translation:    "You are a translation expert. Provide accurate, natural-sounding translations.",
     };
-    const systemPrompt =
+    const taskPrompt =
       taskSystemPrompts[dataset.taskType] ||
-      `You are a specialized AI assistant trained on ${dataset.name}. ${dataset.description || ""}`;
+      `You are a specialized AI assistant trained on "${dataset.name}". ${dataset.description || ""}`;
 
-    // Simulate epoch-by-epoch training progress while Ollama creates the model
-    const totalEpochs = job.epochs;
-    const epochDuration = Math.max(3000, Math.min(8000, trainSamples.length * 200));
+    // Embed up to 20 examples directly in the system prompt (Ollama Modelfile context)
+    const exampleBlock = trainSamples
+      .slice(0, 20)
+      .map((s, i) => `Example ${i + 1}:\nInput: ${s.input}\nExpected: ${s.output}`)
+      .join("\n\n");
+    const systemPrompt = `${taskPrompt}\n\n--- Training Examples ---\n${exampleBlock}`;
 
-    // Check if job was cancelled before starting
-    const [currentJob] = await db
-      .select()
-      .from(trainingJobsTable)
-      .where(eq(trainingJobsTable.id, jobId));
-    if (currentJob.status === "failed") return;
-
-    // Update progress through epochs while creating the model
-    for (let epoch = 1; epoch <= totalEpochs; epoch++) {
-      // Check for cancellation
-      const [checkJob] = await db
-        .select()
-        .from(trainingJobsTable)
-        .where(eq(trainingJobsTable.id, jobId));
-      if (checkJob.status === "failed") return;
-
-      await new Promise((r) => setTimeout(r, epochDuration));
-
-      const progress = epoch / totalEpochs;
-      // Realistic loss curve: starts high, decreases with noise
-      const loss = 2.8 * Math.exp(-progress * 2.5) + 0.1 + (Math.random() - 0.5) * 0.05;
-      const accuracy = 1 - Math.exp(-progress * 3) * 0.9 + (Math.random() - 0.5) * 0.02;
-
-      await db
-        .update(trainingJobsTable)
-        .set({
-          currentEpoch: epoch,
-          progress: epoch < totalEpochs ? progress * 0.9 : 0.95,
-          loss,
-          accuracy: Math.min(Math.max(accuracy, 0), 1),
-          updatedAt: new Date(),
-        })
-        .where(eq(trainingJobsTable.id, jobId));
+    if (systemPrompt.length > 8192) {
+      throw new Error(
+        `Combined system prompt exceeds 8 192 characters (${systemPrompt.length}). Reduce samples or shorten descriptions.`
+      );
     }
 
-    // Create the actual Ollama custom model via Modelfile
+    await db
+      .update(trainingJobsTable)
+      .set({ progress: 0.15, currentEpoch: 0, updatedAt: new Date() })
+      .where(eq(trainingJobsTable.id, jobId));
+
+    // 5. Create the Ollama model with stream:true — track REAL progress
     const sanitizedName = model.name
       .toLowerCase()
       .replace(/[^a-z0-9_.-]/g, "_")
       .replace(/_{2,}/g, "_");
     const ollamaModelName = `nexus-${sanitizedName}`;
 
-    try {
-      await createOllamaModelfile(ollamaModelName, baseModel, systemPrompt, trainSamples);
-    } catch (err) {
-      if (err instanceof OllamaError && err.code === "BAD_INPUT") {
-        console.error("[Training] System prompt too long:", err.message);
-      }
-      throw err;
+    const createResponse = await fetch(`${OLLAMA_HOST}/api/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: ollamaModelName,
+        from: baseModel,
+        system: systemPrompt,
+        parameters: { temperature: 0.7, top_p: 0.9, num_predict: 512 },
+        stream: true,
+      }),
+      signal: AbortSignal.timeout(300_000),
+    });
+
+    if (!createResponse.ok || !createResponse.body) {
+      const errText = await createResponse.text().catch(() => `HTTP ${createResponse.status}`);
+      throw new Error(`Ollama model creation failed: ${errText}`);
     }
 
-    // Mark job complete
+    // Parse streaming progress from Ollama /api/create
+    const reader = createResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const evt = JSON.parse(trimmed) as {
+            status?: string;
+            total?: number;
+            completed?: number;
+          };
+          // Map real Ollama progress to job progress (0.15 → 0.85 range)
+          if (evt.total && evt.completed) {
+            const ratio = evt.completed / evt.total;
+            const mapped = 0.15 + ratio * 0.7; // 15% → 85%
+            await db
+              .update(trainingJobsTable)
+              .set({ progress: Math.min(mapped, 0.85), updatedAt: new Date() })
+              .where(eq(trainingJobsTable.id, jobId));
+          }
+        } catch {
+          // skip malformed JSON lines
+        }
+      }
+
+      // Check for cancellation mid-stream
+      const [mid] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
+      if (mid.status === "failed") {
+        await reader.cancel();
+        return;
+      }
+    }
+
+    await db
+      .update(trainingJobsTable)
+      .set({ progress: 0.88, updatedAt: new Date() })
+      .where(eq(trainingJobsTable.id, jobId));
+
+    console.log(`[Training] ✅ Ollama model created: ${ollamaModelName} (base: ${baseModel})`);
+
+    // 6. Validation pass — run up to 5 samples through the real model and check responses
+    const validationSamples = trainSamples.slice(0, 5);
+    let correctCount = 0;
+
+    for (const sample of validationSamples) {
+      // Check cancellation
+      const [check] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
+      if (check.status === "failed") return;
+
+      try {
+        const inferRes = await fetch(`${OLLAMA_HOST}/api/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: ollamaModelName,
+            prompt: sample.input,
+            stream: false,
+            options: { temperature: 0, num_predict: 100 },
+          }),
+          signal: AbortSignal.timeout(30_000),
+        });
+
+        if (inferRes.ok) {
+          const inferData = await inferRes.json() as { response?: string };
+          const response = (inferData.response || "").toLowerCase();
+          // Real accuracy: check if any key terms from expected output appear in response
+          const expectedTerms = sample.output.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+          const matchedTerms = expectedTerms.filter((t) => response.includes(t));
+          const sampleAccuracy = expectedTerms.length > 0 ? matchedTerms.length / expectedTerms.length : 0;
+          if (sampleAccuracy > 0.3) correctCount++;
+        }
+      } catch {
+        // validation error for one sample — non-fatal
+      }
+    }
+
+    const validatedAccuracy = validationSamples.length > 0
+      ? correctCount / validationSamples.length
+      : null;
+
+    await db
+      .update(trainingJobsTable)
+      .set({ progress: 0.95, updatedAt: new Date() })
+      .where(eq(trainingJobsTable.id, jobId));
+
+    // 7. Mark complete with REAL metrics (validation-based accuracy, no random numbers)
     await db
       .update(trainingJobsTable)
       .set({
@@ -416,22 +541,32 @@ async function runOllamaTraining(
         progress: 1,
         completedAt: new Date(),
         updatedAt: new Date(),
-        loss: 0.08 + Math.random() * 0.05,
-        accuracy: 0.92 + Math.random() * 0.06,
+        // Loss not applicable for Modelfile-based training (no gradient descent)
+        loss: null,
+        accuracy: validatedAccuracy,
       })
       .where(eq(trainingJobsTable.id, jobId));
 
-    // Activate the model and record its Ollama name
+    // 8. Activate the model record
     await db
       .update(aiModelsTable)
       .set({
         status: "active",
-        description: `${model.description || ""} | Ollama: ${ollamaModelName}`.trim(),
+        description: [
+          model.description,
+          `Ollama model: ${ollamaModelName}`,
+          `Samples: ${trainSamples.length}`,
+          validatedAccuracy !== null ? `Validation accuracy: ${(validatedAccuracy * 100).toFixed(1)}%` : null,
+        ].filter(Boolean).join(" | "),
         updatedAt: new Date(),
       })
       .where(eq(aiModelsTable.id, model.id));
+
+    console.log(
+      `[Training] Job ${jobId} complete — model: ${ollamaModelName}, samples: ${trainSamples.length}, accuracy: ${validatedAccuracy !== null ? (validatedAccuracy * 100).toFixed(1) + "%" : "N/A"}`
+    );
   } catch (error) {
-    console.error(`Training job ${jobId} failed:`, error);
+    console.error(`[Training] Job ${jobId} failed:`, error);
     await db
       .update(trainingJobsTable)
       .set({

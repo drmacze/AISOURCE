@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 
 const app: Express = express();
 
@@ -82,6 +83,9 @@ app.get("/api/healthz", (_req, res) => {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api", router);
+
+// ─── Replit Object Storage (presigned upload + file serving) ─────────────────
+registerObjectStorageRoutes(app);
 
 // ─── 404 handler ─────────────────────────────────────────────────────────────
 app.use((_req, res) => {

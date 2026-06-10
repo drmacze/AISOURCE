@@ -9,8 +9,11 @@ export const documentsTable = pgTable("documents", {
   fileType: text("file_type"),
   size: integer("size"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow(),
   indexed: boolean("indexed").default(false).notNull(),
   chunkCount: integer("chunk_count").default(0).notNull(),
+  storageUrl: text("storage_url"),
+  storageObjectPath: text("storage_object_path"),
 });
 
 export const insertDocumentSchema = createInsertSchema(documentsTable).omit({ id: true, createdAt: true, indexed: true, chunkCount: true });
