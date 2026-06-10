@@ -169,7 +169,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto pb-16">
           {children}
         </div>
       </main>
