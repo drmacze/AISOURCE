@@ -238,7 +238,8 @@ export const CLOUD_MODELS: CloudModelEntry[] = [
 
 function getDiskStats(): { usedBytes: number; freeBytes: number; totalBytes: number } {
   try {
-    const out = execSync("df -B1 / --output=used,avail,size 2>/dev/null | tail -1", { encoding: "utf8" }).trim();
+    const modelPath = process.env.OLLAMA_MODELS || "/home/runner/workspace/.ollama-models";
+    const out = execSync(`df -B1 "${modelPath}" --output=used,avail,size 2>/dev/null | tail -1`, { encoding: "utf8" }).trim();
     const parts = out.split(/\s+/);
     if (parts.length >= 3) {
       return {
