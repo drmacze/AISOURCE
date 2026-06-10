@@ -128,9 +128,13 @@ function StorageSettingsPanel({ apiBase }: { apiBase: string }) {
     refetchInterval: 30_000,
   });
 
-  const usedPct = storage?.disk
-    ? Math.round((storage.disk.usedBytes / (storage.disk.totalBytes || 1)) * 100)
+  const usedPctRaw = storage?.disk
+    ? (storage.disk.usedBytes / (storage.disk.totalBytes || 1)) * 100
     : 0;
+  const usedPct = usedPctRaw;
+  const usedPctDisplay = usedPctRaw < 1 && usedPctRaw > 0
+    ? usedPctRaw.toFixed(2)
+    : Math.round(usedPctRaw).toString();
 
   async function handleApply() {
     if (!draftPath.trim()) return;
@@ -204,7 +208,7 @@ function StorageSettingsPanel({ apiBase }: { apiBase: string }) {
                   {storage.disk.totalBytes > 0 && (
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between text-xs font-mono text-muted-foreground">
-                        <span>Disk usage ({usedPct}%)</span>
+                        <span>Disk usage ({usedPctDisplay}%)</span>
                         <span>{formatDiskBytes(storage.disk.usedBytes)} / {formatDiskBytes(storage.disk.totalBytes)}</span>
                       </div>
                       <div className="h-2 rounded-full bg-muted overflow-hidden">

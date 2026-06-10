@@ -517,6 +517,7 @@ router.post("/models/pull", async (req: Request, res: Response) => {
 
     if (!res.writableEnded) {
       if (succeeded || lastStatus === "success") {
+        invalidateOllamaModelCache();
         sse(res, { type: "success", text: `✅ ${modelName} ready — use it in Chat, API, and Training Hub` });
         sse(res, { type: "done", success: true, model: modelName });
       } else {
