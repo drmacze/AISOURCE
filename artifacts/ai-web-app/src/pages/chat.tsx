@@ -331,11 +331,12 @@ export default function Chat() {
         }
       } finally {
         setIsStreaming(false);
-        setStreamingText("");
         setStreamPhase("init");
         abortRef.current = null;
         queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(activeId) });
         queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+        // Keep streaming text visible briefly while the message is saved to the DB
+        setTimeout(() => setStreamingText(""), 800);
       }
       return;
     }
@@ -366,11 +367,12 @@ export default function Chat() {
         setStreamPhase("tokens");
       } finally {
         setIsStreaming(false);
-        setStreamingText("");
         setStreamPhase("init");
         abortRef.current = null;
         queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(activeId) });
         queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+        // Keep streaming text visible briefly while the message is saved to the DB
+        setTimeout(() => setStreamingText(""), 800);
       }
       return;
     }
@@ -433,11 +435,12 @@ export default function Chat() {
       }
     } finally {
       setIsStreaming(false);
-      setStreamingText("");
       setStreamPhase("init");
       abortRef.current = null;
       queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(activeId) });
       queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+      // Keep streaming text visible briefly while the message is saved to the DB
+      setTimeout(() => setStreamingText(""), 800);
     }
   };
 

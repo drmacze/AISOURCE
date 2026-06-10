@@ -22,7 +22,7 @@ import { generateOllamaResponse, isOllamaOnline } from "../ollama";
 const router: IRouter = Router();
 
 const HF_BASE = "https://router.huggingface.co/hf-inference/models";
-const TIMEOUT_MS = 45_000;
+const TIMEOUT_MS = 25_000;
 
 async function hfPost(model: string, body: object): Promise<Response> {
   const token = getHFToken();

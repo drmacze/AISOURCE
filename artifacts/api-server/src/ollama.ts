@@ -99,6 +99,18 @@ async function withRetry<T>(
 let ollamaServerStarted = false;
 let ollamaPid: number | null = null;
 
+// ─── In-memory cache for Ollama model list (avoids repeated slow calls) ──────
+let cachedModels: Array<{
+  name: string;
+  size: number;
+  modified: string;
+  parameterSize: string;
+  quantization: string;
+  family: string;
+}> | null = null;
+let cachedModelsAt = 0;
+const MODEL_CACHE_TTL_MS = 30_000;
+
 function killStaleOllama() {
   try {
     execSync("pkill -f 'ollama serve'", { stdio: "ignore" });
@@ -208,6 +220,12 @@ async function resolveModel(model: string): Promise<string> {
   return names[0];
 }
 
+// ─── Invalidate model cache (call after pull/delete/create) ────────────────
+export function invalidateOllamaModelCache(): void {
+  cachedModels = null;
+  cachedModelsAt = 0;
+}
+
 // ─── Generate (non-streaming) ──────────────────────────────────────────────────
 
 export async function generateOllamaResponse(
@@ -310,7 +328,7 @@ export async function streamOllamaResponse(
       if (isHFConfigured()) {
         console.log("[DLavie OS] Ollama offline — streaming via HuggingFace");
         let fullHFText = "";
-        for await (const token of streamHFResponse(fullPrompt, "mistralai/Mistral-7B-Instruct-v0.3", { maxTokens: 512 })) {
+        for await (const token of streamHFResponse(fullPrompt, "mistralai/Mistral-7B-Instruct-v0.3", { maxTokens: 256 })) {
           fullHFText += token;
           safeWrite({ token, done: false, source: "huggingface" });
         }
@@ -394,7 +412,7 @@ async function generateFallbackResponse(input: string): Promise<string> {
     const { generateHFResponse, isHFConfigured } = await import("./huggingface");
     if (isHFConfigured()) {
       console.log("[DLavie OS] Ollama offline — falling back to HuggingFace Inference API");
-      return await generateHFResponse(input, "mistralai/Mistral-7B-Instruct-v0.3", { maxTokens: 512 });
+      return await generateHFResponse(input, "mistralai/Mistral-7B-Instruct-v0.3", { maxTokens: 256 });
     }
   } catch (hfErr) {
     console.warn("[DLavie OS] HuggingFace fallback failed:", hfErr);
@@ -453,8 +471,13 @@ export async function listOllamaModels(): Promise<
     family: string;
   }>
 > {
+  if (cachedModels && Date.now() - cachedModelsAt < MODEL_CACHE_TTL_MS) {
+    return cachedModels;
+  }
   try {
-    const response = await withRetry(() => fetch(`${OLLAMA_HOST}/api/tags`));
+    const response = await withRetry(() =>
+      fetch(`${OLLAMA_HOST}/api/tags`, { signal: AbortSignal.timeout(5_000) })
+    );
     if (!response.ok) {
       throw new OllamaError(
         "BAD_RESPONSE",
@@ -474,7 +497,7 @@ export async function listOllamaModels(): Promise<
         };
       }>;
     };
-    return (data.models || []).map((m) => ({
+    const result = (data.models || []).map((m) => ({
       name: m.name,
       size: m.size,
       modified: m.modified_at,
@@ -482,6 +505,9 @@ export async function listOllamaModels(): Promise<
       quantization: m.details?.quantization_level || "unknown",
       family: m.details?.family || "unknown",
     }));
+    cachedModels = result;
+    cachedModelsAt = Date.now();
+    return result;
   } catch (err) {
     if (err instanceof OllamaError) throw err;
     const code = classifyFetchError(err);
@@ -504,6 +530,7 @@ export async function deleteOllamaModel(model: string): Promise<void> {
     const code: OllamaErrorCode = status === 404 ? "NOT_FOUND" : "BAD_RESPONSE";
     throw new OllamaError(code, `Failed to delete model "${model}": HTTP ${status}`);
   }
+  invalidateOllamaModelCache();
 }
 
 // ─── Create modelfile ─────────────────────────────────────────────────────────
@@ -558,6 +585,7 @@ export async function createOllamaModelfile(
     }
 
     console.log(`✅ Created Ollama custom model: ${modelName} (based on ${resolvedBase})`);
+  invalidateOllamaModelCache();
   } catch (error) {
     if (error instanceof OllamaError) throw error;
     console.error("Model creation error:", error);
