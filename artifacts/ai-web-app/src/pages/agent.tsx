@@ -416,57 +416,83 @@ export default function AgentPage() {
 
   return (
     <div className="flex h-full flex-col bg-slate-950">
-      {/* Header */}
-      <div className="flex-shrink-0 border-b border-slate-800 px-6 py-4 bg-slate-900/50">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 flex items-center justify-center">
-              <Bot className="w-5 h-5 text-emerald-400" />
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div className="flex-shrink-0 border-b border-slate-800 px-4 py-3 bg-slate-900/50">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 flex-shrink-0 rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 flex items-center justify-center">
+              <Bot className="w-4 h-4 text-emerald-400" />
             </div>
-            <div>
-              <h1 className="text-base font-semibold text-slate-100 font-[Syne]">AI Developer Agent</h1>
-              <p className="text-xs text-slate-500">Agen otonom untuk membangun &amp; melatih model AI open source</p>
+            <div className="min-w-0">
+              <h1 className="text-sm font-semibold text-slate-100 font-[Syne] truncate">AI Developer Agent</h1>
+              <p className="text-xs text-slate-500 hidden sm:block">Agen otonom untuk membangun &amp; melatih model AI</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             <div className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
+              "flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap",
               status === "running" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-              status === "done" ? "bg-sky-500/10 text-sky-400 border border-sky-500/20" :
-              status === "error" ? "bg-red-500/10 text-red-400 border border-red-500/20" :
+              status === "done"    ? "bg-sky-500/10 text-sky-400 border border-sky-500/20" :
+              status === "error"   ? "bg-red-500/10 text-red-400 border border-red-500/20" :
               "bg-slate-800 text-slate-500 border border-slate-700"
             )}>
               {status === "running" && <Loader2 className="w-3 h-3 animate-spin" />}
-              {status === "done" && <CheckCircle2 className="w-3 h-3" />}
-              {status === "error" && <XCircle className="w-3 h-3" />}
-              {status === "idle" && <Bot className="w-3 h-3" />}
-              {status === "running" ? "Berjalan…" : status === "done" ? `Selesai (${totalSteps} langkah)` : status === "error" ? "Error" : "Siap"}
+              {status === "done"    && <CheckCircle2 className="w-3 h-3" />}
+              {status === "error"   && <XCircle className="w-3 h-3" />}
+              {status === "idle"    && <Bot className="w-3 h-3" />}
+              <span className="hidden xs:inline">
+                {status === "running" ? "Berjalan…" :
+                 status === "done"    ? `Selesai (${totalSteps})` :
+                 status === "error"   ? "Error" : "Siap"}
+              </span>
             </div>
             {(steps.length > 0 || summary) && (
               <button
                 onClick={reset}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-600 transition-colors"
+                className="p-1.5 rounded-full text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-600 transition-colors"
+                title="Reset"
               >
-                <Trash2 className="w-3 h-3" /> Reset
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
         </div>
       </div>
 
+      {/* ── Mobile preset chips (horizontal scroll) ────────── */}
+      <div className="md:hidden flex-shrink-0 border-b border-slate-800 bg-slate-900/30">
+        <div className="flex gap-2 px-3 py-2.5 overflow-x-auto scrollbar-none">
+          {PRESETS.map((p) => (
+            <button
+              key={p.label}
+              onClick={() => { setTask(p.task); textareaRef.current?.focus(); }}
+              disabled={status === "running"}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 bg-slate-800/60 hover:bg-slate-700/60 hover:border-slate-600 disabled:opacity-40 transition-all text-xs text-slate-400 whitespace-nowrap"
+            >
+              <p.icon className={cn("w-3 h-3", p.color)} />
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Body: sidebar (desktop) + main ─────────────────── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: Presets */}
-        <div className="w-56 flex-shrink-0 border-r border-slate-800 bg-slate-900/30 flex flex-col">
-          <div className="px-4 py-3 border-b border-slate-800">
+
+        {/* Desktop-only sidebar */}
+        <div className="hidden md:flex w-52 flex-shrink-0 border-r border-slate-800 bg-slate-900/30 flex-col">
+          <div className="px-4 py-2.5 border-b border-slate-800">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Preset Task</p>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
             {PRESETS.map((p) => (
               <button
                 key={p.label}
                 onClick={() => { setTask(p.task); textareaRef.current?.focus(); }}
                 disabled={status === "running"}
-                className="w-full text-left flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-slate-800 bg-slate-900/50 hover:bg-slate-800/60 hover:border-slate-700 transition-all disabled:opacity-40 group"
+                className="w-full text-left flex items-start gap-2 px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900/50 hover:bg-slate-800/60 hover:border-slate-700 transition-all disabled:opacity-40 group"
               >
                 <p.icon className={cn("w-3.5 h-3.5 flex-shrink-0 mt-0.5", p.color)} />
                 <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors leading-snug">
@@ -477,22 +503,23 @@ export default function AgentPage() {
           </div>
         </div>
 
-        {/* Right: Main area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Main area */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+
           {/* Steps timeline */}
-          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2.5">
+          <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 space-y-2">
             {steps.length === 0 && status === "idle" && (
-              <div className="flex flex-col items-center justify-center h-full text-center py-16">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
-                  <Sparkles className="w-7 h-7 text-emerald-400" />
+              <div className="flex flex-col items-center justify-center h-full text-center py-10 px-4">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 flex items-center justify-center mb-3">
+                  <Sparkles className="w-6 h-6 text-emerald-400" />
                 </div>
-                <h2 className="text-lg font-semibold text-slate-300 font-[Syne]">DLavie Agent</h2>
-                <p className="mt-2 text-sm text-slate-500 max-w-sm">
-                  Pilih preset di kiri atau ketik tugas sendiri. Agent akan berpikir dan bertindak secara otomatis untuk membangun model AI.
+                <h2 className="text-base font-semibold text-slate-300 font-[Syne]">DLavie Agent</h2>
+                <p className="mt-1.5 text-xs text-slate-500 max-w-xs">
+                  Pilih preset di atas atau ketik tugas sendiri. Agent akan berpikir dan bertindak otomatis.
                 </p>
-                <div className="mt-6 flex flex-wrap justify-center gap-2">
+                <div className="mt-4 flex flex-wrap justify-center gap-1.5">
                   {["Buat dataset", "Latih model", "Audit sistem"].map((hint) => (
-                    <span key={hint} className="px-3 py-1.5 rounded-full bg-slate-800 text-xs text-slate-500 border border-slate-700">
+                    <span key={hint} className="px-2.5 py-1 rounded-full bg-slate-800 text-xs text-slate-500 border border-slate-700">
                       {hint}
                     </span>
                   ))}
@@ -506,20 +533,18 @@ export default function AgentPage() {
               ))}
             </AnimatePresence>
 
-            {/* Live current step buffer */}
+            {/* Live step buffer */}
             {status === "running" && currentStepBuf.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="rounded-lg border border-emerald-900/40 bg-emerald-950/10 overflow-hidden"
               >
-                <div className="px-3.5 py-2.5 flex items-center gap-2">
-                  <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                  <span className="text-xs text-emerald-400 font-medium">
-                    Langkah {currentStepNum} — sedang berjalan…
-                  </span>
+                <div className="px-3 py-2 flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin flex-shrink-0" />
+                  <span className="text-xs text-emerald-400 font-medium">Langkah {currentStepNum} — sedang berjalan…</span>
                 </div>
-                <div className="px-4 pb-4 space-y-3 border-t border-emerald-900/30 pt-3">
+                <div className="px-3 pb-3 space-y-3 border-t border-emerald-900/30 pt-3">
                   {currentStepBuf.map((ev, i) => (
                     <EventCard key={i} event={ev} />
                   ))}
@@ -528,7 +553,7 @@ export default function AgentPage() {
             )}
 
             {status === "running" && currentStepBuf.length === 0 && steps.length === 0 && (
-              <div className="flex items-center gap-2 text-sm text-slate-500 py-4">
+              <div className="flex items-center gap-2 text-xs text-slate-500 py-4 px-1">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
                 Agent sedang mulai berpikir…
               </div>
@@ -540,14 +565,14 @@ export default function AgentPage() {
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="rounded-lg border border-sky-900/50 bg-sky-950/20 p-4"
+                  className="rounded-lg border border-sky-900/50 bg-sky-950/20 p-3.5"
                 >
                   <div className="flex items-center gap-2 mb-2">
-                    <CheckCircle2 className="w-4 h-4 text-sky-400" />
+                    <CheckCircle2 className="w-4 h-4 text-sky-400 flex-shrink-0" />
                     <span className="text-sm font-semibold text-sky-400">Tugas Selesai</span>
                     <span className="text-xs text-slate-500 ml-auto">{totalSteps} langkah</span>
                   </div>
-                  <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{summary}</p>
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{summary}</p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -555,48 +580,45 @@ export default function AgentPage() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input area */}
-          <div className="flex-shrink-0 border-t border-slate-800 bg-slate-900/50 p-4">
-            <div className="flex gap-3 items-end">
-              <div className="flex-1 relative">
-                <textarea
-                  ref={textareaRef}
-                  value={task}
-                  onChange={(e) => setTask(e.target.value)}
-                  onKeyDown={handleKey}
-                  disabled={status === "running"}
-                  placeholder="Deskripsikan tugas untuk Agent… (Ctrl+Enter untuk jalankan)"
-                  rows={3}
-                  className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 disabled:opacity-50 transition-all font-[Space_Mono] text-xs leading-relaxed"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                {status === "running" ? (
-                  <button
-                    onClick={stop}
-                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors text-sm font-medium"
-                  >
-                    <Square className="w-3.5 h-3.5" /> Stop
-                  </button>
-                ) : (
-                  <button
-                    onClick={run}
-                    disabled={!task.trim()}
-                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-sm font-medium"
-                  >
-                    <Play className="w-3.5 h-3.5" /> Jalankan
-                  </button>
-                )}
+          {/* ── Input area ───────────────────────────────────── */}
+          <div className="flex-shrink-0 border-t border-slate-800 bg-slate-900/50 p-3">
+            <textarea
+              ref={textareaRef}
+              value={task}
+              onChange={(e) => setTask(e.target.value)}
+              onKeyDown={handleKey}
+              disabled={status === "running"}
+              placeholder="Deskripsikan tugas untuk Agent… (Ctrl+Enter untuk jalankan)"
+              rows={3}
+              className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 disabled:opacity-50 transition-all leading-relaxed"
+            />
+            <div className="flex gap-2 mt-2">
+              {status === "running" ? (
                 <button
-                  onClick={() => { setTask(""); textareaRef.current?.focus(); }}
-                  disabled={status === "running"}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 disabled:opacity-40 transition-colors text-sm"
+                  onClick={stop}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors text-xs font-medium"
                 >
-                  <Send className="w-3.5 h-3.5" /> Bersihkan
+                  <Square className="w-3.5 h-3.5" /> Stop
                 </button>
-              </div>
+              ) : (
+                <button
+                  onClick={run}
+                  disabled={!task.trim()}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs font-medium"
+                >
+                  <Play className="w-3.5 h-3.5" /> Jalankan
+                </button>
+              )}
+              <button
+                onClick={() => { setTask(""); textareaRef.current?.focus(); }}
+                disabled={status === "running"}
+                className="px-3 py-2 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 disabled:opacity-40 transition-colors text-xs"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
+
         </div>
       </div>
     </div>

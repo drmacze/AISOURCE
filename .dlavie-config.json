@@ -1,4 +1,7 @@
 {
-  "updatedAt": "2026-06-10T13:28:15.500Z",
-  "secrets": {}
+  "updatedAt": "2026-06-10T16:55:45.513Z",
+  "secrets": {
+    "GITHUB_TOKEN": "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",
+    "HF_TOKEN": "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"
+  }
 }
