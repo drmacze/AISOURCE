@@ -20,6 +20,7 @@ import PromptsPage from "@/pages/prompts";
 import AnalyticsPage from "@/pages/analytics";
 import NotebookPage from "@/pages/notebook";
 import WebSearchPage from "@/pages/websearch";
+import AgentPage from "@/pages/agent";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -51,6 +52,7 @@ function Router() {
         <Route path="/settings" component={SettingsPage} />
         <Route path="/notebook" component={NotebookPage} />
         <Route path="/web-search" component={WebSearchPage} />
+        <Route path="/agent" component={AgentPage} />
         <Route path="/api-docs" component={ApiDocs} />
         <Route component={NotFound} />
       </Switch>

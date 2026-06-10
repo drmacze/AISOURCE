@@ -18,6 +18,7 @@ import authSessionRouter from "./auth-session";
 import toolsRouter from "./tools";
 import promptsRouter from "./prompts";
 import analyticsRouter from "./analytics";
+import agentRouter from "./agent";
 
 const router: IRouter = Router();
 
@@ -59,6 +60,9 @@ router.use(promptsRouter);
 
 // Analytics — real DB-backed metrics and charts
 router.use(analyticsRouter);
+
+// AI Developer Agent — autonomous ReAct agent for building/training models
+router.use(agentRouter);
 
 // Public API v1 — for external integrations (e.g. dlavie.vercel.app)
 router.use("/v1", v1Router);

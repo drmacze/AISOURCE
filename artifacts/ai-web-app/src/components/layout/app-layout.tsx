@@ -22,6 +22,7 @@ import {
   BookMarked,
   Search,
   FileText,
+  Bot,
   BookMarked as PromptIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -51,6 +52,7 @@ const NAV_GROUPS = [
   {
     label: "Training & Models",
     items: [
+      { href: "/agent",      label: "AI Agent",       icon: Bot,              color: "text-emerald-400" },
       { href: "/training",   label: "Training Hub",   icon: Network,          color: "text-orange-400" },
       { href: "/models",     label: "Models",         icon: Box,              color: "text-rose-400" },
     ],
