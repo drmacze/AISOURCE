@@ -19,6 +19,7 @@ declare global {
         id: number | "master";
         name: string;
         permissions: "read" | "write" | "admin";
+        defaultModel: string | null;
       };
     }
   }
@@ -42,10 +43,10 @@ export function extractRawKey(req: Request): string | null {
  */
 export async function resolveApiKey(
   rawKey: string
-): Promise<{ id: number | "master"; name: string; permissions: "read" | "write" | "admin" } | null> {
+): Promise<{ id: number | "master"; name: string; permissions: "read" | "write" | "admin"; defaultModel: string | null } | null> {
   // Master key bypass
   if (MASTER_KEY && rawKey === MASTER_KEY) {
-    return { id: "master", name: "Master Key", permissions: "admin" };
+    return { id: "master", name: "Master Key", permissions: "admin", defaultModel: null };
   }
 
   if (!rawKey.startsWith("nxs_")) return null;
@@ -76,6 +77,7 @@ export async function resolveApiKey(
       id: found.id,
       name: found.name,
       permissions: found.permissions as "read" | "write" | "admin",
+      defaultModel: found.defaultModel,
     };
   } catch {
     return null;
@@ -97,7 +99,7 @@ export function requireAuth(
     if (!rawKey) {
       // If neither master key nor DB keys are configured, open access for dev
       if (!MASTER_KEY) {
-        req.apiKey = { id: "master", name: "Open (no key set)", permissions: "admin" };
+        req.apiKey = { id: "master", name: "Open (no key set)", permissions: "admin", defaultModel: null };
         return next();
       }
       res.status(401).json({

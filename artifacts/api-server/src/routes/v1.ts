@@ -578,12 +578,13 @@ await sendWhatsAppMessage(reply);`,
 
 // ─── POST /api/v1/ask ─────────────────────────────────────────────────────────
 router.post("/ask", requireApiKey, rateLimit, async (req, res) => {
-  const { question, model = "tinyllama", useRAG = true, context: extraContext } = req.body as {
+  const { question, model, useRAG = true, context: extraContext } = req.body as {
     question?: string;
     model?: string;
     useRAG?: boolean;
     context?: string;
   };
+  const resolvedModel = model || req.apiKey?.defaultModel || "tinyllama";
 
   if (!question?.trim()) {
     res.status(400).json({ error: "question is required" });
@@ -595,11 +596,11 @@ router.post("/ask", requireApiKey, rateLimit, async (req, res) => {
   if (extraContext) ragContext = extraContext + (ragContext ? "\n\n" + ragContext : "");
 
   try {
-    const answer = await generateUnified(question, model, ragContext);
+    const answer = await generateUnified(question, resolvedModel, ragContext);
     res.json({
       answer,
-      model,
-      provider: detectProvider(model),
+      model: resolvedModel,
+      provider: detectProvider(resolvedModel),
       ragUsed: !!ragContext,
       latencyMs: Date.now() - start,
     });
@@ -614,11 +615,12 @@ router.post("/ask", requireApiKey, rateLimit, async (req, res) => {
 
 // ─── POST /api/v1/batch ───────────────────────────────────────────────────────
 router.post("/batch", requireApiKey, rateLimit, async (req, res) => {
-  const { questions, model = "tinyllama", useRAG = false } = req.body as {
+  const { questions, model, useRAG = false } = req.body as {
     questions?: string[];
     model?: string;
     useRAG?: boolean;
   };
+  const resolvedModel = model || req.apiKey?.defaultModel || "tinyllama";
 
   if (!Array.isArray(questions) || questions.length === 0) {
     res.status(400).json({ error: "questions array is required" });
@@ -633,8 +635,8 @@ router.post("/batch", requireApiKey, rateLimit, async (req, res) => {
   const results = await Promise.allSettled(
     questions.map(async (q, i) => {
       const ragContext = useRAG ? await retrieveRAGContext(q) : undefined;
-      const answer = await generateUnified(q, model, ragContext);
-      return { index: i, question: q, answer, model, provider: detectProvider(model) };
+      const answer = await generateUnified(q, resolvedModel, ragContext);
+      return { index: i, question: q, answer, model: resolvedModel, provider: detectProvider(resolvedModel) };
     })
   );
 
@@ -645,7 +647,7 @@ router.post("/batch", requireApiKey, rateLimit, async (req, res) => {
         : { index: i, question: questions[i], answer: null, error: r.reason?.message || "Failed" }
     ),
     count: questions.length,
-    model,
+    model: resolvedModel,
     provider: detectProvider(model),
     latencyMs: Date.now() - start,
   });
@@ -764,7 +766,7 @@ router.post("/generate/image", requireApiKey, rateLimit, async (req, res) => {
 
 // ─── POST /api/v1/chat ────────────────────────────────────────────────────────
 router.post("/chat", requireApiKey, rateLimit, async (req, res) => {
-  const { message, model = "tinyllama", conversationId, useRAG = true, systemPrompt } = req.body as {
+  const { message, model, conversationId, useRAG = true, systemPrompt } = req.body as {
     message?: string;
     model?: string;
     conversationId?: number;
@@ -779,12 +781,12 @@ router.post("/chat", requireApiKey, rateLimit, async (req, res) => {
 
   const start = Date.now();
   let convId = conversationId;
-  let resolvedModel = model;
+  let resolvedModel = model || req.apiKey?.defaultModel || "tinyllama";
 
   if (convId) {
     const [conv] = await db.select().from(conversationsTable).where(eq(conversationsTable.id, convId));
     if (!conv) { res.status(404).json({ error: "Conversation not found" }); return; }
-    resolvedModel = model || conv.model || "tinyllama";
+    resolvedModel = model || conv.model || req.apiKey?.defaultModel || "tinyllama";
   } else {
     const title = message.slice(0, 60) + (message.length > 60 ? "..." : "");
     const [newConv] = await db.insert(conversationsTable).values({ title, model: resolvedModel }).returning();
@@ -827,7 +829,7 @@ router.post("/chat", requireApiKey, rateLimit, async (req, res) => {
 
 // ─── POST /api/v1/chat/stream ─────────────────────────────────────────────────
 router.post("/chat/stream", requireApiKey, rateLimit, async (req: Request, res: Response) => {
-  const { message, model = "tinyllama", conversationId, useRAG = true } = req.body as {
+  const { message, model, conversationId, useRAG = true } = req.body as {
     message?: string;
     model?: string;
     conversationId?: number;
@@ -840,11 +842,11 @@ router.post("/chat/stream", requireApiKey, rateLimit, async (req: Request, res: 
   }
 
   let convId = conversationId;
-  let resolvedModel = model;
+  let resolvedModel = model || req.apiKey?.defaultModel || "tinyllama";
 
   if (convId) {
     const [conv] = await db.select().from(conversationsTable).where(eq(conversationsTable.id, convId));
-    if (conv) resolvedModel = model || conv.model || "tinyllama";
+    if (conv) resolvedModel = model || conv.model || req.apiKey?.defaultModel || "tinyllama";
   } else {
     const title = message.slice(0, 60) + (message.length > 60 ? "..." : "");
     const [newConv] = await db.insert(conversationsTable).values({ title, model: resolvedModel }).returning();

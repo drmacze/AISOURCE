@@ -15,6 +15,10 @@ import {
   EyeOff,
   ToggleLeft,
   ToggleRight,
+  Brain,
+  Server,
+  ChevronRight,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,10 +63,27 @@ interface ApiKeyRow {
   key: string;
   permissions: "read" | "write" | "admin";
   active: boolean;
+  defaultModel: string | null;
   requestCount: number;
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+}
+
+interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+  parameters: string;
+  ready: boolean;
+  description: string;
+}
+
+interface ModelCatalogue {
+  local: ModelInfo[];
+  cloud: ModelInfo[];
+  totalLocal: number;
+  totalCloud: number;
 }
 
 const PERM_COLORS: Record<string, string> = {
@@ -106,7 +127,9 @@ export default function ApiKeysPage() {
   const [genOpen, setGenOpen] = useState(false);
   const [genName, setGenName] = useState("");
   const [genPerm, setGenPerm] = useState<"read" | "write" | "admin">("write");
+  const [genModel, setGenModel] = useState("kimi/kimi-k2-instruct");
   const [newKey, setNewKey] = useState<string | null>(null);
+  const [generatedData, setGeneratedData] = useState<{ key: string; defaultModel: string | null } | null>(null);
 
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyRow | null>(null);
 
@@ -117,14 +140,21 @@ export default function ApiKeysPage() {
     refetchInterval: 30_000,
   });
 
+  const modelsQuery = useQuery<ModelCatalogue>({
+    queryKey: ["models-catalogue"],
+    queryFn: () => apiFetch("/api/v1/models/catalogue"),
+    staleTime: 60_000,
+  });
+
   const generateMutation = useMutation({
     mutationFn: () =>
       apiFetch("/api/keys", {
         method: "POST",
-        body: JSON.stringify({ name: genName.trim(), permissions: genPerm }),
+        body: JSON.stringify({ name: genName.trim(), permissions: genPerm, defaultModel: genModel }),
       }),
-    onSuccess: (data: { key: string }) => {
+    onSuccess: (data: { key: string; defaultModel: string | null }) => {
       setNewKey(data.key);
+      setGeneratedData(data);
       setGenName("");
       qc.invalidateQueries({ queryKey: ["api-keys"] });
     },
@@ -350,31 +380,126 @@ await sendWhatsAppMessage(reply);`],
       </div>
 
       {/* ─── Generate Dialog ─────────────────────────────────────────────────── */}
-      <Dialog open={genOpen} onOpenChange={(o) => { setGenOpen(o); if (!o) setNewKey(null); }}>
-        <DialogContent className="bg-slate-900 border-white/10 text-white max-w-md">
+      <Dialog open={genOpen} onOpenChange={(o) => { setGenOpen(o); if (!o) { setNewKey(null); setGeneratedData(null); } }}>
+        <DialogContent className="bg-slate-900 border-white/10 text-white max-w-lg">
           <DialogHeader>
-            <DialogTitle>{newKey ? "Key Generated" : "Generate New API Key"}</DialogTitle>
+            <DialogTitle>{newKey ? "Key Generated — Ready to Use" : "Generate New API Key"}</DialogTitle>
             <DialogDescription className="text-slate-400">
               {newKey
-                ? "Copy this key now — it will not be shown again."
-                : "Create a key for external platforms to access DLavie OS models."}
+                ? "Your key is configured with the selected model. Copy-paste the code below into your bot."
+                : "Create a key for external platforms. Select a default AI model so your key works instantly."}
             </DialogDescription>
           </DialogHeader>
 
-          {newKey ? (
+          {newKey && generatedData ? (
             <div className="space-y-4">
+              {/* Key display */}
               <div className="bg-slate-950 rounded-lg border border-emerald-500/20 p-3">
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-sm text-emerald-300 font-mono break-all">{newKey}</code>
                   <CopyButton text={newKey} />
                 </div>
               </div>
+
+              {/* Model badge */}
+              <div className="flex items-center gap-2 text-xs">
+                <Brain className="w-3.5 h-3.5 text-violet-400" />
+                <span className="text-slate-400">Default model:</span>
+                <span className="text-violet-300 font-mono bg-violet-500/10 px-2 py-0.5 rounded">{generatedData.defaultModel || "tinyllama"}</span>
+                <span className="text-slate-600">(set per key — no need to pass in every request)</span>
+              </div>
+
+              {/* WhatsApp Bot tutorial */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <ExternalLink className="w-4 h-4 text-emerald-400" />
+                  <p className="text-sm font-semibold text-white">WhatsApp Bot — Copy & Paste</p>
+                </div>
+                <div className="relative group">
+                  <pre className="bg-slate-950 border border-white/5 rounded-lg p-3 text-xs text-emerald-300 font-mono overflow-x-auto leading-relaxed">{`const API_KEY = "${newKey}";
+const API_URL = "https://your-app-url.replit.app/api/v1/ask";
+
+async function botReply(message) {
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": API_KEY,
+    },
+    body: JSON.stringify({ question: message, useRAG: true }),
+  });
+  const data = await res.json();
+  return data.answer;  // ← kirim ke WhatsApp
+}`}</pre>
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <CopyButton text={`const API_KEY = "${newKey}";
+const API_URL = "https://your-app-url.replit.app/api/v1/ask";
+
+async function botReply(message) {
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": API_KEY,
+    },
+    body: JSON.stringify({ question: message, useRAG: true }),
+  });
+  const data = await res.json();
+  return data.answer;
+}`} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Node.js / Baileys tutorial */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <ExternalLink className="w-4 h-4 text-blue-400" />
+                  <p className="text-sm font-semibold text-white">Node.js + Baileys (WhatsApp Library)</p>
+                </div>
+                <div className="relative group">
+                  <pre className="bg-slate-950 border border-white/5 rounded-lg p-3 text-xs text-blue-300 font-mono overflow-x-auto leading-relaxed">{`const { default: makeWASocket } = require("@whiskeysockets/baileys");
+
+// Saat menerima pesan WhatsApp
+sock.ev.on("messages.upsert", async ({ messages }) => {
+  const msg = messages[0];
+  if (!msg.message || msg.key.fromMe) return;
+
+  const text = msg.message.conversation || "";
+  const { answer } = await fetch("${BASE}/api/v1/ask", {
+    method: "POST",
+    headers: { "X-API-Key": "${newKey}", "Content-Type": "application/json" },
+    body: JSON.stringify({ question: text, useRAG: true }),
+  }).then(r => r.json());
+
+  await sock.sendMessage(msg.key.remoteJid, { text: answer });
+});`}</pre>
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <CopyButton text={`const { default: makeWASocket } = require("@whiskeysockets/baileys");
+
+sock.ev.on("messages.upsert", async ({ messages }) => {
+  const msg = messages[0];
+  if (!msg.message || msg.key.fromMe) return;
+
+  const text = msg.message.conversation || "";
+  const { answer } = await fetch("${BASE}/api/v1/ask", {
+    method: "POST",
+    headers: { "X-API-Key": "${newKey}", "Content-Type": "application/json" },
+    body: JSON.stringify({ question: text, useRAG: true }),
+  }).then(r => r.json());
+
+  await sock.sendMessage(msg.key.remoteJid, { text: answer });
+});`} />
+                  </div>
+                </div>
+              </div>
+
               <p className="text-xs text-amber-400 flex items-center gap-1.5">
                 <ShieldAlert className="w-3.5 h-3.5" />
                 This is the only time this full key will be shown.
               </p>
               <Button
-                onClick={() => { setGenOpen(false); setNewKey(null); }}
+                onClick={() => { setGenOpen(false); setNewKey(null); setGeneratedData(null); }}
                 className="w-full bg-emerald-600 hover:bg-emerald-500"
               >
                 Done — I saved my key
@@ -406,6 +531,52 @@ await sendWhatsAppMessage(reply);`],
                     <SelectItem value="admin">admin — full access incl. key management</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400 flex items-center gap-2">
+                  <Brain className="w-3.5 h-3.5 text-violet-400" />
+                  Default AI Model
+                </label>
+                <Select value={genModel} onValueChange={(v) => setGenModel(v)}>
+                  <SelectTrigger className="bg-slate-800 border-white/10 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-white/10 text-white max-h-60">
+                    {/* Cloud models */}
+                    <div className="px-3 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Cloud (No install needed)</div>
+                    {(modelsQuery.data?.cloud ?? []).map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{m.name}</span>
+                          <span className="text-[10px] text-slate-500 ml-auto">{m.parameters}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                    {/* Local models */}
+                    {(modelsQuery.data?.local ?? []).length > 0 && (
+                      <>
+                        <div className="px-3 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-t border-white/5 mt-1">Local (Ollama)</div>
+                        {(modelsQuery.data?.local ?? []).map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            <div className="flex items-center gap-2">
+                              <span>{m.name}</span>
+                              <span className="text-[10px] text-slate-500 ml-auto">{m.parameters}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </>
+                    )}
+                    {modelsQuery.isLoading && (
+                      <div className="px-3 py-2 text-xs text-slate-500">Loading models...</div>
+                    )}
+                    {(modelsQuery.data?.cloud ?? []).length === 0 && !modelsQuery.isLoading && (
+                      <div className="px-3 py-2 text-xs text-slate-500">No cloud models available</div>
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-slate-500">
+                  This model becomes the default for all requests using this key. You can override per-request.
+                </p>
               </div>
               <Button
                 onClick={() => generateMutation.mutate()}

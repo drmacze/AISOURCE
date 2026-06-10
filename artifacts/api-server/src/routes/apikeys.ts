@@ -106,6 +106,7 @@ router.get("/keys", requireAdmin, async (_req, res) => {
         key: maskKey(k.key),
         permissions: k.permissions,
         active: k.active,
+        defaultModel: k.defaultModel,
         requestCount: k.requestCount,
         lastUsedAt: k.lastUsedAt,
         expiresAt: k.expiresAt,
@@ -120,10 +121,11 @@ router.get("/keys", requireAdmin, async (_req, res) => {
 
 // ─── POST /api/keys ───────────────────────────────────────────────────────────
 router.post("/keys", requireAdmin, async (req, res) => {
-  const { name, permissions = "write", expiresAt } = req.body as {
+  const { name, permissions = "write", expiresAt, defaultModel } = req.body as {
     name?: string;
     permissions?: "read" | "write" | "admin";
     expiresAt?: string;
+    defaultModel?: string;
   };
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -151,6 +153,7 @@ router.post("/keys", requireAdmin, async (req, res) => {
         key: newKey,
         permissions,
         active: true,
+        defaultModel: defaultModel || null,
         ...(expiry ? { expiresAt: expiry } : {}),
       })
       .returning();
@@ -162,6 +165,7 @@ router.post("/keys", requireAdmin, async (req, res) => {
       key: newKey,
       permissions: created.permissions,
       active: created.active,
+      defaultModel: created.defaultModel,
       expiresAt: created.expiresAt,
       createdAt: created.createdAt,
       warning: "Save this key now — it will not be shown again in full.",

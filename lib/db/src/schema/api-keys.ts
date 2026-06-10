@@ -12,6 +12,7 @@ export const apiKeysTable = pgTable("api_keys", {
     .default("write")
     .notNull(),
   active: boolean("active").default(true).notNull(),
+  defaultModel: text("default_model"),
   requestCount: integer("request_count").default(0).notNull(),
   lastUsedAt: timestamp("last_used_at", { mode: "date" }),
   expiresAt: timestamp("expires_at", { mode: "date" }),
