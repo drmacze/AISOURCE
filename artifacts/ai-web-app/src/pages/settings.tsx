@@ -50,6 +50,13 @@ const INTEGRATION_ICONS: Record<string, React.ElementType> = {
   nexus: Shield,
 };
 
+const INTEGRATION_API_KEY: Record<string, string> = {
+  huggingface: "hfToken",
+  moonshot: "moonshotApiKey",
+  github: "githubToken",
+  nexus: "nexusApiKey",
+};
+
 const INTEGRATION_COLORS: Record<string, string> = {
   huggingface: "text-yellow-400",
   moonshot: "text-violet-400",
@@ -128,7 +135,7 @@ export default function SettingsPage() {
 
   const handleSave = (key: string) => {
     if (!keyValue.trim()) return;
-    updateMutation.mutate({ key, value: keyValue.trim() });
+    updateMutation.mutate({ key: INTEGRATION_API_KEY[key] || key, value: keyValue.trim() });
   };
 
   const handleEdit = (key: string) => {
