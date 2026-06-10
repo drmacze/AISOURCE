@@ -7,15 +7,26 @@ import { startOllamaServer } from "./ollama";
 import { startAutoTraining, startMicroTraining } from "./autotraining";
 import { isHFConfigured, HF_STATUS } from "./huggingface";
 
-// ─── Load saved API keys from config file on startup ─────────────────────────
+// ─── Load saved secrets from config file on startup ──────────────────────────
+// (The settings route module applies them too, but we need them before routes load)
 const CONFIG_PATH = join(process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace", ".dlavie-config.json");
 try {
   if (existsSync(CONFIG_PATH)) {
-    const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Record<string, string>;
-    if (cfg.hfToken)        process.env.HF_TOKEN           = cfg.hfToken;
-    if (cfg.moonshotApiKey) process.env.MOONSHOT_API_KEY   = cfg.moonshotApiKey;
-    if (cfg.githubToken)    process.env.GITHUB_TOKEN        = cfg.githubToken;
-    if (cfg.nexusApiKey)    process.env.NEXUS_API_KEY       = cfg.nexusApiKey;
+    const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as {
+      secrets?: Record<string, string>;
+      hfToken?: string; moonshotApiKey?: string; githubToken?: string; nexusApiKey?: string;
+    };
+    // New generic secrets map
+    if (cfg.secrets) {
+      for (const [k, v] of Object.entries(cfg.secrets)) {
+        if (k && v) process.env[k] = v;
+      }
+    }
+    // Legacy field migration
+    if (cfg.hfToken        && !process.env.HF_TOKEN)          process.env.HF_TOKEN          = cfg.hfToken;
+    if (cfg.moonshotApiKey && !process.env.MOONSHOT_API_KEY)  process.env.MOONSHOT_API_KEY  = cfg.moonshotApiKey;
+    if (cfg.githubToken    && !process.env.GITHUB_TOKEN)      process.env.GITHUB_TOKEN      = cfg.githubToken;
+    if (cfg.nexusApiKey    && !process.env.NEXUS_API_KEY)     process.env.NEXUS_API_KEY     = cfg.nexusApiKey;
   }
 } catch { /* ignore parse errors */ }
 

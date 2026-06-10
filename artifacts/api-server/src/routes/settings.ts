@@ -1,8 +1,11 @@
 /**
- * DLavie OS — Settings API
+ * DLavie OS — Settings & ENV Secrets API
  *
- * Provides read-only status for all configured integrations
- * and allows updating API keys (requires restart to take effect).
+ * GET    /api/settings          — system status (env + system config)
+ * GET    /api/settings/secrets  — list all stored secrets (names + masked values)
+ * POST   /api/settings/secrets  — add or update a secret { name, value }
+ * DELETE /api/settings/secrets/:name — delete a secret by env name
+ * POST   /api/settings/reload   — reload all secrets from file into process.env
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -15,12 +18,21 @@ const router: IRouter = Router();
 const CONFIG_PATH = join(process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace", ".dlavie-config.json");
 
 interface ConfigFile {
+  secrets?: Record<string, string>;
+  updatedAt?: string;
+  // legacy fields — kept for migration
   hfToken?: string;
   moonshotApiKey?: string;
   githubToken?: string;
   nexusApiKey?: string;
-  updatedAt?: string;
 }
+
+const LEGACY_MAP: Record<string, string> = {
+  hfToken: "HF_TOKEN",
+  moonshotApiKey: "MOONSHOT_API_KEY",
+  githubToken: "GITHUB_TOKEN",
+  nexusApiKey: "NEXUS_API_KEY",
+};
 
 function readConfig(): ConfigFile {
   try {
@@ -31,154 +43,151 @@ function readConfig(): ConfigFile {
   return {};
 }
 
-function writeConfig(cfg: ConfigFile) {
+/** Read secrets map, migrating legacy fields automatically */
+function readSecrets(): Record<string, string> {
+  const cfg = readConfig();
+  const secrets: Record<string, string> = { ...(cfg.secrets || {}) };
+  // migrate legacy fields into secrets map
+  for (const [legacyKey, envName] of Object.entries(LEGACY_MAP)) {
+    const val = cfg[legacyKey as keyof ConfigFile] as string | undefined;
+    if (val && !secrets[envName]) {
+      secrets[envName] = val;
+    }
+  }
+  return secrets;
+}
+
+function writeSecrets(secrets: Record<string, string>) {
+  const cfg = readConfig();
+  cfg.secrets = secrets;
+  cfg.updatedAt = new Date().toISOString();
+  // clear legacy fields — they're now in secrets map
+  delete cfg.hfToken;
+  delete cfg.moonshotApiKey;
+  delete cfg.githubToken;
+  delete cfg.nexusApiKey;
   writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf8");
 }
 
-function maskKey(key: string): string {
-  if (key.length <= 8) return "****";
-  return key.slice(0, 4) + "..." + key.slice(-4);
+function maskValue(val: string): string {
+  if (val.length <= 8) return "••••••••";
+  return val.slice(0, 4) + "••••" + val.slice(-4);
 }
 
-/** GET /api/settings — status of all integrations */
+function validateEnvName(name: string): boolean {
+  return /^[A-Z][A-Z0-9_]*$/.test(name);
+}
+
+/** Apply all secrets to process.env */
+function applySecrets(secrets: Record<string, string>) {
+  for (const [name, value] of Object.entries(secrets)) {
+    process.env[name] = value;
+  }
+}
+
+// ─── Apply saved secrets on module load ──────────────────────────────────────
+applySecrets(readSecrets());
+
+// ─── GET /api/settings — system status ────────────────────────────────────────
 router.get("/settings", (_req, res) => {
-  const env = {
-    hfToken: !!process.env.HF_TOKEN,
-    hfTokenPrefix: process.env.HF_TOKEN ? maskKey(process.env.HF_TOKEN) : null,
-    moonshotApiKey: !!process.env.MOONSHOT_API_KEY,
-    moonshotPrefix: process.env.MOONSHOT_API_KEY ? maskKey(process.env.MOONSHOT_API_KEY) : null,
-    githubToken: !!process.env.GITHUB_TOKEN,
-    githubPrefix: process.env.GITHUB_TOKEN ? maskKey(process.env.GITHUB_TOKEN) : null,
-    nexusApiKey: !!process.env.NEXUS_API_KEY,
-    nexusPrefix: process.env.NEXUS_API_KEY ? maskKey(process.env.NEXUS_API_KEY) : null,
-  };
-
-  const file = readConfig();
-  const fileExists = existsSync(CONFIG_PATH);
-
+  const cfg = readConfig();
   res.json({
-    integrations: {
-      huggingface: {
-        name: "HuggingFace",
-        description: "Image Gen, RAG embeddings, chat fallback",
-        configured: env.hfToken,
-        maskedKey: env.hfTokenPrefix,
-        source: env.hfToken ? "Replit Secrets" : "not set",
-      },
-      moonshot: {
-        name: "Kimi K2 (MoonshotAI)",
-        description: "1T MoE cloud reasoning model",
-        configured: env.moonshotApiKey,
-        maskedKey: env.moonshotPrefix,
-        source: env.moonshotApiKey ? "Replit Secrets" : "not set",
-      },
-      github: {
-        name: "GitHub",
-        description: "Auto-training datasets, rate limit 5000 req/hr",
-        configured: env.githubToken,
-        maskedKey: env.githubPrefix,
-        source: env.githubToken ? "Replit Secrets" : "not set",
-      },
-      nexus: {
-        name: "NEXUS API Key",
-        description: "Admin access for key management",
-        configured: env.nexusApiKey,
-        maskedKey: env.nexusPrefix,
-        source: env.nexusApiKey ? "Replit Secrets" : "not set",
-      },
-    },
-    fileConfig: {
-      exists: fileExists,
-      path: CONFIG_PATH,
-      updatedAt: file.updatedAt || null,
-    },
     env: {
       nodeEnv: process.env.NODE_ENV || "development",
       port: process.env.PORT || "8080",
       ollamaModels: process.env.OLLAMA_MODELS || "~/.ollama/models",
       ollamaHost: process.env.OLLAMA_HOST || "http://127.0.0.1:11434",
     },
+    fileConfig: {
+      exists: existsSync(CONFIG_PATH),
+      path: CONFIG_PATH,
+      updatedAt: cfg.updatedAt || null,
+    },
     restartRequired: false,
   });
 });
 
-/** POST /api/settings/update — update a key value (saved to config file) */
-router.post("/settings/update", async (req: Request, res: Response) => {
-  const { key, value } = req.body as { key?: string; value?: string };
+// ─── GET /api/settings/secrets ────────────────────────────────────────────────
+router.get("/settings/secrets", (_req, res) => {
+  const secrets = readSecrets();
+  const list = Object.entries(secrets).map(([name, value]) => ({
+    name,
+    masked: maskValue(value),
+    set: true,
+    // also show live process.env status
+    active: process.env[name] === value,
+  }));
+  res.json({ secrets: list, total: list.length });
+});
 
-  const validKeys = ["hfToken", "moonshotApiKey", "githubToken", "nexusApiKey"];
-  if (!key || !validKeys.includes(key)) {
-    res.status(400).json({ error: "Invalid key name", validKeys });
+// ─── POST /api/settings/secrets ───────────────────────────────────────────────
+router.post("/settings/secrets", (req: Request, res: Response) => {
+  const { name, value } = req.body as { name?: string; value?: string };
+
+  if (!name || typeof name !== "string" || !name.trim()) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+
+  const envName = name.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+
+  if (!validateEnvName(envName)) {
+    res.status(400).json({ error: "Name must start with a letter and contain only letters, numbers, underscores" });
     return;
   }
 
   if (!value || typeof value !== "string" || !value.trim()) {
-    res.status(400).json({ error: "Value is required" });
+    res.status(400).json({ error: "value is required" });
     return;
   }
 
-  const config = readConfig();
-  const mapping: Record<string, keyof ConfigFile> = {
-    hfToken: "hfToken",
-    moonshotApiKey: "moonshotApiKey",
-    githubToken: "githubToken",
-    nexusApiKey: "nexusApiKey",
-  };
-
   const trimmed = value.trim();
-  config[mapping[key]!] = trimmed;
-  config.updatedAt = new Date().toISOString();
-  writeConfig(config);
+  const secrets = readSecrets();
+  secrets[envName] = trimmed;
+  writeSecrets(secrets);
 
-  // Apply immediately to the running process — no restart needed
-  const envMap: Record<string, string> = {
-    hfToken: "HF_TOKEN",
-    moonshotApiKey: "MOONSHOT_API_KEY",
-    githubToken: "GITHUB_TOKEN",
-    nexusApiKey: "NEXUS_API_KEY",
-  };
-  process.env[envMap[key]!] = trimmed;
+  // Apply immediately to running process
+  process.env[envName] = trimmed;
 
-  logger.info({ key }, "API key saved and applied immediately");
+  logger.info({ name: envName }, "Secret saved and applied to process.env");
 
-  res.json({
-    success: true,
-    key,
-    message: "Key saved and active immediately.",
-    restartRequired: false,
-  });
+  res.json({ success: true, name: envName, message: "Secret saved and active immediately." });
 });
 
-/** POST /api/settings/reload — attempt to reload env from config file */
+// ─── DELETE /api/settings/secrets/:name ───────────────────────────────────────
+router.delete("/settings/secrets/:name", (req: Request, res: Response) => {
+  const name = req.params.name?.trim().toUpperCase();
+  if (!name) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+
+  const secrets = readSecrets();
+  if (!secrets[name]) {
+    res.status(404).json({ error: "Secret not found", name });
+    return;
+  }
+
+  delete secrets[name];
+  writeSecrets(secrets);
+
+  // Remove from process.env
+  delete process.env[name];
+
+  logger.info({ name }, "Secret deleted");
+  res.json({ success: true, name, message: "Secret deleted." });
+});
+
+// ─── POST /api/settings/reload ────────────────────────────────────────────────
 router.post("/settings/reload", (_req, res) => {
-  const config = readConfig();
-  let applied = 0;
-
-  if (config.hfToken) {
-    process.env.HF_TOKEN = config.hfToken;
-    applied++;
-  }
-  if (config.moonshotApiKey) {
-    process.env.MOONSHOT_API_KEY = config.moonshotApiKey;
-    applied++;
-  }
-  if (config.githubToken) {
-    process.env.GITHUB_TOKEN = config.githubToken;
-    applied++;
-  }
-  if (config.nexusApiKey) {
-    process.env.NEXUS_API_KEY = config.nexusApiKey;
-    applied++;
-  }
-
-  logger.info({ applied }, "Hot-reloaded keys from config file");
-
+  const secrets = readSecrets();
+  applySecrets(secrets);
+  const applied = Object.keys(secrets).length;
+  logger.info({ applied }, "All secrets reloaded into process.env");
   res.json({
     success: true,
     applied,
-    message: applied > 0
-      ? `Hot-reloaded ${applied} key(s). Some features may require a restart to fully activate.`
-      : "No new keys to reload — all keys are already set.",
+    message: applied > 0 ? `Reloaded ${applied} secret(s) into environment.` : "No secrets to reload.",
   });
 });
 

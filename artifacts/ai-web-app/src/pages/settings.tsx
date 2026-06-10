@@ -1,25 +1,21 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Settings, Key, Brain, GitBranch, Zap, Moon, Shield,
-  Save, RefreshCw, CheckCircle2, AlertCircle, Eye, EyeOff,
-  Server, Database, Clock, ExternalLink, FileJson,
+  Settings, Key, Plus, Trash2, Eye, EyeOff, RefreshCw,
+  Server, CheckCircle2, Copy, Check, Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
 async function apiFetch(path: string, opts?: RequestInit) {
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      ...(opts?.headers || {}),
-    },
+    headers: { "Content-Type": "application/json", ...(opts?.headers || {}) },
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
@@ -28,349 +24,324 @@ async function apiFetch(path: string, opts?: RequestInit) {
   return res.json();
 }
 
-interface IntegrationStatus {
+interface SecretRow {
   name: string;
-  description: string;
-  configured: boolean;
-  maskedKey: string | null;
-  source: string;
+  masked: string;
+  set: boolean;
+  active: boolean;
 }
 
-interface SettingsData {
-  integrations: Record<string, IntegrationStatus>;
-  fileConfig: { exists: boolean; path: string; updatedAt: string | null };
+interface SystemData {
   env: { nodeEnv: string; port: string; ollamaModels: string; ollamaHost: string };
-  restartRequired: boolean;
+  fileConfig: { exists: boolean; path: string; updatedAt: string | null };
 }
 
-const INTEGRATION_ICONS: Record<string, React.ElementType> = {
-  huggingface: Brain,
-  moonshot: Moon,
-  github: GitBranch,
-  nexus: Shield,
-};
-
-const INTEGRATION_API_KEY: Record<string, string> = {
-  huggingface: "hfToken",
-  moonshot: "moonshotApiKey",
-  github: "githubToken",
-  nexus: "nexusApiKey",
-};
-
-const INTEGRATION_COLORS: Record<string, string> = {
-  huggingface: "text-yellow-400",
-  moonshot: "text-violet-400",
-  github: "text-pink-400",
-  nexus: "text-emerald-400",
-};
-
-const INTEGRATION_BG: Record<string, string> = {
-  huggingface: "bg-yellow-500/10 border-yellow-500/20",
-  moonshot: "bg-violet-500/10 border-violet-500/20",
-  github: "bg-pink-500/10 border-pink-500/20",
-  nexus: "bg-emerald-500/10 border-emerald-500/20",
-};
+function CopyBtn({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+      className="p-1 rounded hover:bg-white/10 text-slate-500 hover:text-slate-300 transition-colors"
+      title="Copy name"
+    >
+      {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+    </button>
+  );
+}
 
 export default function SettingsPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [keyValue, setKeyValue] = useState("");
-  const [showKey, setShowKey] = useState(false);
+  const [newName, setNewName]   = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [showNew, setShowNew]   = useState(false);
+  const [revealMap, setRevealMap] = useState<Record<string, boolean>>({});
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const settingsQuery = useQuery<SettingsData>({
-    queryKey: ["settings"],
-    queryFn: () => apiFetch("/api/settings"),
-    refetchInterval: 30_000,
+  const secretsQuery = useQuery<{ secrets: SecretRow[]; total: number }>({
+    queryKey: ["settings-secrets"],
+    queryFn: () => apiFetch("/api/settings/secrets"),
+    refetchInterval: 15_000,
   });
 
-  const updateMutation = useMutation({
-    mutationFn: ({ key, value }: { key: string; value: string }) =>
-      apiFetch("/api/settings/update", {
-        method: "POST",
-        body: JSON.stringify({ key, value }),
-      }),
-    onSuccess: () => {
-      toast({
-        title: "Key tersimpan",
-        description: "API key aktif dan langsung berfungsi.",
-      });
-      setEditingKey(null);
-      setKeyValue("");
-      setShowKey(false);
-      // Force re-fetch settings so status updates immediately
-      qc.invalidateQueries({ queryKey: ["settings"] });
-      qc.refetchQueries({ queryKey: ["settings"] });
+  const systemQuery = useQuery<SystemData>({
+    queryKey: ["settings-system"],
+    queryFn: () => apiFetch("/api/settings"),
+    staleTime: 60_000,
+  });
+
+  const addMutation = useMutation({
+    mutationFn: ({ name, value }: { name: string; value: string }) =>
+      apiFetch("/api/settings/secrets", { method: "POST", body: JSON.stringify({ name, value }) }),
+    onSuccess: (data) => {
+      toast({ title: "Secret disimpan", description: `${data.name} aktif sekarang.` });
+      setNewName(""); setNewValue(""); setShowNew(false);
+      qc.invalidateQueries({ queryKey: ["settings-secrets"] });
     },
-    onError: (err: Error) => {
-      toast({
-        title: "Error",
-        description: err.message,
-        variant: "destructive",
-      });
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (name: string) =>
+      apiFetch(`/api/settings/secrets/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    onSuccess: (_, name) => {
+      toast({ title: "Secret dihapus", description: name });
+      setDeleteConfirm(null);
+      qc.invalidateQueries({ queryKey: ["settings-secrets"] });
     },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
   const reloadMutation = useMutation({
     mutationFn: () => apiFetch("/api/settings/reload", { method: "POST" }),
     onSuccess: (data) => {
-      toast({
-        title: "Reloaded",
-        description: data.message,
-      });
-      qc.invalidateQueries({ queryKey: ["settings"] });
-      qc.invalidateQueries({ queryKey: ["v1-health"] });
-      qc.invalidateQueries({ queryKey: ["autotraining-status"] });
-    },
-    onError: (err: Error) => {
-      toast({
-        title: "Reload failed",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast({ title: "Reloaded", description: data.message });
+      qc.invalidateQueries({ queryKey: ["settings-secrets"] });
     },
   });
 
-  const data = settingsQuery.data;
-  const integrations = data?.integrations || {};
+  const secrets = secretsQuery.data?.secrets ?? [];
+  const sysData = systemQuery.data;
 
-  const handleSave = (key: string) => {
-    if (!keyValue.trim()) return;
-    updateMutation.mutate({ key: INTEGRATION_API_KEY[key] || key, value: keyValue.trim() });
+  const handleAdd = () => {
+    const name = newName.trim().toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+    const value = newValue.trim();
+    if (!name || !value) return;
+    addMutation.mutate({ name, value });
   };
 
-  const handleEdit = (key: string) => {
-    setEditingKey(key);
-    setKeyValue("");
-    setShowKey(false);
-  };
+  const toggleReveal = (name: string) =>
+    setRevealMap((m) => ({ ...m, [name]: !m[name] }));
 
   return (
     <div className="min-h-full bg-slate-950 p-4 sm:p-6 space-y-6">
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <motion.h1
-            initial={{ opacity: 0, x: -12 }}
-            animate={{ opacity: 1, x: 0 }}
+            initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }}
             className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2"
           >
-            <Settings className="w-6 h-6 text-slate-400" /> Settings
+            <Lock className="w-5 h-5 text-emerald-400" /> Environment Secrets
           </motion.h1>
           <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.1 }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.08 }}
             className="text-sm text-slate-500 mt-0.5"
           >
-            Manage API keys, integrations, and system configuration
+            Simpan API key sebagai environment variable — tersimpan permanen di server
           </motion.p>
         </div>
         <Button
           onClick={() => reloadMutation.mutate()}
           disabled={reloadMutation.isPending}
           variant="outline"
-          className="border-white/10 text-slate-300 hover:text-white shrink-0"
+          size="sm"
+          className="border-white/10 text-slate-400 hover:text-white shrink-0"
         >
-          {reloadMutation.isPending ? (
-            <RefreshCw className="w-4 h-4 mr-1.5 animate-spin" />
-          ) : (
-            <RefreshCw className="w-4 h-4 mr-1.5" />
-          )}
-          Hot Reload
+          <RefreshCw className={cn("w-3.5 h-3.5 mr-1.5", reloadMutation.isPending && "animate-spin")} />
+          Reload
         </Button>
       </div>
 
-      {/* Integration Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {Object.entries(integrations).map(([key, int], i) => {
-          const Icon = INTEGRATION_ICONS[key] || Key;
-          const color = INTEGRATION_COLORS[key] || "text-slate-400";
-          const bg = INTEGRATION_BG[key] || "bg-slate-800/50 border-white/5";
-          const isEditing = editingKey === key;
-
-          return (
-            <motion.div
-              key={key}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 + i * 0.05 }}
-              className={cn(
-                "rounded-xl border p-4 space-y-3",
-                bg
-              )}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center", bg.replace("border", "bg").split(" ")[0])}>
-                    <Icon className={cn("w-4.5 h-4.5", color)} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-white">{int.name}</h3>
-                    <p className="text-xs text-slate-400">{int.description}</p>
-                  </div>
-                </div>
-                {int.configured ? (
-                  <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-medium">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Active</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 text-amber-400 text-xs font-medium">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Not set</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Key info */}
-              {int.configured && int.maskedKey && (
-                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 bg-black/20 rounded-lg px-3 py-2">
-                  <Key className="w-3 h-3 text-slate-500" />
-                  <span>{int.maskedKey}</span>
-                  <span className="text-slate-600 ml-auto">{int.source}</span>
-                </div>
-              )}
-
-              {/* Edit / Save area */}
-              {isEditing ? (
-                <div className="space-y-2">
-                  <div className="relative">
-                    <Input
-                      type={showKey ? "text" : "password"}
-                      value={keyValue}
-                      onChange={(e) => setKeyValue(e.target.value)}
-                      placeholder={`Enter ${int.name} API key`}
-                      className="bg-slate-950 border-white/10 text-white font-mono text-sm pr-10"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => setShowKey((v) => !v)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                    >
-                      {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => handleSave(key)}
-                      disabled={!keyValue.trim() || updateMutation.isPending}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white"
-                      size="sm"
-                    >
-                      {updateMutation.isPending ? (
-                        <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                      ) : (
-                        <Save className="w-3.5 h-3.5 mr-1.5" />
-                      )}
-                      Save
-                    </Button>
-                    <Button
-                      onClick={() => { setEditingKey(null); setKeyValue(""); }}
-                      variant="outline"
-                      className="border-white/10 text-slate-300"
-                      size="sm"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Button
-                  onClick={() => handleEdit(key)}
-                  variant="outline"
-                  className="w-full border-white/10 text-slate-300 hover:text-white text-sm"
-                  size="sm"
-                >
-                  <Key className="w-3.5 h-3.5 mr-1.5" />
-                  {int.configured ? "Update Key" : "Add Key"}
-                </Button>
-              )}
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* System Info */}
+      {/* Add new secret panel */}
       <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.35 }}
+        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+        className="rounded-xl border border-white/8 bg-slate-900/70 overflow-hidden"
+      >
+        <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2">
+          <Plus className="w-4 h-4 text-emerald-400" />
+          <span className="text-sm font-semibold text-white">Tambah Secret Baru</span>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500 font-medium uppercase tracking-wide">Nama</label>
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
+                placeholder="HF_TOKEN"
+                className="bg-slate-950 border-white/10 text-white font-mono text-sm uppercase"
+                onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+              />
+              <p className="text-[11px] text-slate-600">Huruf kapital, angka, underscore</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500 font-medium uppercase tracking-wide">Value</label>
+              <div className="relative">
+                <Input
+                  type={showNew ? "text" : "password"}
+                  value={newValue}
+                  onChange={(e) => setNewValue(e.target.value)}
+                  placeholder="Paste API key di sini…"
+                  className="bg-slate-950 border-white/10 text-white font-mono text-sm pr-10"
+                  onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                />
+                <button
+                  onClick={() => setShowNew((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                >
+                  {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+          <Button
+            onClick={handleAdd}
+            disabled={!newName.trim() || !newValue.trim() || addMutation.isPending}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white w-full sm:w-auto"
+            size="sm"
+          >
+            {addMutation.isPending
+              ? <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              : <Plus className="w-3.5 h-3.5 mr-1.5" />
+            }
+            Simpan Secret
+          </Button>
+        </div>
+      </motion.div>
+
+      {/* Secrets list */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
+        className="rounded-xl border border-white/8 bg-slate-900/70 overflow-hidden"
+      >
+        <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Key className="w-4 h-4 text-slate-400" />
+            <span className="text-sm font-semibold text-white">
+              {secretsQuery.isLoading ? "Memuat…" : `${secrets.length} Secret${secrets.length !== 1 ? "s" : ""}`}
+            </span>
+          </div>
+          <button
+            onClick={() => qc.invalidateQueries({ queryKey: ["settings-secrets"] })}
+            className="p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-white transition-colors"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", secretsQuery.isFetching && "animate-spin")} />
+          </button>
+        </div>
+
+        {secretsQuery.isLoading ? (
+          <div className="p-8 text-center text-slate-500 text-sm">Memuat secrets…</div>
+        ) : secrets.length === 0 ? (
+          <div className="p-10 text-center space-y-2">
+            <Lock className="w-8 h-8 text-slate-700 mx-auto" />
+            <p className="text-slate-400 text-sm">Belum ada secrets. Tambahkan di atas.</p>
+            <p className="text-slate-600 text-xs">Contoh: HF_TOKEN, GITHUB_TOKEN, MOONSHOT_API_KEY</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-white/[0.04]">
+            <AnimatePresence>
+              {secrets.map((s, i) => (
+                <motion.div
+                  key={s.name}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 8 }}
+                  transition={{ delay: i * 0.03 }}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] group"
+                >
+                  {/* Active dot */}
+                  <div className={cn(
+                    "w-2 h-2 rounded-full flex-shrink-0",
+                    s.active ? "bg-emerald-400" : "bg-amber-400"
+                  )} title={s.active ? "Active in process.env" : "Saved but not yet active"} />
+
+                  {/* Name */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <code className="text-sm font-mono font-semibold text-emerald-300">{s.name}</code>
+                      <CopyBtn text={s.name} />
+                    </div>
+                    <div className="text-xs font-mono text-slate-500 mt-0.5">
+                      {revealMap[s.name] ? (
+                        <span className="text-slate-300">{s.masked}</span>
+                      ) : (
+                        <span>••••••••••••••••</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Status badge */}
+                  {s.active ? (
+                    <span className="text-xs text-emerald-400 flex items-center gap-1 flex-shrink-0">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Active
+                    </span>
+                  ) : (
+                    <span className="text-xs text-amber-400 flex-shrink-0">Saved</span>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => toggleReveal(s.name)}
+                      className="p-1.5 rounded hover:bg-white/10 text-slate-500 hover:text-white transition-colors"
+                      title={revealMap[s.name] ? "Sembunyikan" : "Lihat value"}
+                    >
+                      {revealMap[s.name] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+
+                    {deleteConfirm === s.name ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => deleteMutation.mutate(s.name)}
+                          disabled={deleteMutation.isPending}
+                          className="text-xs px-2 py-1 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+                        >
+                          Hapus
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirm(null)}
+                          className="text-xs px-2 py-1 rounded bg-white/5 text-slate-400 hover:bg-white/10 transition-colors"
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDeleteConfirm(s.name)}
+                        className="p-1.5 rounded hover:bg-red-500/15 text-slate-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                        title="Hapus secret"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </motion.div>
+
+      {/* System Config */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}
         className="rounded-xl border border-white/5 bg-slate-900/60 p-5"
       >
         <div className="flex items-center gap-2 mb-4">
           <Server className="w-4 h-4 text-slate-400" />
           <h2 className="text-sm font-semibold text-white">System Configuration</h2>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 font-mono text-xs">
           {[
-            { k: "Node Environment", v: data?.env?.nodeEnv || "—" },
-            { k: "API Port", v: data?.env?.port || "—" },
-            { k: "Ollama Host", v: data?.env?.ollamaHost || "—" },
-            { k: "Ollama Models Path", v: data?.env?.ollamaModels || "—" },
-            { k: "Config File", v: data?.fileConfig?.exists ? "Yes" : "No", sub: data?.fileConfig?.path },
-            { k: "Config Updated", v: data?.fileConfig?.updatedAt ? new Date(data.fileConfig.updatedAt).toLocaleString() : "—" },
+            { k: "Node Environment", v: sysData?.env?.nodeEnv || "—" },
+            { k: "API Port",         v: sysData?.env?.port || "—" },
+            { k: "Ollama Host",      v: sysData?.env?.ollamaHost || "—" },
+            { k: "Ollama Models",    v: sysData?.env?.ollamaModels || "—" },
+            { k: "Config File",      v: sysData?.fileConfig?.exists ? "Found" : "Not found", sub: sysData?.fileConfig?.path },
+            { k: "Last Updated",     v: sysData?.fileConfig?.updatedAt ? new Date(sysData.fileConfig.updatedAt).toLocaleString("id-ID") : "—" },
           ].map(({ k, v, sub }) => (
-            <div key={k} className="flex flex-col gap-0.5 p-2.5 rounded-lg bg-white/[0.02]">
-              <span className="text-xs text-slate-500">{k}</span>
-              <span className="text-slate-300 text-xs">{v}</span>
-              {sub && <span className="text-[10px] text-slate-600 truncate">{sub}</span>}
+            <div key={k} className="p-2.5 rounded-lg bg-white/[0.025] space-y-0.5">
+              <div className="text-slate-500">{k}</div>
+              <div className="text-slate-300 truncate">{v}</div>
+              {sub && <div className="text-[10px] text-slate-600 truncate">{sub}</div>}
             </div>
           ))}
         </div>
       </motion.div>
 
-      {/* How to get keys */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
-        className="rounded-xl border border-white/5 bg-slate-900/60 p-5"
-      >
-        <div className="flex items-center gap-2 mb-4">
-          <ExternalLink className="w-4 h-4 text-blue-400" />
-          <h2 className="text-sm font-semibold text-white">Where to get API keys</h2>
-        </div>
-        <div className="space-y-3">
-          {[
-            {
-              name: "HuggingFace",
-              url: "https://huggingface.co/settings/tokens",
-              desc: "Create a free account, then generate a Read token for inference",
-            },
-            {
-              name: "Kimi K2 (Moonshot)",
-              url: "https://platform.moonshot.cn",
-              desc: "Sign up at MoonshotAI platform and create an API key",
-            },
-            {
-              name: "GitHub",
-              url: "https://github.com/settings/tokens",
-              desc: "Generate a personal access token (no scopes needed for public repos)",
-            },
-          ].map((item) => (
-            <a
-              key={item.name}
-              href={item.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] hover:bg-white/[0.04] transition-colors group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-white">{item.name}</span>
-                  <ExternalLink className="w-3 h-3 text-slate-500 group-hover:text-blue-400 transition-colors" />
-                </div>
-                <p className="text-xs text-slate-400 mt-0.5">{item.desc}</p>
-              </div>
-            </a>
-          ))}
-        </div>
-      </motion.div>
     </div>
   );
 }
