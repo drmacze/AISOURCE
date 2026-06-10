@@ -15,6 +15,11 @@ import Generate from "@/pages/generate";
 import ApiKeys from "@/pages/api-keys";
 import SettingsPage from "@/pages/settings";
 import NotFound from "@/pages/not-found";
+import AIToolsPage from "@/pages/ai-tools";
+import PromptsPage from "@/pages/prompts";
+import AnalyticsPage from "@/pages/analytics";
+import NotebookPage from "@/pages/notebook";
+import WebSearchPage from "@/pages/websearch";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,11 +42,16 @@ function Router() {
         <Route path="/chat/:id" component={Chat} />
         <Route path="/rag" component={Rag} />
         <Route path="/training" component={Training} />
-        <Route path="/api-docs" component={ApiDocs} />
         <Route path="/models" component={ModelsPage} />
         <Route path="/generate" component={Generate} />
+        <Route path="/ai-tools" component={AIToolsPage} />
+        <Route path="/prompts" component={PromptsPage} />
+        <Route path="/analytics" component={AnalyticsPage} />
         <Route path="/api-keys" component={ApiKeys} />
         <Route path="/settings" component={SettingsPage} />
+        <Route path="/notebook" component={NotebookPage} />
+        <Route path="/web-search" component={WebSearchPage} />
+        <Route path="/api-docs" component={ApiDocs} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

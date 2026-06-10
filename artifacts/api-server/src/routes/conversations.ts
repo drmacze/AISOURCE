@@ -116,6 +116,56 @@ async function retrieveWebContext(query: string): Promise<string | undefined> {
   }
 }
 
+// ─── Helper: extract rows from Drizzle/pg QueryResult ────────────────────────
+function pgRows<T = Record<string, unknown>>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  const r = result as { rows?: T[] };
+  return r.rows || [];
+}
+
+// ─── GET /conversations/search ────────────────────────────────────────────────
+router.get("/conversations/search", async (req, res) => {
+  const { q = "", limit = "20" } = req.query as Record<string, string>;
+  if (!q.trim()) { res.status(400).json({ error: "q is required" }); return; }
+  try {
+    const results = pgRows(await db.execute(sql`
+      SELECT DISTINCT ON (c.id)
+        c.id, c.title, c.model, c.created_at, c.updated_at,
+        m.content AS matching_message,
+        m.role AS matching_role
+      FROM conversations c
+      JOIN messages m ON m.conversation_id = c.id
+      WHERE c.title ILIKE ${`%${q}%`} OR m.content ILIKE ${`%${q}%`}
+      ORDER BY c.id DESC, c.updated_at DESC
+      LIMIT ${parseInt(limit, 10) || 20}
+    `));
+    res.json({ query: q, results });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ─── GET /conversations/stats ─────────────────────────────────────────────────
+router.get("/conversations/stats", async (_req, res) => {
+  try {
+    const rows = pgRows(await db.execute(sql`
+      SELECT
+        COUNT(DISTINCT c.id)::int AS total_conversations,
+        COUNT(m.id)::int AS total_messages,
+        COALESCE(SUM(m.tokens), 0)::bigint AS total_tokens,
+        COUNT(m.id) FILTER (WHERE m.role = 'user')::int AS user_messages,
+        COUNT(m.id) FILTER (WHERE m.role = 'assistant')::int AS assistant_messages,
+        AVG(m.tokens) FILTER (WHERE m.tokens IS NOT NULL)::float AS avg_tokens_per_message
+      FROM conversations c
+      LEFT JOIN messages m ON m.conversation_id = c.id
+    `));
+    const row = rows[0] || {};
+    res.json(row);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 router.get("/conversations", async (_req, res) => {
   const rows = await db
     .select()
@@ -185,19 +235,23 @@ router.delete("/conversations/:id", async (req, res) => {
   res.status(204).send();
 });
 
-// PATCH: update conversation model
+// PATCH: update conversation model and/or title
 router.patch("/conversations/:id", async (req, res) => {
   const { id } = GetConversationParams.parse(req.params);
-  const { model } = req.body as { model?: string };
+  const { model, title } = req.body as { model?: string; title?: string };
 
-  if (!model) {
-    res.status(400).json({ error: "model field required" });
+  if (!model && !title) {
+    res.status(400).json({ error: "model or title field required" });
     return;
   }
 
+  const updateData: Record<string, unknown> = { updatedAt: new Date() };
+  if (model) updateData.model = model;
+  if (title) updateData.title = title;
+
   const [updated] = await db
     .update(conversationsTable)
-    .set({ model, updatedAt: new Date() })
+    .set(updateData)
     .where(eq(conversationsTable.id, id))
     .returning();
 
@@ -207,6 +261,13 @@ router.patch("/conversations/:id", async (req, res) => {
   }
 
   res.json(updated);
+});
+
+// DELETE all conversations (bulk)
+router.delete("/conversations", async (_req, res) => {
+  await db.delete(messagesTable);
+  const deleted = await db.delete(conversationsTable).returning({ id: conversationsTable.id });
+  res.json({ deleted: deleted.length });
 });
 
 router.get("/conversations/:id/messages", async (req, res) => {
@@ -408,6 +469,106 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
   } as typeof res.end;
 
   await streamOllamaResponse(body.content, model, combinedContext, res);
+});
+
+
+// ─── GET /conversations/:id/export ────────────────────────────────────────────
+router.get("/conversations/:id/export", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const format = (req.query.format as string) || "json";
+
+  const [conv] = await db.select().from(conversationsTable).where(eq(conversationsTable.id, id));
+  if (!conv) { res.status(404).json({ error: "Conversation not found" }); return; }
+
+  const msgs = await db.select().from(messagesTable)
+    .where(eq(messagesTable.conversationId, id))
+    .orderBy(messagesTable.createdAt);
+
+  if (format === "markdown" || format === "md") {
+    const md = [
+      `# ${conv.title}`,
+      `**Model:** ${conv.model || "tinyllama"}  `,
+      `**Created:** ${new Date(conv.createdAt).toISOString()}  `,
+      `**Messages:** ${msgs.length}`,
+      "",
+      "---",
+      "",
+      ...msgs.map((m) => {
+        const roleLabel = m.role === "user" ? "**You**" : `**${conv.model || "AI"}**`;
+        return `${roleLabel}\n\n${m.content}\n`;
+      }),
+    ].join("\n");
+
+    res.setHeader("Content-Type", "text/markdown");
+    res.setHeader("Content-Disposition", `attachment; filename="conversation-${id}.md"`);
+    res.send(md);
+  } else if (format === "txt") {
+    const txt = [
+      `Conversation: ${conv.title}`,
+      `Model: ${conv.model || "tinyllama"}`,
+      `Date: ${new Date(conv.createdAt).toISOString()}`,
+      "",
+      "=" .repeat(60),
+      "",
+      ...msgs.map((m) => `[${m.role.toUpperCase()}]\n${m.content}\n`),
+    ].join("\n");
+
+    res.setHeader("Content-Type", "text/plain");
+    res.setHeader("Content-Disposition", `attachment; filename="conversation-${id}.txt"`);
+    res.send(txt);
+  } else {
+    res.json({
+      id: conv.id,
+      title: conv.title,
+      model: conv.model,
+      createdAt: conv.createdAt,
+      updatedAt: conv.updatedAt,
+      messageCount: msgs.length,
+      messages: msgs.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        tokens: m.tokens,
+        createdAt: m.createdAt,
+      })),
+    });
+  }
+});
+
+// GET /conversations/:id/summary — AI-generated conversation summary
+router.get("/conversations/:id/summary", async (req: Request, res: Response) => {
+  const idNum = parseInt(req.params.id, 10);
+  if (isNaN(idNum)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const msgs = await db.select().from(messagesTable)
+    .where(eq(messagesTable.conversationId, idNum))
+    .orderBy(messagesTable.createdAt);
+
+  if (msgs.length === 0) { res.json({ summary: "Empty conversation." }); return; }
+
+  // Build a readable transcript
+  const transcript = msgs
+    .slice(-20) // last 20 messages
+    .map((m) => `${m.role === "user" ? "User" : "AI"}: ${String(m.content || "").slice(0, 200)}`)
+    .join("\n");
+
+  try {
+    const { generateOllamaResponse, isOllamaOnline } = await import("../ollama");
+    const online = await isOllamaOnline().catch(() => false);
+    if (!online) {
+      res.json({ summary: `Conversation with ${msgs.length} messages.` });
+      return;
+    }
+    const summary = await generateOllamaResponse(
+      transcript,
+      "You are a conversation summarizer. In 2-3 sentences, summarize what this conversation was about and its key outcomes. Be concise."
+    );
+    res.json({ summary, messageCount: msgs.length });
+  } catch (e) {
+    res.json({ summary: `Conversation with ${msgs.length} messages.`, error: String(e) });
+  }
 });
 
 export default router;

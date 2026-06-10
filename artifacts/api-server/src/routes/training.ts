@@ -579,4 +579,181 @@ async function runOllamaTraining(
   }
 }
 
+// ─── GET /training-datasets/:id/samples ──────────────────────────────────────
+router.get("/training-datasets/:id/samples", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+
+  const { source, minLength, search, limit = "200", offset = "0" } = req.query as Record<string, string>;
+
+  let samples = await db.select().from(trainingSamplesTable)
+    .where(eq(trainingSamplesTable.datasetId, id))
+    .orderBy(desc(trainingSamplesTable.createdAt));
+
+  // Filter by source
+  if (source && source !== "all") {
+    samples = samples.filter((s) => s.source === source);
+  }
+  // Filter by minimum content length
+  if (minLength) {
+    const min = parseInt(minLength, 10);
+    samples = samples.filter((s) => (s.input?.length || 0) + (s.output?.length || 0) >= min);
+  }
+  // Search in input/output
+  if (search) {
+    const q = search.toLowerCase();
+    samples = samples.filter((s) =>
+      s.input?.toLowerCase().includes(q) || s.output?.toLowerCase().includes(q)
+    );
+  }
+
+  const total = samples.length;
+  const lim = parseInt(limit, 10) || 200;
+  const off = parseInt(offset, 10) || 0;
+  const page = samples.slice(off, off + lim);
+
+  // Add quality scores
+  const scored = page.map((s) => {
+    const inputLen = s.input?.length || 0;
+    const outputLen = s.output?.length || 0;
+    const ratio = outputLen > 0 ? Math.min(outputLen / Math.max(inputLen, 1), 5) : 0;
+    const quality = Math.min(
+      0.3 * Math.min(inputLen / 100, 1) +
+      0.3 * Math.min(outputLen / 200, 1) +
+      0.2 * (ratio > 0.2 && ratio < 10 ? 1 : 0) +
+      0.2 * (s.source ? 1 : 0),
+      1
+    );
+    return { ...s, qualityScore: Math.round(quality * 100) };
+  });
+
+  res.json({ total, limit: lim, offset: off, samples: scored });
+});
+
+// ─── POST /training-datasets/:id/deduplicate ──────────────────────────────────
+router.post("/training-datasets/:id/deduplicate", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+
+  const samples = await db.select().from(trainingSamplesTable)
+    .where(eq(trainingSamplesTable.datasetId, id))
+    .orderBy(trainingSamplesTable.createdAt);
+
+  const seen = new Set<string>();
+  const duplicateIds: number[] = [];
+
+  for (const s of samples) {
+    const key = (s.input || "").trim().toLowerCase().slice(0, 200);
+    if (seen.has(key)) {
+      duplicateIds.push(s.id);
+    } else {
+      seen.add(key);
+    }
+  }
+
+  if (duplicateIds.length === 0) {
+    res.json({ removed: 0, message: "No duplicates found" });
+    return;
+  }
+
+  // Delete duplicates in batches
+  for (const dupId of duplicateIds) {
+    await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.id, dupId));
+  }
+
+  // Update sample count
+  const [countRow] = await db.select({ c: sql<number>`COUNT(*)::int` }).from(trainingSamplesTable)
+    .where(eq(trainingSamplesTable.datasetId, id));
+  await db.update(trainingDatasetsTable)
+    .set({ sampleCount: countRow?.c ?? 0, updatedAt: new Date() })
+    .where(eq(trainingDatasetsTable.id, id));
+
+  res.json({ removed: duplicateIds.length, remaining: countRow?.c ?? 0 });
+});
+
+// ─── POST /training-datasets/:id/import ───────────────────────────────────────
+router.post("/training-datasets/:id/import", async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+
+  const { jsonl, source = "import" } = req.body as { jsonl?: string; source?: string };
+  if (!jsonl?.trim()) { res.status(400).json({ error: "jsonl field is required" }); return; }
+
+  const [ds] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, id));
+  if (!ds) { res.status(404).json({ error: "Dataset not found" }); return; }
+
+  const lines = jsonl.trim().split("\n").filter((l) => l.trim());
+  let imported = 0;
+  const errors: string[] = [];
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line.trim()) as Record<string, unknown>;
+
+      // Support multiple JSONL formats
+      let input = "";
+      let output = "";
+
+      if (obj.messages && Array.isArray(obj.messages)) {
+        // OpenAI fine-tuning format
+        const msgs = obj.messages as Array<{ role: string; content: string }>;
+        const user = msgs.find((m) => m.role === "user");
+        const assistant = msgs.find((m) => m.role === "assistant");
+        input = user?.content || "";
+        output = assistant?.content || "";
+      } else if (obj.input && obj.output) {
+        input = String(obj.input);
+        output = String(obj.output);
+      } else if (obj.prompt && obj.completion) {
+        input = String(obj.prompt);
+        output = String(obj.completion);
+      } else if (obj.question && obj.answer) {
+        input = String(obj.question);
+        output = String(obj.answer);
+      } else if (obj.instruction && obj.response) {
+        input = String(obj.instruction);
+        output = String(obj.response);
+      } else {
+        errors.push(`Line skipped (unknown format): ${line.slice(0, 80)}`);
+        continue;
+      }
+
+      if (!input.trim() || !output.trim()) continue;
+      await db.insert(trainingSamplesTable).values({
+        datasetId: id,
+        input: input.trim().slice(0, 2000),
+        output: output.trim().slice(0, 2000),
+        source,
+        metadata: JSON.stringify({ importedAt: new Date().toISOString(), originalFormat: "jsonl" }),
+      });
+      imported++;
+    } catch {
+      errors.push(`Parse error: ${line.slice(0, 80)}`);
+    }
+  }
+
+  // Update sample count
+  const [countRow] = await db.select({ c: sql<number>`COUNT(*)::int` }).from(trainingSamplesTable)
+    .where(eq(trainingSamplesTable.datasetId, id));
+  await db.update(trainingDatasetsTable)
+    .set({ sampleCount: countRow?.c ?? 0, updatedAt: new Date() })
+    .where(eq(trainingDatasetsTable.id, id));
+
+  res.json({
+    imported,
+    total: lines.length,
+    errors: errors.slice(0, 10),
+    newSampleCount: countRow?.c ?? 0,
+  });
+});
+
+// ─── DELETE /training-datasets/:id/samples/:sampleId ─────────────────────────
+router.delete("/training-datasets/:id/samples/:sampleId", async (req: Request, res: Response) => {
+  const sampleId = parseInt(req.params.sampleId, 10);
+  if (isNaN(sampleId)) { res.status(400).json({ error: "Invalid sample id" }); return; }
+  const [deleted] = await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.id, sampleId)).returning();
+  if (!deleted) { res.status(404).json({ error: "Sample not found" }); return; }
+  res.status(204).send();
+});
+
 export default router;

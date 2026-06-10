@@ -16,6 +16,7 @@ import {
   Plus, Trash2, Send, Bot, User, Loader2, MessageSquare,
   ChevronDown, Cpu, Zap, StopCircle, Sparkles, Cloud,
   Copy, Check, Download, Code2, ChevronRight, Mic, MicOff,
+  FileDown,
 } from "lucide-react";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
@@ -150,6 +151,8 @@ export default function Chat() {
   const [copiedId, setCopiedId] = React.useState<number | string | null>(null);
   const [voiceActive, setVoiceActive] = React.useState(false);
   const recognitionRef = React.useRef<SpeechRecognition | null>(null);
+  const [renamingId, setRenamingId] = React.useState<number | null>(null);
+  const [renameValue, setRenameValue] = React.useState("");
 
   const { data: conversations, isLoading: loadingConvos } = useListConversations();
   const { data: activeConversation, isLoading: loadingActive } = useGetConversation(
@@ -182,6 +185,45 @@ export default function Chat() {
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeConversation?.messages, streamingText, isStreaming]);
+
+  // ── Prompt Library injection: pick up prompt from /prompts page ─────────────
+  React.useEffect(() => {
+    const injectedPrompt = sessionStorage.getItem("nexus_prompt_inject");
+    const injectedName   = sessionStorage.getItem("nexus_prompt_name");
+    if (injectedPrompt) {
+      sessionStorage.removeItem("nexus_prompt_inject");
+      sessionStorage.removeItem("nexus_prompt_name");
+      setInput(injectedPrompt);
+      // Auto-create a new conversation titled after the prompt
+      if (!activeId) {
+        const model = selectedModel || ollamaModels?.[0]?.name || "tinyllama";
+        createMutation.mutate({ data: { title: injectedName || "Prompt Session", model } });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const renameMutation = useQuery({
+    queryKey: ["rename-noop"],
+    queryFn: () => Promise.resolve(null),
+    enabled: false,
+  });
+  const submitRename = async (id: number, newTitle: string) => {
+    if (!newTitle.trim()) { setRenamingId(null); return; }
+    await fetch(`${BASE}/api/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: newTitle.trim() }),
+    });
+    queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+    setRenamingId(null);
+  };
+  const bulkDeleteMutation = React.useCallback(async () => {
+    if (!window.confirm("Delete ALL conversations? This cannot be undone.")) return;
+    await fetch(`${BASE}/api/conversations`, { method: "DELETE" });
+    queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+    setLocation("/chat");
+  }, [queryClient, setLocation]);
 
   const createMutation = useCreateConversation({
     mutation: {
@@ -518,17 +560,34 @@ export default function Chat() {
                       </span>
                     )}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="opacity-0 group-hover:opacity-100 h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteMutation.mutate({ id: c.id });
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-blue-400"
+                      title="Export conversation"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const url = `${BASE}/api/conversations/${c.id}/export?format=md`;
+                        const a = document.createElement("a");
+                        a.href = url; a.download = `conversation-${c.id}.md`;
+                        a.click();
+                      }}
+                    >
+                      <FileDown className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteMutation.mutate({ id: c.id });
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
                 </div>
               ))
             )}

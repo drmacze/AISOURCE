@@ -488,5 +488,105 @@ router.post("/documents/search", async (req: Request, res: Response) => {
   })));
 });
 
+// ─── POST /documents/reembed-all ─────────────────────────────────────────────
+/** Re-generate embeddings for all documents that don't have one yet */
+router.post("/documents/reembed-all", async (_req: Request, res: Response) => {
+  const docs = await db.execute(
+    sql`SELECT id, title, content FROM documents WHERE embedding IS NULL ORDER BY id ASC`
+  ) as unknown as Array<{ id: number; title: string; content: string }>;
+
+  if (docs.length === 0) {
+    res.json({ message: "All documents already have embeddings", updated: 0 });
+    return;
+  }
+
+  let updated = 0;
+  const errors: number[] = [];
+
+  for (const doc of docs) {
+    try {
+      const text = `${doc.title} ${doc.content || ""}`.slice(0, 512);
+      const vec = await generateEmbedding(text);
+      if (vec && vec.length === EMBED_DIMS) {
+        await db.execute(sql`
+          UPDATE documents
+          SET embedding = ${pgVector(vec)}::vector,
+              embedding_model = 'sentence-transformers/all-MiniLM-L6-v2'
+          WHERE id = ${doc.id}
+        `);
+        updated++;
+      }
+    } catch {
+      errors.push(doc.id);
+    }
+  }
+
+  res.json({
+    message: `Re-embedded ${updated}/${docs.length} documents`,
+    total: docs.length,
+    updated,
+    errors,
+  });
+});
+
+// ─── GET /documents/:id/preview ───────────────────────────────────────────────
+router.get("/documents/:id/preview", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "invalid id" }); return; }
+  const [row] = await db.select().from(documentsTable).where(eq(documentsTable.id, id));
+  if (!row) { res.status(404).json({ error: "Document not found" }); return; }
+
+  // Split content into chunks for preview
+  const content = row.content || "";
+  const chunks = chunkText(content, 500, 80).map((chunk, i) => ({
+    index: i,
+    text: chunk,
+    length: chunk.length,
+    words: chunk.split(/\s+/).length,
+  }));
+
+  const hasEmbedding = await db.execute(sql`SELECT embedding IS NOT NULL AS has_emb FROM documents WHERE id = ${id}`)
+    .then((r) => (r as unknown as Array<{ has_emb: boolean }>)[0]?.has_emb ?? false)
+    .catch(() => false);
+
+  res.json({
+    id: row.id,
+    title: row.title,
+    fileType: row.fileType,
+    size: row.size,
+    chunkCount: chunks.length,
+    totalWords: content.split(/\s+/).length,
+    totalChars: content.length,
+    hasEmbedding,
+    embeddingModel: (row as Record<string, unknown>).embeddingModel || null,
+    chunks: chunks.slice(0, 50), // Return first 50 chunks max
+    indexed: row.indexed,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  });
+});
+
+// ─── POST /documents/:id/embed ────────────────────────────────────────────────
+router.post("/documents/:id/embed", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "invalid id" }); return; }
+  const [doc] = await db.select().from(documentsTable).where(eq(documentsTable.id, id));
+  if (!doc) { res.status(404).json({ error: "Document not found" }); return; }
+
+  const text = `${doc.title} ${doc.content || ""}`.slice(0, 512);
+  const vec = await generateEmbedding(text);
+  if (!vec) {
+    res.status(503).json({ error: "EmbeddingUnavailable", message: "HF_TOKEN not set or embedding failed" });
+    return;
+  }
+  await db.execute(sql`
+    UPDATE documents
+    SET embedding = ${pgVector(vec)}::vector,
+        embedding_model = 'sentence-transformers/all-MiniLM-L6-v2'
+    WHERE id = ${id}
+  `);
+  res.json({ ok: true, documentId: id, dimensions: vec.length });
+});
+
 export { generateEmbedding };
 export default router;

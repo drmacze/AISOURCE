@@ -47,3 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+.ollama-models/
+node_modules/
+.ollama-models/
+node_modules/

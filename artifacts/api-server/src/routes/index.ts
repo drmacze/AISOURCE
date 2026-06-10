@@ -15,6 +15,9 @@ import apiKeysRouter from "./apikeys";
 import searchRouter from "./search";
 import settingsRouter from "./settings";
 import authSessionRouter from "./auth-session";
+import toolsRouter from "./tools";
+import promptsRouter from "./prompts";
+import analyticsRouter from "./analytics";
 
 const router: IRouter = Router();
 
@@ -47,6 +50,15 @@ router.use(kimiRouter);
 
 // Web search (DuckDuckGo) + Ollama real-time metrics
 router.use(searchRouter);
+
+// AI NLP Tools — summarize, translate, sentiment, classify, NER, keywords
+router.use(toolsRouter);
+
+// Prompt Library — save and manage reusable prompts
+router.use(promptsRouter);
+
+// Analytics — real DB-backed metrics and charts
+router.use(analyticsRouter);
 
 // Public API v1 — for external integrations (e.g. dlavie.vercel.app)
 router.use("/v1", v1Router);

@@ -8,6 +8,9 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
+import { db } from "@workspace/db";
+import { conversationsTable, messagesTable, documentsTable, promptsTable } from "@workspace/db";
+import { like, or, desc, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -228,6 +231,92 @@ router.get("/ollama/metrics", async (_req: Request, res: Response) => {
     });
   } catch (err) {
     res.status(502).json({ error: String(err), online: false });
+  }
+});
+
+// ─── GET /api/global-search ───────────────────────────────────────────────────
+// Search across conversations, messages, documents, and prompts simultaneously
+router.get("/global-search", async (req: Request, res: Response) => {
+  const q = String(req.query.q || "").trim();
+  if (!q || q.length < 2) {
+    res.status(400).json({ error: "q must be at least 2 characters" });
+    return;
+  }
+
+  const pattern = `%${q}%`;
+
+  try {
+    const [convResults, msgResults, docResults, promptResults] = await Promise.all([
+      // Conversations by title
+      db.select({
+        id: conversationsTable.id,
+        title: conversationsTable.title,
+        model: conversationsTable.model,
+        createdAt: conversationsTable.createdAt,
+      }).from(conversationsTable)
+        .where(like(conversationsTable.title, pattern))
+        .limit(5),
+
+      // Messages by content
+      db.select({
+        id: messagesTable.id,
+        conversationId: messagesTable.conversationId,
+        role: messagesTable.role,
+        content: messagesTable.content,
+        createdAt: messagesTable.createdAt,
+      }).from(messagesTable)
+        .where(like(messagesTable.content, pattern))
+        .orderBy(desc(messagesTable.createdAt))
+        .limit(5),
+
+      // Documents by title or content
+      db.select({
+        id: documentsTable.id,
+        title: documentsTable.title,
+        content: documentsTable.content,
+        chunkCount: documentsTable.chunkCount,
+        createdAt: documentsTable.createdAt,
+      }).from(documentsTable)
+        .where(or(like(documentsTable.title, pattern), like(documentsTable.content, pattern)))
+        .limit(5),
+
+      // Prompts by title or content
+      db.select({
+        id: promptsTable.id,
+        name: promptsTable.name,
+        content: promptsTable.content,
+        category: promptsTable.category,
+      }).from(promptsTable)
+        .where(or(like(promptsTable.name, pattern), like(promptsTable.content, pattern)))
+        .limit(5),
+    ]);
+
+    const totalHits = convResults.length + msgResults.length + docResults.length + promptResults.length;
+
+    res.json({
+      query: q,
+      totalHits,
+      results: {
+        conversations: convResults.map((c) => ({ ...c, type: "conversation", snippet: c.title })),
+        messages: msgResults.map((m) => ({
+          ...m,
+          type: "message",
+          snippet: String(m.content || "").slice(0, 120),
+        })),
+        documents: docResults.map((d) => ({
+          ...d,
+          type: "document",
+          snippet: String(d.content || "").slice(0, 120),
+        })),
+        prompts: promptResults.map((p) => ({
+          ...p,
+          type: "prompt",
+          snippet: String(p.content || "").slice(0, 120),
+        })),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
   }
 });
 
