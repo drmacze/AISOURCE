@@ -9,7 +9,7 @@
  */
 
 import type { Response } from "express";
-import { HF_TOKEN, hfHeaders, isHFConfigured } from "./huggingface.js";
+import { getHFToken, hfHeaders, isHFConfigured } from "./huggingface.js";
 
 export const KIMI_HF_MODEL      = "moonshotai/Kimi-K2-Instruct";
 export const KIMI_HF_ROUTER     = "https://router.huggingface.co/v1/chat/completions";

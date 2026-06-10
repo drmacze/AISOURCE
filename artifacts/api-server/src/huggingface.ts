@@ -8,9 +8,13 @@
  *  4. Streaming inference support
  */
 
-export const HF_TOKEN = process.env.HF_TOKEN || "";
 export const HF_API_BASE = "https://api-inference.huggingface.co";
 export const HF_HUB_BASE = "https://huggingface.co";
+
+/** Always reads from process.env at call time — safe after runtime updates */
+export function getHFToken(): string {
+  return process.env.HF_TOKEN || "";
+}
 
 /**
  * Default HF chat models — ordered by preference.
@@ -27,13 +31,15 @@ export const HF_CHAT_MODELS = [
 
 export function hfHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (HF_TOKEN) h["Authorization"] = `Bearer ${HF_TOKEN}`;
+  const token = getHFToken();
+  if (token) h["Authorization"] = `Bearer ${token}`;
   return h;
 }
 
 /** Check if HuggingFace token is configured */
 export function isHFConfigured(): boolean {
-  return !!HF_TOKEN && HF_TOKEN.startsWith("hf_");
+  const token = getHFToken();
+  return !!token && token.startsWith("hf_");
 }
 
 /**
@@ -261,5 +267,5 @@ export async function generateTrainingSamplesFromText(
 
 export const HF_STATUS = {
   isConfigured: isHFConfigured,
-  tokenPrefix: () => HF_TOKEN ? HF_TOKEN.slice(0, 12) + "..." : "not set",
+  tokenPrefix: () => { const t = getHFToken(); return t ? t.slice(0, 12) + "..." : "not set"; },
 };

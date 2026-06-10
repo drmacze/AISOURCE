@@ -5,7 +5,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { HF_TOKEN, hfHeaders, isHFConfigured, HF_API_BASE } from "../huggingface";
+import { getHFToken, hfHeaders, isHFConfigured, HF_API_BASE } from "../huggingface";
 
 const router: IRouter = Router();
 

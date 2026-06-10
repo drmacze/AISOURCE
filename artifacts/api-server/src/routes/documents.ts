@@ -8,6 +8,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { objectStorageClient } from "../replit_integrations/object_storage";
+import { getHFToken } from "../huggingface";
 
 // ─── Object Storage helpers ────────────────────────────────────────────────────
 const BUCKET_ID = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID || "";
@@ -47,7 +48,6 @@ const BM25_K1 = 1.5;
 const BM25_B  = 0.75;
 
 // ─── HuggingFace embedding config ─────────────────────────────────────────────
-const HF_TOKEN         = process.env.HF_TOKEN || "";
 const HF_EMBED_MODEL   = "sentence-transformers/all-MiniLM-L6-v2";
 const HF_EMBED_URL     = `https://api-inference.huggingface.co/models/${HF_EMBED_MODEL}`;
 const EMBED_DIMS       = 384;
@@ -57,12 +57,13 @@ const EMBED_DIMS       = 384;
  * Returns null if HF_TOKEN not set or API fails.
  */
 async function generateEmbedding(text: string): Promise<number[] | null> {
-  if (!HF_TOKEN) return null;
+  const hfToken = getHFToken();
+  if (!hfToken) return null;
   try {
     const res = await fetch(HF_EMBED_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${HF_TOKEN}`,
+        Authorization: `Bearer ${hfToken}`,
         "Content-Type":  "application/json",
         "x-wait-for-model": "true",
       },
@@ -325,7 +326,7 @@ router.post("/documents/upload", upload.single("file"), async (req: Request, res
     chunkCount: chunks.length,
     fileName: file.originalname,
     fileSizeBytes: file.size,
-    embeddingQueued: !!HF_TOKEN,
+    embeddingQueued: !!getHFToken(),
     storageObjectPath: storageResult?.objectPath ?? null,
     storedInCloud: !!storageResult,
   });
@@ -410,7 +411,7 @@ router.post("/documents/search", async (req: Request, res: Response) => {
     return (d as Record<string, unknown>).embedding != null;
   });
 
-  if ((searchType === "vector" || searchType === "hybrid") && HF_TOKEN) {
+  if ((searchType === "vector" || searchType === "hybrid") && getHFToken()) {
     try {
       const queryVec = await generateEmbedding(query);
       if (queryVec && queryVec.length === EMBED_DIMS) {

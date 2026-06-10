@@ -91,15 +91,17 @@ export default function SettingsPage() {
         method: "POST",
         body: JSON.stringify({ key, value }),
       }),
-    onSuccess: (data) => {
+    onSuccess: () => {
       toast({
-        title: "Key saved",
-        description: data.message,
+        title: "Key tersimpan",
+        description: "API key aktif dan langsung berfungsi.",
       });
       setEditingKey(null);
       setKeyValue("");
       setShowKey(false);
+      // Force re-fetch settings so status updates immediately
       qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.refetchQueries({ queryKey: ["settings"] });
     },
     onError: (err: Error) => {
       toast({

@@ -1,11 +1,23 @@
 import "dotenv/config";
-import { mkdirSync } from "fs";
+import { mkdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { startOllamaServer } from "./ollama";
 import { startAutoTraining, startMicroTraining } from "./autotraining";
 import { isHFConfigured, HF_STATUS } from "./huggingface";
+
+// ─── Load saved API keys from config file on startup ─────────────────────────
+const CONFIG_PATH = join(process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace", ".dlavie-config.json");
+try {
+  if (existsSync(CONFIG_PATH)) {
+    const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Record<string, string>;
+    if (cfg.hfToken)        process.env.HF_TOKEN           = cfg.hfToken;
+    if (cfg.moonshotApiKey) process.env.MOONSHOT_API_KEY   = cfg.moonshotApiKey;
+    if (cfg.githubToken)    process.env.GITHUB_TOKEN        = cfg.githubToken;
+    if (cfg.nexusApiKey)    process.env.NEXUS_API_KEY       = cfg.nexusApiKey;
+  }
+} catch { /* ignore parse errors */ }
 
 // ─── Port ─────────────────────────────────────────────────────────────────────
 const rawPort = process.env["PORT"];

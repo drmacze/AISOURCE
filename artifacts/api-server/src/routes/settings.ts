@@ -125,17 +125,27 @@ router.post("/settings/update", async (req: Request, res: Response) => {
     nexusApiKey: "nexusApiKey",
   };
 
-  config[mapping[key]!] = value.trim();
+  const trimmed = value.trim();
+  config[mapping[key]!] = trimmed;
   config.updatedAt = new Date().toISOString();
   writeConfig(config);
 
-  logger.info({ key }, "API key updated in config file — restart required");
+  // Apply immediately to the running process — no restart needed
+  const envMap: Record<string, string> = {
+    hfToken: "HF_TOKEN",
+    moonshotApiKey: "MOONSHOT_API_KEY",
+    githubToken: "GITHUB_TOKEN",
+    nexusApiKey: "NEXUS_API_KEY",
+  };
+  process.env[envMap[key]!] = trimmed;
+
+  logger.info({ key }, "API key saved and applied immediately");
 
   res.json({
     success: true,
     key,
-    message: "Key saved to config file. Restart the API server to apply changes.",
-    restartRequired: true,
+    message: "Key saved and active immediately.",
+    restartRequired: false,
   });
 });
 
@@ -144,19 +154,19 @@ router.post("/settings/reload", (_req, res) => {
   const config = readConfig();
   let applied = 0;
 
-  if (config.hfToken && !process.env.HF_TOKEN) {
+  if (config.hfToken) {
     process.env.HF_TOKEN = config.hfToken;
     applied++;
   }
-  if (config.moonshotApiKey && !process.env.MOONSHOT_API_KEY) {
+  if (config.moonshotApiKey) {
     process.env.MOONSHOT_API_KEY = config.moonshotApiKey;
     applied++;
   }
-  if (config.githubToken && !process.env.GITHUB_TOKEN) {
+  if (config.githubToken) {
     process.env.GITHUB_TOKEN = config.githubToken;
     applied++;
   }
-  if (config.nexusApiKey && !process.env.NEXUS_API_KEY) {
+  if (config.nexusApiKey) {
     process.env.NEXUS_API_KEY = config.nexusApiKey;
     applied++;
   }
