@@ -62,6 +62,34 @@ let nextCycleAt: Date | null    = null;
 let currentCycleLog: string[]   = [];
 const seenHashes = new Set<string>(); // in-memory dedup cache
 
+// ─── SSE event bus ────────────────────────────────────────────────────────────
+export type TrainingEvent =
+  | { type: "cycle_complete"; cycleNumber: number; samplesAdded: number; totalSamples: number; breakdown: Record<string, number>; at: string }
+  | { type: "cycle_start"; cycleNumber: number; at: string }
+  | { type: "cycle_error"; cycleNumber: number; error: string; at: string }
+  | { type: "heartbeat"; at: string };
+
+type SSEClient = { id: number; send: (event: TrainingEvent) => void; close: () => void };
+let nextClientId = 1;
+const sseClients = new Map<number, SSEClient>();
+
+export function registerSSEClient(client: SSEClient): number {
+  sseClients.set(client.id, client);
+  return client.id;
+}
+
+export function unregisterSSEClient(id: number) {
+  sseClients.delete(id);
+}
+
+function broadcastEvent(event: TrainingEvent) {
+  for (const client of sseClients.values()) {
+    try { client.send(event); } catch { sseClients.delete(client.id); }
+  }
+}
+
+export function allocateClientId() { return nextClientId++; }
+
 const activityLog: Array<{ at: Date; msg: string; type: "info" | "success" | "error" }> = [];
 let sourceStats: Record<string, number> = {
   wikipedia: 0, hackernews: 0, reddit: 0, arxiv: 0, rss: 0,
@@ -763,6 +791,7 @@ export async function runAutoTrainingCycle(): Promise<{
 
   try {
     log(`=== Auto-training cycle #${totalCyclesCompleted + 1} started ===`);
+    broadcastEvent({ type: "cycle_start", cycleNumber: totalCyclesCompleted + 1, at: new Date().toISOString() });
     const dataset = await getLiveDataset();
 
     // Run all sources, some in parallel where safe
@@ -821,9 +850,19 @@ export async function runAutoTrainingCycle(): Promise<{
     totalSamplesAdded += totalAdded;
     lastCycleAt = new Date();
 
+    broadcastEvent({
+      type: "cycle_complete",
+      cycleNumber: totalCyclesCompleted,
+      samplesAdded: totalAdded,
+      totalSamples: totalCount,
+      breakdown,
+      at: new Date().toISOString(),
+    });
+
     return { samplesAdded: totalAdded, success: true, breakdown, cycleNumber: totalCyclesCompleted };
   } catch (err) {
     log(`Cycle error: ${String(err)}`, "error");
+    broadcastEvent({ type: "cycle_error", cycleNumber: totalCyclesCompleted, error: String(err), at: new Date().toISOString() });
     return { samplesAdded: 0, success: false, breakdown, cycleNumber: totalCyclesCompleted };
   } finally {
     autoTrainingRunning = false;

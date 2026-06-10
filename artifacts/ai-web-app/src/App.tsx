@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout/app-layout";
+import { useTrainingNotifications } from "@/hooks/useTrainingNotifications";
 
 import Dashboard from "@/pages/dashboard";
 import Chat from "@/pages/chat";
@@ -45,14 +46,23 @@ function Router() {
   );
 }
 
+function AppInner() {
+  useTrainingNotifications();
+  return (
+    <>
+      <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+        <Router />
+      </WouterRouter>
+      <Toaster />
+    </>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
+        <AppInner />
       </TooltipProvider>
     </QueryClientProvider>
   );

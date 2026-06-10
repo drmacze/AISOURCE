@@ -10,6 +10,10 @@ import {
   stopAutoTraining,
   getAutoTrainingStatus,
   scrapeUrlForTraining,
+  registerSSEClient,
+  unregisterSSEClient,
+  allocateClientId,
+  type TrainingEvent,
 } from "../autotraining";
 import { checkGitHubRateLimit, isGitHubConfigured } from "../github-datasets";
 import { db } from "@workspace/db";
@@ -133,6 +137,42 @@ router.post("/autotraining/scrape-url", async (req, res) => {
 
   const result = await scrapeUrlForTraining(url, datasetId);
   res.json({ ok: result.success, ...result });
+});
+
+/** GET /api/autotraining/events — SSE stream of real-time training events */
+router.get("/autotraining/events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const clientId = allocateClientId();
+
+  const send = (event: TrainingEvent) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  const close = () => {
+    unregisterSSEClient(clientId);
+    res.end();
+  };
+
+  registerSSEClient({ id: clientId, send, close });
+
+  // Send initial heartbeat so client knows the connection is live
+  send({ type: "heartbeat", at: new Date().toISOString() });
+
+  // Keep-alive heartbeat every 30s
+  const heartbeat = setInterval(() => {
+    try { send({ type: "heartbeat", at: new Date().toISOString() }); }
+    catch { clearInterval(heartbeat); unregisterSSEClient(clientId); }
+  }, 30_000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unregisterSSEClient(clientId);
+  });
 });
 
 /** GET /api/autotraining/activity — Latest activity log */
