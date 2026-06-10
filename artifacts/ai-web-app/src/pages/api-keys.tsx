@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Key,
@@ -19,6 +19,7 @@ import {
   Server,
   ChevronRight,
   ExternalLink,
+  Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -123,6 +124,28 @@ export default function ApiKeysPage() {
     () => localStorage.getItem("nexus_master_key") || ""
   );
   const [showMaster, setShowMaster] = useState(false);
+  const [autoAuthStatus, setAutoAuthStatus] = useState<"loading" | "found" | "not-found">("loading");
+
+  // Auto-load primary admin key from database on mount
+  useEffect(() => {
+    fetch(`${BASE}/api/auth/session`)
+      .then((r) => r.json())
+      .then((data: { found: boolean; key: string | null; name?: string }) => {
+        if (data.found && data.key) {
+          const stored = localStorage.getItem("nexus_master_key");
+          if (stored !== data.key) {
+            localStorage.setItem("nexus_master_key", data.key);
+            setMasterKey(data.key);
+            qc.invalidateQueries({ queryKey: ["api-keys"] });
+          }
+          setPrimaryKeyName(data.name ?? null);
+          setAutoAuthStatus("found");
+        } else {
+          setAutoAuthStatus("not-found");
+        }
+      })
+      .catch(() => setAutoAuthStatus("not-found"));
+  }, [qc]);
 
   const [genOpen, setGenOpen] = useState(false);
   const [genName, setGenName] = useState("");
@@ -132,6 +155,7 @@ export default function ApiKeysPage() {
   const [generatedData, setGeneratedData] = useState<{ key: string; defaultModel: string | null } | null>(null);
 
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyRow | null>(null);
+  const [primaryKeyName, setPrimaryKeyName] = useState<string | null>(null);
 
   const keysQuery = useQuery<{ keys: ApiKeyRow[]; total: number }>({
     queryKey: ["api-keys", masterKey],
@@ -186,6 +210,31 @@ export default function ApiKeysPage() {
       toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const setPrimaryMutation = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch("/api/auth/session", {
+        method: "POST",
+        body: JSON.stringify({ keyId: id }),
+      }),
+    onSuccess: () => {
+      // Re-fetch session to update UI and localStorage
+      fetch(`${BASE}/api/auth/session`)
+        .then((r) => r.json())
+        .then((data: { found: boolean; key: string | null; name?: string }) => {
+          if (data.found && data.key) {
+            localStorage.setItem("nexus_master_key", data.key);
+            setMasterKey(data.key);
+            setPrimaryKeyName(data.name ?? null);
+            setAutoAuthStatus("found");
+            qc.invalidateQueries({ queryKey: ["api-keys"] });
+          }
+        });
+      toast({ title: "Primary key diubah", description: "Key ini sekarang tersimpan permanen sebagai admin utama." });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   const saveMasterKey = () => {
     localStorage.setItem("nexus_master_key", masterKey);
     qc.invalidateQueries({ queryKey: ["api-keys"] });
@@ -216,35 +265,78 @@ export default function ApiKeysPage() {
         </Button>
       </div>
 
-      {/* Master Key Config */}
+      {/* Dashboard Auth */}
       <div className="bg-slate-900/60 border border-white/8 rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-amber-400" />
           <span className="text-sm font-medium text-white">Dashboard Auth</span>
-          <span className="text-xs text-slate-500 ml-auto">
-            Needed to manage keys from this UI. Stored locally in your browser.
+          <span className="ml-auto">
+            {autoAuthStatus === "loading" && (
+              <span className="text-xs text-slate-500 flex items-center gap-1">
+                <RefreshCw className="w-3 h-3 animate-spin" /> Checking database…
+              </span>
+            )}
+            {autoAuthStatus === "found" && (
+              <span className="text-xs text-emerald-400 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5" /> Auto-authenticated dari database
+              </span>
+            )}
+            {autoAuthStatus === "not-found" && (
+              <span className="text-xs text-amber-400 flex items-center gap-1.5">
+                <ShieldAlert className="w-3.5 h-3.5" /> Belum ada primary key — buat admin key dulu
+              </span>
+            )}
           </span>
         </div>
-        <div className="flex gap-2">
-          <div className="flex-1 relative">
-            <Input
-              type={showMaster ? "text" : "password"}
-              value={masterKey}
-              onChange={(e) => setMasterKey(e.target.value)}
-              placeholder="NEXUS_API_KEY or any admin nxs_... key"
-              className="bg-slate-800 border-white/10 text-white font-mono text-sm pr-10"
-            />
+
+        {autoAuthStatus === "found" ? (
+          <div className="flex items-center gap-3 bg-emerald-500/8 border border-emerald-500/20 rounded-lg px-3 py-2">
+            <div className="flex-1">
+              <p className="text-xs text-emerald-300 font-medium">
+                Tersimpan permanen di database
+                {primaryKeyName && <span className="text-slate-400 font-normal"> — <span className="text-white">{primaryKeyName}</span></span>}
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Admin key aktif tersimpan di DB — tidak akan hilang walau browser di-clear atau server restart.
+              </p>
+            </div>
             <button
               onClick={() => setShowMaster((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              className="text-slate-400 hover:text-white p-1.5 rounded hover:bg-white/10"
+              title={showMaster ? "Sembunyikan key" : "Lihat key"}
             >
               {showMaster ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          <Button onClick={saveMasterKey} variant="outline" className="border-white/10 text-slate-300 hover:text-white">
-            Save
-          </Button>
-        </div>
+        ) : (
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <Input
+                type={showMaster ? "text" : "password"}
+                value={masterKey}
+                onChange={(e) => setMasterKey(e.target.value)}
+                placeholder="Paste admin nxs_... key di sini"
+                className="bg-slate-800 border-white/10 text-white font-mono text-sm pr-10"
+              />
+              <button
+                onClick={() => setShowMaster((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              >
+                {showMaster ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <Button onClick={saveMasterKey} variant="outline" className="border-white/10 text-slate-300 hover:text-white">
+              Simpan
+            </Button>
+          </div>
+        )}
+
+        {showMaster && masterKey && (
+          <div className="flex items-center gap-2 bg-slate-950 border border-white/5 rounded px-3 py-2">
+            <code className="flex-1 text-xs text-emerald-300 font-mono break-all">{masterKey}</code>
+            <CopyButton text={masterKey} />
+          </div>
+        )}
       </div>
 
       {/* Keys Table */}
@@ -322,6 +414,20 @@ export default function ApiKeysPage() {
 
                 {/* Actions */}
                 <div className="flex items-center gap-1">
+                  {k.permissions === "admin" && k.active && (
+                    <button
+                      onClick={() => setPrimaryMutation.mutate(k.id)}
+                      className={cn(
+                        "p-1.5 rounded transition-colors",
+                        primaryKeyName === k.name
+                          ? "text-amber-400"
+                          : "text-slate-600 hover:text-amber-400 hover:bg-white/10"
+                      )}
+                      title={primaryKeyName === k.name ? "Key utama saat ini" : "Jadikan primary key (tersimpan permanen)"}
+                    >
+                      <Star className={cn("w-3.5 h-3.5", primaryKeyName === k.name && "fill-amber-400")} />
+                    </button>
+                  )}
                   <button
                     onClick={() => toggleMutation.mutate({ id: k.id, active: !k.active })}
                     className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-white transition-colors"

@@ -14,6 +14,7 @@ import kimiRouter from "./kimi";
 import apiKeysRouter from "./apikeys";
 import searchRouter from "./search";
 import settingsRouter from "./settings";
+import authSessionRouter from "./auth-session";
 
 const router: IRouter = Router();
 
@@ -52,5 +53,8 @@ router.use("/v1", v1Router);
 
 // Settings — manage API keys and integrations
 router.use(settingsRouter);
+
+// Persistent auth session — store primary admin key in DB
+router.use(authSessionRouter);
 
 export default router;

@@ -15,7 +15,8 @@ import { Router, type IRouter, type Request, type Response, type NextFunction } 
 import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { apiKeysTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
+import { getPrimaryKey, setPrimaryKey } from "./auth-session";
 
 const router: IRouter = Router();
 
@@ -157,6 +158,17 @@ router.post("/keys", requireAdmin, async (req, res) => {
         ...(expiry ? { expiresAt: expiry } : {}),
       })
       .returning();
+
+    // If this is an admin key and no primary key is set yet, auto-set it as primary
+    if (permissions === "admin") {
+      try {
+        const existing = await getPrimaryKey();
+        if (!existing) {
+          await setPrimaryKey(newKey);
+          console.log("[ApiKeys] First admin key auto-set as primary dashboard key.");
+        }
+      } catch { /* non-fatal */ }
+    }
 
     // Return the FULL key once — it won't be shown again
     res.status(201).json({
