@@ -20,9 +20,6 @@ import { getPrimaryKey, setPrimaryKey } from "./auth-session";
 
 const router: IRouter = Router();
 
-// ─── Master admin key (env var) ───────────────────────────────────────────────
-const MASTER_KEY = process.env.NEXUS_API_KEY || "";
-
 function extractKey(req: Request): string | null {
   return (
     (req.headers["x-api-key"] as string) ||
@@ -35,9 +32,11 @@ function extractKey(req: Request): string | null {
 
 async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   const key = extractKey(req);
+  // Always read dynamically — supports runtime updates via Settings page
+  const masterKey = process.env.NEXUS_API_KEY || "";
 
   // If master key is set, accept it directly
-  if (MASTER_KEY && key === MASTER_KEY) {
+  if (masterKey && key === masterKey) {
     return next();
   }
 
@@ -61,10 +60,10 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction): Pr
   // ── Bootstrap mode ──────────────────────────────────────────────────────────
   // When no NEXUS_API_KEY is set AND no keys exist in the DB yet,
   // allow unauthenticated access so the first admin key can be created.
-  if (!MASTER_KEY) {
+  if (!masterKey) {
     try {
       const [countRow] = await db
-        .select({ c: (await import("drizzle-orm")).count() })
+        .select({ c: count() })
         .from(apiKeysTable);
       if ((countRow?.c ?? 0) === 0) {
         console.warn("[ApiKeys] Bootstrap mode: no keys in DB — unauthenticated access allowed until first admin key is created.");

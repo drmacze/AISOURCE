@@ -10,8 +10,8 @@ import { Router, type Request, type Response } from "express";
 import {
   streamKimi,
   getKimiConfig,
+  getMoonshotKey,
   KIMI_HF_MODEL,
-  MOONSHOT_API_KEY,
   type KimiMessage,
 } from "../kimi.js";
 import { db } from "@workspace/db";
@@ -27,7 +27,7 @@ router.get("/kimi/status", (_req: Request, res: Response) => {
     configured: cfg.ok,
     via: cfg.via,
     model: cfg.via === "moonshot" ? "kimi-k2-0711-preview (official)" : KIMI_HF_MODEL,
-    moonshot: !!MOONSHOT_API_KEY,
+    moonshot: !!getMoonshotKey(),
     reason: cfg.reason,
   });
 });

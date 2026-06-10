@@ -14,7 +14,10 @@ import { getHFToken, hfHeaders, isHFConfigured } from "./huggingface.js";
 export const KIMI_HF_MODEL      = "moonshotai/Kimi-K2-Instruct";
 export const KIMI_HF_ROUTER     = "https://router.huggingface.co/v1/chat/completions";
 export const KIMI_MOONSHOT_BASE = "https://api.moonshot.cn/v1";
-export const MOONSHOT_API_KEY   = process.env.MOONSHOT_API_KEY || "";
+/** Always read dynamically — picks up runtime updates from Settings page */
+export function getMoonshotKey(): string { return process.env.MOONSHOT_API_KEY || ""; }
+/** @deprecated use getMoonshotKey() */
+export const MOONSHOT_API_KEY   = "";
 
 export interface KimiMessage {
   role: "system" | "user" | "assistant";
@@ -23,13 +26,13 @@ export interface KimiMessage {
 
 /** Check if Kimi K2 is available (HF Router or Moonshot) */
 export function isKimiConfigured(): boolean {
-  return !!MOONSHOT_API_KEY || isHFConfigured();
+  return !!getMoonshotKey() || isHFConfigured();
 }
 
 /** Detailed config info */
 export function getKimiConfig(): { ok: boolean; via: "hf" | "moonshot" | "none"; model: string; reason?: string } {
-  if (MOONSHOT_API_KEY) return { ok: true, via: "moonshot", model: "kimi-k2-0711-preview" };
-  if (isHFConfigured())  return { ok: true, via: "hf", model: KIMI_HF_MODEL };
+  if (getMoonshotKey()) return { ok: true, via: "moonshot", model: "kimi-k2-0711-preview" };
+  if (isHFConfigured()) return { ok: true, via: "hf", model: KIMI_HF_MODEL };
   return { ok: false, via: "none", model: "", reason: "Set HF_TOKEN or MOONSHOT_API_KEY to use Kimi K2" };
 }
 
@@ -99,7 +102,8 @@ export async function* streamKimiResponseMoonshot(
   messages: KimiMessage[],
   options: { maxTokens?: number; temperature?: number } = {}
 ): AsyncGenerator<string> {
-  if (!MOONSHOT_API_KEY) throw new Error("MOONSHOT_API_KEY not configured");
+  const moonshotKey = getMoonshotKey();
+  if (!moonshotKey) throw new Error("MOONSHOT_API_KEY not configured");
 
   const { maxTokens = 2048, temperature = 0.7 } = options;
 
@@ -107,7 +111,7 @@ export async function* streamKimiResponseMoonshot(
     method: "POST",
     headers: {
       "Content-Type":  "application/json",
-      "Authorization": `Bearer ${MOONSHOT_API_KEY}`,
+      "Authorization": `Bearer ${moonshotKey}`,
     },
     body: JSON.stringify({
       model: "kimi-k2-0711-preview",

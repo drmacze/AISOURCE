@@ -13,9 +13,11 @@
 
 import { createHash } from "crypto";
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || "";
 const GH_API = "https://api.github.com";
 const TIMEOUT_MS = 15_000;
+
+/** Always reads dynamically — picks up runtime updates from Settings page */
+function getGitHubToken(): string { return process.env.GITHUB_TOKEN || ""; }
 
 function ghHeaders(useAuth = true): Record<string, string> {
   const h: Record<string, string> = {
@@ -23,13 +25,14 @@ function ghHeaders(useAuth = true): Record<string, string> {
     "User-Agent": "DLavieOS-AutoTraining/2.0",
     "X-GitHub-Api-Version": "2022-11-28",
   };
-  if (useAuth && GITHUB_TOKEN) h["Authorization"] = `Bearer ${GITHUB_TOKEN}`;
+  const token = getGitHubToken();
+  if (useAuth && token) h["Authorization"] = `Bearer ${token}`;
   return h;
 }
 
 async function ghFetch(url: string): Promise<Response> {
   let res = await fetch(url, { headers: ghHeaders(true), signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if ((res.status === 401 || res.status === 403) && GITHUB_TOKEN) {
+  if ((res.status === 401 || res.status === 403) && getGitHubToken()) {
     res = await fetch(url, { headers: ghHeaders(false), signal: AbortSignal.timeout(TIMEOUT_MS) });
   }
   return res;
@@ -396,7 +399,7 @@ export async function checkGitHubRateLimit(): Promise<{
       limit: data.rate.limit,
       remaining: data.rate.remaining,
       reset: new Date(data.rate.reset * 1000),
-      authenticated: GITHUB_TOKEN.length > 0,
+      authenticated: getGitHubToken().length > 0,
     };
   } catch {
     return { limit: 60, remaining: 0, reset: new Date(), authenticated: false };
@@ -416,5 +419,5 @@ export function getIssueRepo(): string {
 }
 
 export function isGitHubConfigured(): boolean {
-  return GITHUB_TOKEN.length > 0;
+  return getGitHubToken().length > 0;
 }

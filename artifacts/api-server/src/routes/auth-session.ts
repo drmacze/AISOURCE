@@ -44,37 +44,33 @@ export { getPrimaryKey, setPrimaryKey };
 router.get("/auth/session", async (_req: Request, res: Response) => {
   const primaryKey = await getPrimaryKey();
 
-  if (!primaryKey) {
-    res.json({ found: false, key: null });
+  if (primaryKey) {
+    try {
+      const [row] = await db
+        .select()
+        .from(apiKeysTable)
+        .where(eq(apiKeysTable.key, primaryKey))
+        .limit(1);
+
+      if (row && row.active && row.permissions === "admin") {
+        const expired = row.expiresAt && new Date() > row.expiresAt;
+        if (!expired) {
+          res.json({ found: true, key: primaryKey, name: row.name, permissions: row.permissions });
+          return;
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Fallback: if NEXUS_API_KEY is set in env (e.g. saved via Settings), use it automatically
+  // so the user doesn't need to paste it manually every time
+  const nexusKey = process.env.NEXUS_API_KEY;
+  if (nexusKey) {
+    res.json({ found: true, key: nexusKey, name: "NEXUS Admin Key", permissions: "admin" });
     return;
   }
 
-  try {
-    const [row] = await db
-      .select()
-      .from(apiKeysTable)
-      .where(eq(apiKeysTable.key, primaryKey))
-      .limit(1);
-
-    if (!row || !row.active || row.permissions !== "admin") {
-      res.json({ found: false, key: null, reason: "stored key is inactive or non-admin" });
-      return;
-    }
-
-    if (row.expiresAt && new Date() > row.expiresAt) {
-      res.json({ found: false, key: null, reason: "stored key expired" });
-      return;
-    }
-
-    res.json({
-      found: true,
-      key: primaryKey,
-      name: row.name,
-      permissions: row.permissions,
-    });
-  } catch {
-    res.json({ found: false, key: null });
-  }
+  res.json({ found: false, key: null });
 });
 
 /** POST /api/auth/session — set a specific key as primary (admin only) */
