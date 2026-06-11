@@ -4,6 +4,8 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
+import path from "path";
+import { existsSync } from "fs";
 
 const app: Express = express();
 
@@ -87,10 +89,25 @@ app.use("/api", router);
 // ─── Replit Object Storage (presigned upload + file serving) ─────────────────
 registerObjectStorageRoutes(app);
 
-// ─── 404 handler ─────────────────────────────────────────────────────────────
-app.use((_req, res) => {
-  res.status(404).json({ error: "Not Found", message: "Route not found. Check /api/health for status." });
-});
+// ─── Static frontend (production only) ───────────────────────────────────────
+// In production the Vite app is pre-built; serve it from the API process so
+// a single port (5000) handles both the API and the web UI.
+const WORKSPACE_ROOT = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
+const FRONTEND_DIST = path.join(WORKSPACE_ROOT, "artifacts", "ai-web-app", "dist", "public");
+
+if (process.env.NODE_ENV === "production" && existsSync(FRONTEND_DIST)) {
+  app.use(express.static(FRONTEND_DIST, { index: false }));
+  // SPA fallback — all non-API routes return index.html
+  app.get("/{*path}", (_req: Request, res: Response) => {
+    res.sendFile(path.join(FRONTEND_DIST, "index.html"));
+  });
+  logger.info({ dir: FRONTEND_DIST }, "Serving static frontend");
+} else {
+  // ─── 404 handler (dev — frontend is on its own Vite dev server) ─────────────
+  app.use((_req, res) => {
+    res.status(404).json({ error: "Not Found", message: "Route not found. Check /api/health for status." });
+  });
+}
 
 // ─── Error handler ────────────────────────────────────────────────────────────
 app.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
