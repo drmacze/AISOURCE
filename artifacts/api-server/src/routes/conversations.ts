@@ -484,6 +484,27 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
     content: body.content,
   });
 
+  // ── Multi-turn memory: load last N messages as conversation history ─────────
+  const historyRows = await db
+    .select()
+    .from(messagesTable)
+    .where(eq(messagesTable.conversationId, idNum))
+    .orderBy(desc(messagesTable.createdAt))
+    .limit(20);
+
+  // Reverse to chronological order, exclude the message we just inserted
+  const historyMsgs = historyRows
+    .reverse()
+    .filter((m) => !(m.role === "user" && m.content === body.content));
+
+  // Build history string for system context (last 10 exchanges = 20 msgs max)
+  const historyContext = historyMsgs.length > 1
+    ? historyMsgs
+        .slice(-18) // keep last 18 to leave room for current message
+        .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${String(m.content || "").slice(0, 600)}`)
+        .join("\n")
+    : "";
+
   // Get RAG context (vector search → BM25 fallback)
   const ragContext = await retrieveRAGContext(body.content);
 
@@ -493,8 +514,12 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
     webContext = await retrieveWebContext(body.content);
   }
 
-  // Merge contexts: knowledge base + web search
-  const combinedContext = [ragContext, webContext].filter(Boolean).join("\n\n---\n\n") || undefined;
+  // Merge contexts: history + knowledge base + web search
+  const contextParts: string[] = [];
+  if (historyContext) contextParts.push(`Conversation history:\n${historyContext}`);
+  if (ragContext)     contextParts.push(`Knowledge base:\n${ragContext}`);
+  if (webContext)     contextParts.push(`Web search:\n${webContext}`);
+  const combinedContext = contextParts.length > 0 ? contextParts.join("\n\n---\n\n") : undefined;
 
   // Accumulate full text from SSE tokens + final fullText event; track any error
   let fullText = "";

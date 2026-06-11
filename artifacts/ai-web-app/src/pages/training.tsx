@@ -448,8 +448,6 @@ function AutoTrainingPanel() {
   );
 }
 
-import { getApiBase } from "./models";
-const BASE = getApiBase();
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface OllamaModel {

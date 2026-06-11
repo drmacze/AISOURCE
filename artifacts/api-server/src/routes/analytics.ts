@@ -253,4 +253,125 @@ router.get("/analytics/training-jobs", async (_req, res) => {
   }
 });
 
+// ─── GET /api/analytics/all — single combined endpoint (fast, 1 round-trip) ──
+router.get("/analytics/all", async (req, res) => {
+  const days = Math.min(parseInt(String(req.query.days || "30"), 10), 90);
+
+  // Fire DB queries in parallel — no serial awaits
+  const [
+    convRow, msgRow, docRow, sampleRow, jobRow, modelRow,
+    embeddedRow, tokenRow, msgsByDayRaw, sourceRaw,
+    modelsRaw, docStatusRaw, topConvsRaw, jobStatusRaw,
+  ] = await Promise.all([
+    db.select({ c: count() }).from(conversationsTable),
+    db.select({ c: count() }).from(messagesTable),
+    db.select({ c: count() }).from(documentsTable),
+    db.select({ c: count() }).from(trainingSamplesTable),
+    db.select({ c: count() }).from(trainingJobsTable),
+    db.select({ c: count() }).from(aiModelsTable),
+    db.execute(sql`SELECT COUNT(*)::int AS n FROM documents WHERE embedding IS NOT NULL`).catch(() => []),
+    db.execute(sql`SELECT COALESCE(SUM(tokens), 0)::bigint AS t FROM messages`).catch(() => []),
+    db.execute(sql`
+      SELECT DATE(created_at AT TIME ZONE 'UTC') AS day,
+             COUNT(*)::int AS total,
+             COUNT(*) FILTER (WHERE role='user')::int AS user_messages,
+             COUNT(*) FILTER (WHERE role='assistant')::int AS assistant_messages,
+             COALESCE(SUM(tokens),0)::bigint AS tokens
+      FROM messages
+      WHERE created_at >= NOW() - INTERVAL '${sql.raw(String(days))} days'
+      GROUP BY day ORDER BY day ASC
+    `).catch(() => []),
+    db.execute(sql`
+      SELECT COALESCE(source,'unknown') AS source, COUNT(*)::int AS count
+      FROM training_samples GROUP BY source ORDER BY count DESC
+    `).catch(() => []),
+    db.execute(sql`
+      SELECT COALESCE(model,'unknown') AS model, COUNT(*)::int AS conversations
+      FROM conversations GROUP BY model ORDER BY conversations DESC
+    `).catch(() => []),
+    db.execute(sql`
+      SELECT COALESCE(file_type,'text') AS file_type,
+             COUNT(*)::int AS count,
+             COUNT(*) FILTER (WHERE embedding IS NOT NULL)::int AS embedded,
+             COALESCE(SUM(chunk_count),0)::int AS total_chunks
+      FROM documents GROUP BY file_type ORDER BY count DESC
+    `).catch(() => []),
+    db.execute(sql`
+      SELECT c.id, c.title, c.model,
+             COUNT(m.id)::int AS message_count,
+             COALESCE(SUM(m.tokens),0)::bigint AS total_tokens
+      FROM conversations c LEFT JOIN messages m ON m.conversation_id=c.id
+      GROUP BY c.id,c.title,c.model ORDER BY message_count DESC LIMIT 10
+    `).catch(() => []),
+    db.execute(sql`SELECT status, COUNT(*)::int AS count FROM training_jobs GROUP BY status`).catch(() => []),
+  ]);
+
+  // System metrics (no Ollama calls — fast)
+  const mem = process.memoryUsage();
+  let dbSize = "—";
+  try {
+    const r = rows<{ size: string }>(await db.execute(sql`SELECT pg_size_pretty(pg_database_size(current_database())) AS size`));
+    dbSize = r[0]?.size || "—";
+  } catch { /* ignore */ }
+
+  const autoStatus = getAutoTrainingStatus();
+
+  const embR = rows<{ n: number }>(embeddedRow);
+  const tokR = rows<{ t: string }>(tokenRow);
+  const totalDocs = docRow[0]?.c ?? 0;
+  const embDocs = embR[0]?.n ?? 0;
+
+  const srcData = rows<{ source: string; count: number }>(sourceRaw).map((r) => ({ ...r, count: Number(r.count) }));
+  const srcTotal = srcData.reduce((s, r) => s + r.count, 0);
+
+  const docByType = rows<{ file_type: string; count: number; embedded: number }>(docStatusRaw)
+    .map((r) => ({ ...r, count: Number(r.count), embedded: Number(r.embedded) }));
+
+  res.json({
+    overview: {
+      conversations:         convRow[0]?.c ?? 0,
+      messages:              msgRow[0]?.c ?? 0,
+      documents:             totalDocs,
+      trainingSamples:       sampleRow[0]?.c ?? 0,
+      trainingJobs:          jobRow[0]?.c ?? 0,
+      registeredModels:      modelRow[0]?.c ?? 0,
+      embeddedDocuments:     embDocs,
+      embeddingCoverage:     totalDocs > 0 ? Math.round(embDocs / totalDocs * 100) : 0,
+      totalTokensEstimated:  Number(tokR[0]?.t ?? 0),
+      autoTrainingCycles:    autoStatus.totalCyclesCompleted,
+      autoTrainingSamples:   autoStatus.totalSamplesAdded,
+      autoTrainingRunning:   autoStatus.running,
+      uptime:                Math.round(process.uptime()),
+      uptimeHours:           Math.round(process.uptime() / 3600 * 10) / 10,
+    },
+    msgsByDay: rows<{ day: string; total: number; user_messages: number; assistant_messages: number; tokens: string }>(msgsByDayRaw)
+      .map((r) => ({ ...r, tokens: Number(r.tokens) })),
+    sources: {
+      total: srcTotal,
+      sources: srcData.map((r) => ({ ...r, percentage: Math.round(r.count / Math.max(srcTotal, 1) * 100) })),
+    },
+    models: rows<{ model: string; conversations: number }>(modelsRaw).map((r) => ({ ...r, conversations: Number(r.conversations) })),
+    docStatus: {
+      total: totalDocs, embedded: embDocs,
+      coverage: totalDocs > 0 ? Math.round(embDocs / totalDocs * 100) : 0,
+      byType: docByType,
+    },
+    topConvs: rows<{ id: number; title: string; message_count: number; total_tokens: string }>(topConvsRaw)
+      .map((r) => ({ ...r, message_count: Number(r.message_count), total_tokens: Number(r.total_tokens) })),
+    trainingJobs: rows<{ status: string; count: number }>(jobStatusRaw).map((r) => ({ ...r, count: Number(r.count) })),
+    systemMetrics: {
+      memory: {
+        heapUsedMB:  Math.round(mem.heapUsed  / 1024 / 1024),
+        heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+        rssMB:       Math.round(mem.rss       / 1024 / 1024),
+      },
+      uptime: { seconds: Math.round(process.uptime()), formatted: formatUptime(process.uptime()) },
+      node:   { version: process.version, pid: process.pid },
+      database: { size: dbSize },
+      hf: { connected: isHFConfigured() },
+    },
+    generatedAt: Date.now(),
+  });
+});
+
 export default router;

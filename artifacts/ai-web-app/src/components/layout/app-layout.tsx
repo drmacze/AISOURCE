@@ -68,6 +68,7 @@ const NAV_GROUPS = [
   {
     label: "Intelligence",
     items: [
+      { href: "/playground",  label: "Playground",     icon: Zap,              color: "text-yellow-400" },
       { href: "/ai-tools",   label: "AI Tools",       icon: Wand2,            color: "text-violet-400" },
       { href: "/notebook",   label: "Notebook",       icon: BookMarked,       color: "text-violet-300" },
       { href: "/web-search", label: "Web Search",     icon: Search,           color: "text-sky-400" },
