@@ -82,6 +82,23 @@ if (process.env.GITHUB_TOKEN) {
   logger.warn("GITHUB_TOKEN not set — GitHub API limited to 60 req/hr");
 }
 
+// ─── Prompts auto-seed ────────────────────────────────────────────────────────
+// Seed default prompt library on first boot (no-op if already seeded)
+setTimeout(async () => {
+  try {
+    const { db } = await import("@workspace/db");
+    const { promptsTable } = await import("@workspace/db");
+    const { count } = await import("drizzle-orm");
+    const [{ c }] = await db.select({ c: count() }).from(promptsTable);
+    if ((c ?? 0) === 0) {
+      await fetch(`http://127.0.0.1:${rawPort}/api/prompts/seed`, { method: "POST" });
+      logger.info("Prompts library seeded with default prompts");
+    }
+  } catch (e) {
+    logger.warn({ err: e }, "Prompts auto-seed failed (non-fatal)");
+  }
+}, 3000);
+
 // ─── Auto-training ────────────────────────────────────────────────────────────
 const AUTO_TRAIN_INTERVAL_MS = Number(process.env.AUTO_TRAIN_INTERVAL_MS) || 3 * 60 * 60 * 1000;
 startAutoTraining(AUTO_TRAIN_INTERVAL_MS);

@@ -42,6 +42,10 @@ import {
   hfHeaders,
   type ChatMessage,
 } from "../huggingface";
+import {
+  generateGroqResponse,
+  isGroqConfigured,
+} from "../groq";
 import crypto from "crypto";
 
 const router: IRouter = Router();
@@ -52,6 +56,7 @@ async function agentLLMCall(
   messages: ChatMessage[],
   opts: { maxTokens?: number; temperature?: number } = {}
 ): Promise<{ text: string; model: string }> {
+  // 1. Try HuggingFace (Qwen2.5-Coder-32B)
   if (isHFConfigured()) {
     try {
       return await chatCompletionHFWithFallback(messages, {
@@ -59,17 +64,32 @@ async function agentLLMCall(
         temperature: opts.temperature ?? 0.15,
       });
     } catch (e) {
-      console.warn("[Agent] HF failed, fallback to Ollama:", String(e).slice(0, 200));
+      console.warn("[Agent] HF failed, trying Groq:", String(e).slice(0, 200));
     }
   }
+  // 2. Try Groq (fast cloud LLM, free tier)
+  if (isGroqConfigured()) {
+    for (const model of ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
+      try {
+        const text = await generateGroqResponse(messages as Parameters<typeof generateGroqResponse>[0], model, {
+          maxTokens: opts.maxTokens ?? 3000,
+          temperature: opts.temperature ?? 0.15,
+        });
+        return { text, model: `groq/${model}` };
+      } catch (e) {
+        console.warn(`[Agent] Groq ${model} failed:`, String(e).slice(0, 100));
+      }
+    }
+  }
+  // 3. Try local Ollama
   const prompt = messages
     .map((m) => `${m.role === "system" ? "SYSTEM" : m.role === "user" ? "USER" : "ASSISTANT"}: ${m.content}`)
     .join("\n\n");
-  for (const m of ["qwen2.5:3b", "phi4:14b", "tinyllama"]) {
+  for (const m of ["qwen2.5:3b", "gemma3:4b", "tinyllama"]) {
     try { return { text: await generateOllamaResponse(prompt, m), model: `${m} (local)` }; }
     catch { continue; }
   }
-  throw new Error("No LLM available — all HF models and local Ollama failed");
+  throw new Error("No LLM available — HF, Groq, and local Ollama all failed");
 }
 
 // ─── Python execution ─────────────────────────────────────────────────────────

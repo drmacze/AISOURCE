@@ -82,6 +82,11 @@ interface DatasetStats {
   sourceBreakdown: Record<string, number>;
 }
 
+function getApiBase(): string {
+  const env = (import.meta as { env?: { VITE_API_URL?: string } }).env;
+  return (env?.VITE_API_URL || "").replace(/\/$/, "");
+}
+
 const SOURCE_META: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
   "wikipedia-en":           { icon: <BookOpen className="w-3 h-3" />, label: "Wikipedia EN",       color: "text-blue-400" },
   "wikipedia-multilingual": { icon: <Languages className="w-3 h-3" />, label: "Wikipedia Multi",   color: "text-cyan-400" },

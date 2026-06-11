@@ -1,7 +1,7 @@
 /**
  * DLavie OS — Web Search + Ollama Metrics
  *
- * GET  /api/search          — DuckDuckGo web search (free, no API key)
+ * GET  /api/search          — Web search: Groq Compound (Brave) → DuckDuckGo fallback
  * GET  /api/ollama/ps       — Running Ollama models (VRAM, tokens/sec)
  * GET  /api/ollama/version  — Ollama version info
  * GET  /api/ollama/metrics  — Combined Ollama metrics
@@ -11,6 +11,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { conversationsTable, messagesTable, documentsTable, promptsTable } from "@workspace/db";
 import { like, or, desc, sql } from "drizzle-orm";
+import { isGroqConfigured, getGroqKey, GROQ_BASE_URL } from "../groq";
 
 const router: IRouter = Router();
 
@@ -114,9 +115,92 @@ async function ddgSearch(query: string, maxResults = 8): Promise<DDGResult[]> {
   return results.slice(0, maxResults);
 }
 
+// ─── Groq Compound Search (Brave Search built-in) ────────────────────────────
+
+interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+  source: "groq" | "instant" | "related";
+}
+
+/**
+ * Use Groq's compound model (which has Brave Search built-in) to get real
+ * web search results as structured JSON.
+ */
+async function groqSearch(query: string, maxResults = 8): Promise<SearchResult[]> {
+  const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${getGroqKey()}`,
+    },
+    body: JSON.stringify({
+      model: "compound-beta-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a web search assistant. Search the web for the user's query and return ONLY a JSON array of search results. Each result must be an object with: title (string), url (string), snippet (string, 1-2 sentences). Return at most ${maxResults} results. Return ONLY the JSON array, no other text.`,
+        },
+        {
+          role: "user",
+          content: `Search the web for: ${query}`,
+        },
+      ],
+      max_tokens: 1500,
+      temperature: 0.1,
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Groq search API error (${response.status})`);
+  }
+
+  const data = await response.json() as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const content = data.choices?.[0]?.message?.content ?? "";
+
+  // Parse JSON from model response
+  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error("No JSON array in Groq response");
+
+  const parsed = JSON.parse(jsonMatch[0]) as Array<{
+    title?: string; url?: string; snippet?: string;
+  }>;
+
+  return parsed
+    .filter((r) => r.title && r.snippet)
+    .slice(0, maxResults)
+    .map((r) => ({
+      title: String(r.title || "").slice(0, 120),
+      url: String(r.url || ""),
+      snippet: String(r.snippet || ""),
+      source: "groq" as const,
+    }));
+}
+
+/**
+ * Primary search: Groq Compound (Brave Search) → DuckDuckGo fallback
+ */
+async function search(query: string, maxResults = 8): Promise<{ results: SearchResult[]; via: string }> {
+  if (isGroqConfigured()) {
+    try {
+      const results = await groqSearch(query, maxResults);
+      if (results.length > 0) return { results, via: "groq-compound (brave search)" };
+    } catch (e) {
+      console.warn("[Search] Groq search failed, falling back to DDG:", String(e).slice(0, 100));
+    }
+  }
+  // Fallback: DuckDuckGo Instant Answer
+  const ddgResults = await ddgSearch(query, maxResults);
+  return { results: ddgResults.map((r) => ({ ...r, source: r.source as "instant" | "related" })), via: "duckduckgo" };
+}
+
 /**
  * GET /api/search?q=query&max=8
- * Returns real DuckDuckGo search results.
+ * Returns web search results via Groq Compound (Brave Search) or DDG fallback.
  */
 router.get("/search", async (req: Request, res: Response) => {
   const query = String(req.query.q || "").trim();
@@ -128,8 +212,8 @@ router.get("/search", async (req: Request, res: Response) => {
   }
 
   try {
-    const results = await ddgSearch(query, max);
-    res.json({ query, results, count: results.length, via: "duckduckgo" });
+    const { results, via } = await search(query, max);
+    res.json({ query, results, count: results.length, via });
   } catch (err) {
     res.status(502).json({ error: String(err), query });
   }
@@ -148,8 +232,8 @@ router.post("/search", async (req: Request, res: Response) => {
   }
 
   try {
-    const results = await ddgSearch(query, Math.min(max, 20));
-    res.json({ query, results, count: results.length, via: "duckduckgo" });
+    const { results, via } = await search(query, Math.min(max, 20));
+    res.json({ query, results, count: results.length, via });
   } catch (err) {
     res.status(502).json({ error: String(err), query });
   }

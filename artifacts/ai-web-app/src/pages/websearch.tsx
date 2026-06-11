@@ -1,8 +1,8 @@
 /**
  * DLavie OS — Web Search
  *
- * Real-time web search via DuckDuckGo — no API key required.
- * Results are then optionally summarized by the local Ollama model.
+ * Real-time web search via Groq Compound (Brave Search) — fast, accurate results.
+ * Falls back to DuckDuckGo if Groq is unavailable. Results can be summarized by AI.
  */
 
 import React, { useState, useRef, useEffect } from "react";
@@ -190,7 +190,7 @@ export default function WebSearchPage() {
           </div>
           <div>
             <h1 className="text-lg font-semibold text-white">Web Search</h1>
-            <p className="text-xs text-slate-400">Real-time DuckDuckGo search + AI summarization</p>
+            <p className="text-xs text-slate-400">Brave Search (via Groq) + AI summarization</p>
           </div>
         </div>
       </div>
@@ -257,7 +257,7 @@ export default function WebSearchPage() {
                 <Info className="w-4 h-4 text-slate-600 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    Search uses the DuckDuckGo Instant Answer API — no tracking, no API key needed.
+                    Search uses Groq Compound (Brave Search) for real, current web results. Falls back to DuckDuckGo automatically.
                     Results can be summarized or analyzed using your local Ollama model.
                   </p>
                 </div>
@@ -269,7 +269,7 @@ export default function WebSearchPage() {
           {loading && (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <Loader2 className="w-8 h-8 text-sky-400 animate-spin" />
-              <p className="text-sm text-slate-500 font-mono animate-pulse">Searching DuckDuckGo…</p>
+              <p className="text-sm text-slate-500 font-mono animate-pulse">Searching the web…</p>
             </div>
           )}
 
