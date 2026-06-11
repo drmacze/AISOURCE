@@ -20,6 +20,7 @@ import {
   listOllamaModels,
   deleteOllamaModel,
   getOllamaModelInfo,
+  invalidateOllamaModelCache,
   OllamaError,
   OllamaErrorCode,
   STORAGE_CONFIG_FILE,
