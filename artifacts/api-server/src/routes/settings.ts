@@ -1,11 +1,12 @@
 /**
  * DLavie OS — Settings & ENV Secrets API
  *
- * GET    /api/settings          — system status (env + system config)
- * GET    /api/settings/secrets  — list all stored secrets (names + masked values)
- * POST   /api/settings/secrets  — add or update a secret { name, value }
- * DELETE /api/settings/secrets/:name — delete a secret by env name
- * POST   /api/settings/reload   — reload all secrets from file into process.env
+ * GET    /api/settings                — system status (env + system config)
+ * GET    /api/settings/secrets        — list all stored secrets (names + masked values)
+ * POST   /api/settings/secrets        — add or update a secret { name, value }
+ * POST   /api/settings/secrets/test   — live test a key against its real provider API
+ * DELETE /api/settings/secrets/:name  — delete a secret by env name
+ * POST   /api/settings/reload         — reload all secrets from file into process.env
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -118,6 +119,114 @@ router.get("/settings/secrets", (_req, res) => {
     active: process.env[name] === value,
   }));
   res.json({ secrets: list, total: list.length });
+});
+
+// ─── POST /api/settings/secrets/test ─────────────────────────────────────────
+// Live-tests a key against the real provider API. Returns { ok, provider, detail }.
+router.post("/settings/secrets/test", async (req: Request, res: Response) => {
+  const { name, value } = req.body as { name?: string; value?: string };
+
+  if (!name || !value) {
+    res.status(400).json({ ok: false, error: "name and value are required" });
+    return;
+  }
+
+  const key = value.trim();
+
+  try {
+    let result: { ok: boolean; provider: string; detail: string };
+
+    switch (name.trim().toUpperCase()) {
+
+      case "GROQ_API_KEY": {
+        const r = await fetch("https://api.groq.com/openai/v1/models", {
+          headers: { Authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (r.ok) {
+          const data = await r.json() as { data?: { id: string }[] };
+          const count = data?.data?.length ?? 0;
+          result = { ok: true, provider: "Groq", detail: `Valid — ${count} model tersedia` };
+        } else {
+          const err = await r.json().catch(() => ({})) as { error?: { message?: string } };
+          result = { ok: false, provider: "Groq", detail: err?.error?.message || `HTTP ${r.status}` };
+        }
+        break;
+      }
+
+      case "OPENROUTER_API_KEY": {
+        const r = await fetch("https://openrouter.ai/api/v1/models", {
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "HTTP-Referer": "https://nexusos.replit.app",
+            "X-Title": "NEXUS_OS",
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (r.ok) {
+          const data = await r.json() as { data?: { id: string }[] };
+          const count = data?.data?.length ?? 0;
+          result = { ok: true, provider: "OpenRouter", detail: `Valid — ${count} model tersedia` };
+        } else {
+          const err = await r.json().catch(() => ({})) as { error?: { message?: string } };
+          result = { ok: false, provider: "OpenRouter", detail: err?.error?.message || `HTTP ${r.status}` };
+        }
+        break;
+      }
+
+      case "HF_TOKEN": {
+        const r = await fetch("https://huggingface.co/api/whoami", {
+          headers: { Authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (r.ok) {
+          const data = await r.json() as { name?: string; type?: string };
+          result = { ok: true, provider: "HuggingFace", detail: `Valid — logged in sebagai @${data?.name || "unknown"}` };
+        } else {
+          result = { ok: false, provider: "HuggingFace", detail: r.status === 401 ? "Token tidak valid atau expired" : `HTTP ${r.status}` };
+        }
+        break;
+      }
+
+      case "GITHUB_TOKEN": {
+        const r = await fetch("https://api.github.com/user", {
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "User-Agent": "NEXUS_OS/1.0",
+            Accept: "application/vnd.github+json",
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (r.ok) {
+          const data = await r.json() as { login?: string; public_repos?: number };
+          const rateLimit = r.headers.get("x-ratelimit-remaining");
+          result = {
+            ok: true,
+            provider: "GitHub",
+            detail: `Valid — @${data?.login || "unknown"} · ${rateLimit ?? "?"} req/hr tersisa`,
+          };
+        } else {
+          result = { ok: false, provider: "GitHub", detail: r.status === 401 ? "Token tidak valid atau expired" : `HTTP ${r.status}` };
+        }
+        break;
+      }
+
+      default:
+        result = { ok: false, provider: name, detail: "Provider tidak dikenali untuk pengujian otomatis" };
+    }
+
+    logger.info({ name, ok: result.ok, provider: result.provider }, "Secret connection test");
+    res.json(result);
+
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isTimeout = msg.includes("timeout") || msg.includes("abort");
+    res.json({
+      ok: false,
+      provider: name,
+      detail: isTimeout ? "Timeout — tidak ada respons dari server provider" : `Error: ${msg}`,
+    });
+  }
 });
 
 // ─── POST /api/settings/secrets ───────────────────────────────────────────────

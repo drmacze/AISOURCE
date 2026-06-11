@@ -1,4 +1,7 @@
 {
-  "updatedAt": "2026-06-11T01:27:01.991Z",
-  "secrets": {}
+  "updatedAt": "2026-06-11T13:24:00.545Z",
+  "secrets": {
+    "GROQ_API_KEY": "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",
+    "OPENROUTER_API_KEY": "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"
+  }
 }

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Settings, Key, Plus, Trash2, Eye, EyeOff, RefreshCw,
   Server, CheckCircle2, Copy, Check, Lock, Zap, Github,
-  BrainCircuit, AlertCircle,
+  BrainCircuit, AlertCircle, Wifi, WifiOff, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,6 +92,8 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
+type TestStatus = { ok: boolean; detail: string } | null;
+
 function QuickKeyRow({
   item,
   isSet,
@@ -105,6 +107,28 @@ function QuickKeyRow({
 }) {
   const [value, setValue] = useState("");
   const [show, setShow] = useState(false);
+  const [testStatus, setTestStatus] = useState<TestStatus>(null);
+  const [isTesting, setIsTesting] = useState(false);
+
+  const handleTest = async () => {
+    const v = value.trim();
+    if (!v) return;
+    setIsTesting(true);
+    setTestStatus(null);
+    try {
+      const res = await fetch(`${BASE}/api/settings/secrets/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: item.name, value: v }),
+      });
+      const data = await res.json() as { ok: boolean; detail: string };
+      setTestStatus({ ok: data.ok, detail: data.detail });
+    } catch {
+      setTestStatus({ ok: false, detail: "Tidak bisa terhubung ke server" });
+    } finally {
+      setIsTesting(false);
+    }
+  };
 
   return (
     <div className={cn(
@@ -151,33 +175,75 @@ function QuickKeyRow({
       </div>
 
       {!isSet && (
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Input
-              type={show ? "text" : "password"}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder={`Paste ${item.name} di sini…`}
-              className="bg-slate-950 border-white/10 text-white font-mono text-xs pr-9 h-8"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && value.trim()) onSave(item.name, value.trim());
-              }}
-            />
-            <button
-              onClick={() => setShow((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                type={show ? "text" : "password"}
+                value={value}
+                onChange={(e) => { setValue(e.target.value); setTestStatus(null); }}
+                placeholder={`Paste ${item.name} di sini…`}
+                className="bg-slate-950 border-white/10 text-white font-mono text-xs pr-9 h-8"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && value.trim()) onSave(item.name, value.trim());
+                }}
+              />
+              <button
+                onClick={() => setShow((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+              >
+                {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+
+            {/* Test button */}
+            <Button
+              onClick={handleTest}
+              disabled={!value.trim() || isTesting}
+              size="sm"
+              variant="outline"
+              className="border-white/10 text-slate-300 hover:text-white h-8 px-3 text-xs shrink-0"
+              title="Test koneksi ke provider"
             >
-              {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            </button>
+              {isTesting
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <Wifi className="w-3 h-3" />
+              }
+            </Button>
+
+            {/* Save button */}
+            <Button
+              onClick={() => { if (value.trim()) onSave(item.name, value.trim()); }}
+              disabled={!value.trim() || isSaving}
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white h-8 px-3 text-xs shrink-0"
+            >
+              {isSaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : "Simpan"}
+            </Button>
           </div>
-          <Button
-            onClick={() => { if (value.trim()) onSave(item.name, value.trim()); }}
-            disabled={!value.trim() || isSaving}
-            size="sm"
-            className="bg-emerald-600 hover:bg-emerald-500 text-white h-8 px-3 text-xs shrink-0"
-          >
-            {isSaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : "Simpan"}
-          </Button>
+
+          {/* Test result */}
+          <AnimatePresence>
+            {testStatus && (
+              <motion.div
+                initial={{ opacity: 0, y: -4, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: "auto" }}
+                exit={{ opacity: 0, y: -4, height: 0 }}
+                className={cn(
+                  "flex items-start gap-2 px-2.5 py-2 rounded-md text-xs",
+                  testStatus.ok
+                    ? "bg-emerald-950/40 border border-emerald-500/20 text-emerald-300"
+                    : "bg-red-950/30 border border-red-500/20 text-red-300"
+                )}
+              >
+                {testStatus.ok
+                  ? <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-400" />
+                  : <WifiOff className="w-3.5 h-3.5 mt-0.5 shrink-0 text-red-400" />
+                }
+                <span>{testStatus.detail}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </div>
