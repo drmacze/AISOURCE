@@ -19,13 +19,14 @@ import type { Response } from "express";
 export const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 
 export const GROQ_MODELS = [
-  { id: "llama-3.3-70b-versatile",          label: "Llama 3.3 70B",             context: 128000, free: true  },
-  { id: "llama-3.1-8b-instant",             label: "Llama 3.1 8B (Fast)",       context: 131072, free: true  },
-  { id: "mixtral-8x7b-32768",               label: "Mixtral 8x7B",              context: 32768,  free: true  },
-  { id: "gemma2-9b-it",                     label: "Gemma 2 9B",                context: 8192,   free: true  },
-  { id: "deepseek-r1-distill-llama-70b",    label: "DeepSeek R1 70B (Reason)",  context: 131072, free: true  },
-  { id: "llama-3.3-70b-specdec",            label: "Llama 3.3 70B SpecDec",     context: 8192,   free: true  },
-  { id: "qwen-qwq-32b",                     label: "Qwen QwQ 32B (Reason)",     context: 131072, free: true  },
+  { id: "llama-3.3-70b-versatile",                  label: "Llama 3.3 70B",              context: 128000, free: true  },
+  { id: "llama-3.1-8b-instant",                     label: "Llama 3.1 8B (Fast)",        context: 131072, free: true  },
+  { id: "meta-llama/llama-4-scout-17b-16e-instruct",label: "Llama 4 Scout 17B",          context: 131072, free: true  },
+  { id: "qwen/qwen3-32b",                            label: "Qwen3 32B",                  context: 32768,  free: true  },
+  { id: "openai/gpt-oss-120b",                       label: "OpenAI OSS 120B",            context: 131072, free: true  },
+  { id: "openai/gpt-oss-20b",                        label: "OpenAI OSS 20B (Fast)",      context: 131072, free: true  },
+  { id: "groq/compound",                             label: "Groq Compound",              context: 131072, free: true  },
+  { id: "groq/compound-mini",                        label: "Groq Compound Mini (Fast)",  context: 131072, free: true  },
 ];
 
 export function getGroqKey(): string {

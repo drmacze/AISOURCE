@@ -21,16 +21,18 @@ import type { Response } from "express";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export const OPENROUTER_FREE_MODELS = [
-  { id: "meta-llama/llama-3.3-70b-instruct:free",          label: "Llama 3.3 70B",           context: 131072 },
-  { id: "meta-llama/llama-3.1-8b-instruct:free",           label: "Llama 3.1 8B",            context: 131072 },
-  { id: "mistralai/mistral-7b-instruct:free",              label: "Mistral 7B",              context: 32768  },
-  { id: "google/gemma-2-9b-it:free",                       label: "Gemma 2 9B",              context: 8192   },
-  { id: "microsoft/phi-3-mini-128k-instruct:free",         label: "Phi-3 Mini 128K",         context: 128000 },
-  { id: "qwen/qwen3-8b:free",                              label: "Qwen3 8B",                context: 40960  },
-  { id: "deepseek/deepseek-r1-distill-qwen-1.5b:free",     label: "DeepSeek R1 1.5B",        context: 65536  },
-  { id: "deepseek/deepseek-r1:free",                       label: "DeepSeek R1 (full)",      context: 65536  },
-  { id: "microsoft/mai-ds-r1:free",                        label: "Microsoft MAI DS-R1",     context: 65536  },
-  { id: "nousresearch/hermes-3-llama-3.1-8b:free",         label: "Hermes 3 Llama 8B",       context: 131072 },
+  { id: "qwen/qwen3-coder:free",                           label: "Qwen3 Coder 480B (Free)", context: 1048576 },
+  { id: "nvidia/nemotron-3-ultra-550b-a55b:free",          label: "NVIDIA Nemotron Ultra",   context: 1000000 },
+  { id: "nvidia/nemotron-3-super-120b-a12b:free",          label: "NVIDIA Nemotron Super",   context: 1000000 },
+  { id: "meta-llama/llama-3.3-70b-instruct:free",          label: "Llama 3.3 70B",           context: 131072  },
+  { id: "google/gemma-4-31b-it:free",                      label: "Gemma 4 31B",             context: 262144  },
+  { id: "google/gemma-4-26b-a4b-it:free",                  label: "Gemma 4 26B",             context: 262144  },
+  { id: "nousresearch/hermes-3-llama-3.1-405b:free",       label: "Hermes 3 405B",           context: 131072  },
+  { id: "openai/gpt-oss-120b:free",                        label: "OpenAI OSS 120B",         context: 131072  },
+  { id: "openai/gpt-oss-20b:free",                         label: "OpenAI OSS 20B",          context: 131072  },
+  { id: "meta-llama/llama-3.2-3b-instruct:free",           label: "Llama 3.2 3B (Fast)",     context: 131072  },
+  { id: "qwen/qwen3-next-80b-a3b-instruct:free",           label: "Qwen3 Next 80B",          context: 262144  },
+  { id: "openrouter/free",                                  label: "OpenRouter Auto (Free)",  context: 200000  },
 ];
 
 export function getOpenRouterKey(): string {
