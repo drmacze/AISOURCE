@@ -24,6 +24,7 @@ import resourcesRouter from "./resources";
 import hfAutoTrainRouter from "./hf-autotrain";
 import trainingAdvancedRouter from "./training-advanced";
 import onedriveRouter from "./onedrive";
+import spotifyRouter from "./spotify";
 
 const router: IRouter = Router();
 
@@ -92,5 +93,8 @@ router.use(authSessionRouter);
 
 // Microsoft OneDrive — 1TB cloud storage + RAG sync
 router.use(onedriveRouter);
+
+// Spotify Now Playing — live widget for GitHub profile
+router.use(spotifyRouter);
 
 export default router;
