@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "RXs2MPNBEFpkVwR8grHzA"
+uri = "file://README.md"
+type = "text"
+title = "GitHub Profile README.md — Musthafa Darma"
