@@ -2,13 +2,15 @@
  * DLavie OS — HuggingFace Integration
  *
  * Provides:
- *  1. Text generation fallback when Ollama is offline
- *  2. Model hub browsing (trending models)
- *  3. Dataset access for auto-training
- *  4. Streaming inference support
+ *  1. Chat completions via HF Serverless Inference API (runs on HF GPUs — no local RAM needed)
+ *  2. Text generation fallback when Ollama is offline
+ *  3. Model hub browsing (trending models)
+ *  4. Dataset access for auto-training
+ *  5. Streaming inference support
  */
 
-export const HF_API_BASE = "https://api-inference.huggingface.co";
+export const HF_API_BASE = "https://api-inference.huggingface.co";     // used for datasets/old endpoints
+export const HF_ROUTER_BASE = "https://router.huggingface.co";          // serverless inference (works from Replit)
 export const HF_HUB_BASE = "https://huggingface.co";
 
 /** Always reads from process.env at call time — safe after runtime updates */
@@ -17,10 +19,22 @@ export function getHFToken(): string {
 }
 
 /**
+ * Heavy AI-dev specialist models — run on HF GPU servers via router.huggingface.co.
+ * Runs entirely on HF's GPUs — consumes ZERO local RAM.
+ * Confirmed working from Replit: Qwen2.5-Coder-32B-Instruct → HTTP 200.
+ */
+export const HF_AGENT_MODELS = [
+  "Qwen/Qwen2.5-Coder-32B-Instruct",        // 32B coding specialist — CONFIRMED WORKING
+  "Qwen/Qwen2.5-72B-Instruct",              // 72B general (if Pro tier)
+  "google/gemma-2-2b-it",                   // fast small fallback
+];
+
+/**
  * Default HF chat models — ordered by preference.
  * These are free-tier models that support chat completion.
  */
 export const HF_CHAT_MODELS = [
+  "Qwen/Qwen2.5-Coder-32B-Instruct",
   "mistralai/Mistral-7B-Instruct-v0.3",
   "HuggingFaceH4/zephyr-7b-beta",
   "microsoft/Phi-3-mini-4k-instruct",
@@ -269,3 +283,103 @@ export const HF_STATUS = {
   isConfigured: isHFConfigured,
   tokenPrefix: () => { const t = getHFToken(); return t ? t.slice(0, 12) + "..." : "not set"; },
 };
+
+// ─── Chat Completions API (OpenAI-compatible HF endpoint) ─────────────────────
+// Runs on HF GPU servers — uses ZERO local RAM. Model size doesn't matter.
+
+export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+
+/**
+ * Call HuggingFace's serverless chat completions endpoint.
+ * The model runs on HF's GPU infrastructure — not on local RAM.
+ * Supports 7B, 32B, 70B, etc. with no local resource constraint.
+ */
+export async function chatCompletionHF(
+  messages: ChatMessage[],
+  model: string = HF_AGENT_MODELS[0],
+  options: { maxTokens?: number; temperature?: number } = {}
+): Promise<string> {
+  if (!isHFConfigured()) throw new Error("HF_TOKEN not configured");
+
+  const { maxTokens = 2048, temperature = 0.3 } = options;
+  // Use router.huggingface.co — confirmed working from Replit (api-inference is blocked)
+  const url = `${HF_ROUTER_BASE}/v1/chat/completions`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: hfHeaders(),
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: maxTokens,
+      temperature,
+      top_p: 0.9,
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+
+  if (!response.ok) {
+    const err = await response.text().catch(() => response.statusText);
+    throw new Error(`HF chat API (${model}) error ${response.status}: ${err.slice(0, 300)}`);
+  }
+
+  const data = await response.json() as {
+    choices: Array<{ message: { content: string } }>;
+  };
+  return data.choices?.[0]?.message?.content?.trim() ?? "";
+}
+
+/**
+ * Try each model in HF_AGENT_MODELS in order until one succeeds.
+ * For each model, tries the chat completions endpoint first, then falls back
+ * to the old text-generation endpoint (which is known to work on free tier).
+ * Returns { text, model } so the caller knows which model was used.
+ */
+export async function chatCompletionHFWithFallback(
+  messages: ChatMessage[],
+  options: { maxTokens?: number; temperature?: number } = {}
+): Promise<{ text: string; model: string }> {
+  if (!isHFConfigured()) throw new Error("HF_TOKEN not configured");
+
+  const errors: string[] = [];
+
+  for (const model of HF_AGENT_MODELS) {
+    // Try 1: OpenAI-compatible chat completions endpoint
+    try {
+      const text = await chatCompletionHF(messages, model, options);
+      if (text) {
+        console.log(`[HF] Chat completions success — model: ${model}, len: ${text.length}`);
+        return { text, model };
+      }
+    } catch (e) {
+      const errMsg = String(e).slice(0, 200);
+      console.warn(`[HF] Chat completions failed (${model}): ${errMsg}`);
+      errors.push(`chat/${model}: ${errMsg}`);
+    }
+
+    // Try 2: Old text-generation endpoint (free tier, known to work)
+    try {
+      const systemMsg = messages.find((m) => m.role === "system")?.content ?? "";
+      const userMsgs = messages.filter((m) => m.role !== "system");
+      const prompt = [
+        systemMsg ? `<s>[INST] <<SYS>>\n${systemMsg}\n<</SYS>>\n\n` : "<s>[INST] ",
+        ...userMsgs.map((m) =>
+          m.role === "user" ? m.content : `[/INST] ${m.content} </s><s>[INST] `
+        ),
+        " [/INST]",
+      ].join("");
+
+      const text = await generateHFResponse(prompt, model, options);
+      if (text) {
+        console.log(`[HF] Text-gen fallback success — model: ${model}, len: ${text.length}`);
+        return { text, model: `${model} (text-gen)` };
+      }
+    } catch (e) {
+      const errMsg = String(e).slice(0, 200);
+      console.warn(`[HF] Text-gen fallback failed (${model}): ${errMsg}`);
+      errors.push(`textgen/${model}: ${errMsg}`);
+    }
+  }
+
+  throw new Error(`All HF models and endpoints failed:\n${errors.join("\n")}`);
+}
