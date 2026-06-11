@@ -6,5 +6,11 @@
     "HF_TOKEN": "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",
     "GITHUB_TOKEN": "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",
     "SPOTIFY_REFRESH_TOKEN": "AQDhmbTu8UedSZ1JBcdgpwVeXxLyBKMqwGekwtDc9KmsntJ0f5rGlB50EZbdYBqpJPN86E5wBLALnh6UtoOwBFB421fl5uY4NTm-P1v4scmTy_D-wQgTZ92Q3SG2bATXqE8"
+  },
+  "spotify": {
+    "pinnedTrackId": "4wCiTliB8X4GioUQW0nupW",
+    "pinnedTrackTitle": "Doa",
+    "pinnedTrackArtist": "K3bi",
+    "pinnedTrackThumb": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e0290014852928da9343e98c9ca"
   }
 }
