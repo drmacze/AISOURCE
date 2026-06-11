@@ -95,7 +95,7 @@ router.get("/settings", (_req, res) => {
   res.json({
     env: {
       nodeEnv: process.env.NODE_ENV || "development",
-      port: process.env.PORT || "8080",
+      port: process.env.PORT || "3000",
       ollamaModels: process.env.OLLAMA_MODELS || "~/.ollama/models",
       ollamaHost: process.env.OLLAMA_HOST || "http://127.0.0.1:11434",
     },

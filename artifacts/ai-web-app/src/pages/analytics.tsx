@@ -16,9 +16,7 @@ import { cn } from "@/lib/utils";
 function getBase(): string {
   const env = (import.meta.env.VITE_API_URL as string || "").replace(/\/$/, "");
   if (env) return env;
-  return window.location.port === "5000"
-    ? `${window.location.protocol}//${window.location.hostname}:8080`
-    : "";
+  return "";
 }
 
 const CHART_COLORS = ["#10b981","#3b82f6","#a855f7","#f59e0b","#ef4444","#06b6d4","#f97316","#84cc16"];

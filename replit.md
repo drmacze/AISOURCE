@@ -4,7 +4,7 @@ A fully local, open-source AI workspace with chat, RAG (Retrieval-Augmented Gene
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 3000)
 - `pnpm --filter @workspace/ai-web-app run dev` — run the web frontend (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
@@ -59,7 +59,7 @@ A fully local, open-source AI workspace with chat, RAG (Retrieval-Augmented Gene
 
 - After changing `lib/api-spec/openapi.yaml`, always run `pnpm --filter @workspace/api-spec run codegen` before using new hooks.
 - Database schema changes via `lib/db/src/schema/` require `pnpm --filter @workspace/db run push` to apply.
-- API server port is 8080; frontend port is 5000.
+- API server port is 3000; frontend port is 5000; artifact router owns port 8080 (do not use it for app code).
 - Ollama server is auto-started by the API server; if it fails, chat falls back to rule-based responses.
 - The `training_jobs` table needs `createdAt`/`updatedAt` for dashboard ordering.
 - Ollama model `tinyllama` is pulled automatically on first use; other models can be pulled via API.

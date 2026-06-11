@@ -10,9 +10,6 @@ import {
 // ─── API Helper ───────────────────────────────────────────────────────────────
 
 function getApiBase() {
-  if (typeof window !== "undefined" && window.location.port === "5000") {
-    return `${window.location.protocol}//${window.location.hostname}:8080`;
-  }
   return "";
 }
 

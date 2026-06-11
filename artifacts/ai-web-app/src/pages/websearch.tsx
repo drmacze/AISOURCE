@@ -19,9 +19,7 @@ import { cn } from "@/lib/utils";
 const API_BASE = (import.meta.env.VITE_API_URL as string || "").replace(/\/$/, "");
 function getApiBase() {
   if (API_BASE) return API_BASE;
-  return window.location.port === "5000"
-    ? `${window.location.protocol}//${window.location.hostname}:8080`
-    : "";
+  return "";
 }
 
 interface SearchResult {

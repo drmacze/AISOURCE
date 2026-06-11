@@ -34,9 +34,7 @@ function useAgentRunning() {
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
-    const base = (typeof window !== "undefined" && window.location.port === "5000")
-      ? `${window.location.protocol}//${window.location.hostname}:8080`
-      : "";
+    const base = "";
 
     const check = async () => {
       try {
@@ -102,9 +100,6 @@ const API_BASE = typeof import.meta !== "undefined" && (import.meta as { env?: {
 
 function getApiBase() {
   if (API_BASE) return API_BASE;
-  if (typeof window !== "undefined" && window.location.port === "5000") {
-    return `${window.location.protocol}//${window.location.hostname}:8080`;
-  }
   return "";
 }
 

@@ -843,7 +843,7 @@ Include: description, intended use, limitations, training data, evaluation, usag
       if (!name || !value) return { ok: false, error: "name and value required" };
       if (!/^[A-Z][A-Z0-9_]*$/.test(name)) return { ok: false, error: "name must be UPPERCASE_WITH_UNDERSCORES" };
       try {
-        const res = await fetch(`http://127.0.0.1:${process.env.PORT || 8080}/api/settings/secrets`, {
+        const res = await fetch(`http://127.0.0.1:${process.env.PORT || 3000}/api/settings/secrets`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, value }), signal: AbortSignal.timeout(5000),
         });
         if (!res.ok) throw new Error(`${res.status}`);
