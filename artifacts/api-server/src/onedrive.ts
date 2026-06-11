@@ -8,7 +8,8 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 
 const GRAPH_API = "https://graph.microsoft.com/v1.0";
-const AUTH_BASE = "https://login.microsoftonline.com/consumers/oauth2/v2.0";
+// "common" supports both personal (consumers) AND work/school (organizations) accounts
+const AUTH_BASE = "https://login.microsoftonline.com/common/oauth2/v2.0";
 const SCOPES = "Files.ReadWrite.All offline_access User.Read";
 const CONFIG_PATH = join(
   process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace",
