@@ -1,19 +1,27 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+/**
+ * DLavie OS — AI Developer Agent Page
+ *
+ * - Sessions run on the server as background processes (survive page navigation)
+ * - Polls server every 2s for live event updates
+ * - Session state persists in localStorage across navigation
+ * - Autonomous mode: server runs self-directed tasks every 30 min
+ * - Only uses tinyllama (RAM-safe, 0.6 GB)
+ */
+
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Bot, Play, Square, Lightbulb, Wrench, CheckCircle2,
-  XCircle, Loader2, ChevronDown, ChevronRight, Trash2,
-  Sparkles, Database, Network, Cpu, Globe, RefreshCw,
-  Send, AlertTriangle,
+  Bot, Play, Square, Trash2, Loader2, CheckCircle2, XCircle,
+  AlertTriangle, Lightbulb, ChevronDown, ChevronRight, Sparkles,
+  Database, Network, Cpu, Search, Package, Zap, RefreshCw,
+  Clock, ToggleLeft, ToggleRight, PlusCircle, History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type EventType = "thought" | "tool_call" | "tool_result" | "done" | "error";
-
 interface AgentEvent {
-  type: EventType;
+  type: "thought" | "tool_call" | "tool_result" | "done" | "error";
   content?: string;
   tool?: string;
   args?: Record<string, unknown>;
@@ -23,65 +31,72 @@ interface AgentEvent {
   steps?: number;
   message?: string;
   step?: number;
+  ts: number;
 }
 
-interface AgentStep {
-  id: number;
+interface AgentSession {
+  id: string;
+  task: string;
+  status: "running" | "done" | "error" | "stopped";
   events: AgentEvent[];
-  collapsed: boolean;
+  summary: string;
+  totalSteps: number;
+  model: string;
+  autonomous: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
-type AgentStatus = "idle" | "running" | "done" | "error";
+interface SessionSummary {
+  id: string;
+  task: string;
+  status: "running" | "done" | "error" | "stopped";
+  totalSteps: number;
+  summary: string;
+  model: string;
+  autonomous: boolean;
+  eventCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
-// ─── Preset tasks ─────────────────────────────────────────────────────────────
+// ─── API base (frontend is :5000, API is :8080) ───────────────────────────────
+function apiBase(): string {
+  if (typeof window !== "undefined" && window.location.port === "5000") {
+    return `${window.location.protocol}//${window.location.hostname}:8080`;
+  }
+  return "";
+}
+const BASE = apiBase();
 
-const PRESETS = [
-  {
-    icon: Database,
-    label: "Buat Dataset Q&A",
-    color: "text-emerald-400",
-    task: 'Buat dataset baru bernama "AI Fundamentals QA" dengan task type "qa", lalu generate 5 sampel training tentang topik "artificial intelligence and machine learning basics". Pastikan semua sampel tersimpan.',
-  },
-  {
-    icon: Network,
-    label: "Bangun & Latih Model",
-    color: "text-blue-400",
-    task: 'Buat dataset "General Assistant Training" (task type: qa), generate 5 sampel tentang "helpful AI assistant responses", lalu buat model baru bernama "DLavie-Assistant-v1" (type: llm, architecture: tinyllama), kemudian mulai training.',
-  },
-  {
-    icon: Cpu,
-    label: "Pipeline Lengkap",
-    color: "text-violet-400",
-    task: 'Lakukan pipeline lengkap: 1) Cek dataset dan model yang sudah ada, 2) Buat dataset baru "NLP Tasks Dataset" (task: generation), 3) Generate 8 sampel tentang "natural language processing tasks", 4) Buat model "DLavie-NLP-v1" (type: llm), 5) Start training, 6) Berikan ringkasan apa saja yang berhasil dibuat.',
-  },
-  {
-    icon: Globe,
-    label: "Research & Dataset",
-    color: "text-amber-400",
-    task: 'Search web untuk informasi tentang "transformer architecture in AI", lalu buat dataset baru "Transformer Knowledge" (task: qa) dan generate 5 sampel training berdasarkan topik tersebut.',
-  },
-  {
-    icon: RefreshCw,
-    label: "Audit Sistem",
-    color: "text-cyan-400",
-    task: "Audit sistem: list semua dataset yang ada, list semua model yang terdaftar, cek training jobs terbaru, dan cek model Ollama yang sudah terinstall. Berikan ringkasan lengkap kondisi sistem saat ini.",
-  },
-];
-
-// ─── Tool icon map ─────────────────────────────────────────────────────────────
-
+// ─── Tool icon ────────────────────────────────────────────────────────────────
 function ToolIcon({ tool }: { tool: string }) {
   if (tool.includes("dataset") || tool.includes("sample")) return <Database className="w-3.5 h-3.5" />;
-  if (tool.includes("model") || tool.includes("train") || tool.includes("job")) return <Network className="w-3.5 h-3.5" />;
-  if (tool.includes("install") || tool.includes("ollama")) return <Cpu className="w-3.5 h-3.5" />;
-  if (tool.includes("search")) return <Globe className="w-3.5 h-3.5" />;
-  if (tool.includes("finish")) return <CheckCircle2 className="w-3.5 h-3.5" />;
-  if (tool.includes("generate")) return <Sparkles className="w-3.5 h-3.5" />;
-  return <Wrench className="w-3.5 h-3.5" />;
+  if (tool.includes("model") || tool.includes("training") || tool.includes("job")) return <Network className="w-3.5 h-3.5" />;
+  if (tool.includes("installed")) return <Package className="w-3.5 h-3.5" />;
+  if (tool.includes("search")) return <Search className="w-3.5 h-3.5" />;
+  if (tool === "finish") return <CheckCircle2 className="w-3.5 h-3.5" />;
+  return <Cpu className="w-3.5 h-3.5" />;
+}
+
+// ─── Status badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status, steps }: { status: AgentSession["status"]; steps?: number }) {
+  const configs = {
+    running: { cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: <Loader2 className="w-3 h-3 animate-spin" />, label: "Running…" },
+    done:    { cls: "bg-sky-500/10 text-sky-400 border-sky-500/20",             icon: <CheckCircle2 className="w-3 h-3" />,          label: `Done${steps ? ` (${steps})` : ""}` },
+    error:   { cls: "bg-red-500/10 text-red-400 border-red-500/20",             icon: <XCircle className="w-3 h-3" />,               label: "Error" },
+    stopped: { cls: "bg-slate-700/50 text-slate-400 border-slate-700",          icon: <Square className="w-3 h-3" />,                label: "Stopped" },
+  };
+  const c = configs[status];
+  return (
+    <div className={cn("flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border", c.cls)}>
+      {c.icon}
+      <span>{c.label}</span>
+    </div>
+  );
 }
 
 // ─── Event card ───────────────────────────────────────────────────────────────
-
 function EventCard({ event }: { event: AgentEvent }) {
   const [open, setOpen] = useState(true);
 
@@ -92,7 +107,7 @@ function EventCard({ event }: { event: AgentEvent }) {
           <Lightbulb className="w-3 h-3 text-amber-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-xs font-medium text-amber-400 uppercase tracking-wider">Pikiran</span>
+          <span className="text-xs font-medium text-amber-400 uppercase tracking-wider">Thought</span>
           <p className="mt-0.5 text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{event.content}</p>
         </div>
       </div>
@@ -102,15 +117,13 @@ function EventCard({ event }: { event: AgentEvent }) {
   if (event.type === "tool_call") {
     return (
       <div className="flex gap-2.5 items-start">
-        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
+        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
           <ToolIcon tool={event.tool || ""} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-emerald-400 uppercase tracking-wider">Memanggil Tool</span>
-            <code className="text-xs bg-emerald-500/10 text-emerald-300 px-1.5 py-0.5 rounded font-mono">
-              {event.tool}()
-            </code>
+            <span className="text-xs font-medium text-emerald-400 uppercase tracking-wider">Tool Call</span>
+            <code className="text-xs bg-emerald-500/10 text-emerald-300 px-1.5 py-0.5 rounded font-mono">{event.tool}()</code>
           </div>
           {event.args && Object.keys(event.args).length > 0 && (
             <button
@@ -118,7 +131,7 @@ function EventCard({ event }: { event: AgentEvent }) {
               className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-400 transition-colors"
             >
               {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-              Argumen
+              Args
             </button>
           )}
           <AnimatePresence>
@@ -145,26 +158,18 @@ function EventCard({ event }: { event: AgentEvent }) {
           "mt-0.5 flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center",
           event.ok ? "bg-sky-500/20" : "bg-red-500/20"
         )}>
-          {event.ok
-            ? <CheckCircle2 className="w-3 h-3 text-sky-400" />
-            : <XCircle className="w-3 h-3 text-red-400" />
-          }
+          {event.ok ? <CheckCircle2 className="w-3 h-3 text-sky-400" /> : <XCircle className="w-3 h-3 text-red-400" />}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className={cn("text-xs font-medium uppercase tracking-wider", event.ok ? "text-sky-400" : "text-red-400")}>
-              {event.ok ? "Hasil" : "Error"}
+              {event.ok ? "Result" : "Error"}
             </span>
-            <code className="text-xs bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">
-              {event.tool}
-            </code>
+            <code className="text-xs bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">{event.tool}</code>
           </div>
-          <button
-            onClick={() => setOpen((o) => !o)}
-            className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-400 transition-colors"
-          >
+          <button onClick={() => setOpen((o) => !o)} className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-400 transition-colors">
             {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-            {event.ok ? "Lihat data" : "Lihat error"}
+            {event.ok ? "View data" : "View error"}
           </button>
           <AnimatePresence>
             {open && (
@@ -174,14 +179,10 @@ function EventCard({ event }: { event: AgentEvent }) {
                 exit={{ opacity: 0, height: 0 }}
                 className={cn(
                   "mt-1.5 text-xs rounded p-2.5 overflow-x-auto font-mono border max-h-48 overflow-y-auto",
-                  event.ok
-                    ? "text-slate-300 bg-sky-950/30 border-sky-900/40"
-                    : "text-red-300 bg-red-950/30 border-red-900/40"
+                  event.ok ? "text-slate-300 bg-sky-950/30 border-sky-900/40" : "text-red-300 bg-red-950/30 border-red-900/40"
                 )}
               >
-                {typeof event.data === "string"
-                  ? event.data
-                  : JSON.stringify(event.data, null, 2)}
+                {typeof event.data === "string" ? event.data : JSON.stringify(event.data, null, 2)}
               </motion.pre>
             )}
           </AnimatePresence>
@@ -204,15 +205,536 @@ function EventCard({ event }: { event: AgentEvent }) {
     );
   }
 
+  if (event.type === "done") {
+    return (
+      <div className="rounded-lg border border-sky-900/50 bg-sky-950/20 p-3">
+        <div className="flex items-center gap-2 mb-1">
+          <CheckCircle2 className="w-4 h-4 text-sky-400" />
+          <span className="text-sm font-semibold text-sky-400">Task Complete</span>
+          {event.steps && <span className="text-xs text-slate-500 ml-auto">{event.steps} steps</span>}
+        </div>
+        {event.summary && <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{event.summary}</p>}
+      </div>
+    );
+  }
+
   return null;
 }
 
-// ─── Step group ───────────────────────────────────────────────────────────────
+// ─── Session item in sidebar list ─────────────────────────────────────────────
+function SessionItem({
+  session, isActive, onClick, onDelete,
+}: {
+  session: SessionSummary;
+  isActive: boolean;
+  onClick: () => void;
+  onDelete: (id: string) => void;
+}) {
+  const timeAgo = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ago`;
+  };
 
-function StepGroup({ step, onToggle }: { step: AgentStep; onToggle: () => void }) {
-  const hasError = step.events.some((e) => e.type === "error");
-  const toolCalls = step.events.filter((e) => e.type === "tool_call");
-  const mainTool = toolCalls[0]?.tool;
+  return (
+    <div
+      className={cn(
+        "group relative flex flex-col gap-1 px-3 py-2.5 rounded-lg cursor-pointer border transition-all",
+        isActive
+          ? "bg-emerald-500/5 border-emerald-500/20 text-white"
+          : "bg-slate-900/40 border-slate-800/60 hover:bg-slate-800/50 hover:border-slate-700"
+      )}
+      onClick={onClick}
+    >
+      <div className="flex items-start gap-2 justify-between">
+        <p className="text-xs text-slate-300 line-clamp-2 leading-snug flex-1">{session.task}</p>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(session.id); }}
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-red-400 text-slate-600 transition-all flex-shrink-0"
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <StatusBadge status={session.status} steps={session.totalSteps} />
+        {session.autonomous && (
+          <span className="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 text-[10px] border border-violet-500/20 font-mono">AUTO</span>
+        )}
+        <span className="text-[10px] text-slate-600 font-mono ml-auto flex items-center gap-1">
+          <Clock className="w-2.5 h-2.5" />
+          {timeAgo(session.createdAt)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Presets ──────────────────────────────────────────────────────────────────
+const PRESETS = [
+  { label: "Audit System",       task: "List all datasets, models, and training jobs. Summarize the current state of the AI system.",                                                     icon: Sparkles,    color: "text-emerald-400" },
+  { label: "Create Dataset",     task: "Create a new Q&A training dataset named 'General AI QA' and generate 5 training samples about artificial intelligence fundamentals.",              icon: Database,    color: "text-purple-400" },
+  { label: "Train a Model",      task: "List all registered models and datasets. Pick the best matching pair and start a training job.",                                                   icon: Network,     color: "text-orange-400" },
+  { label: "Generate Samples",   task: "Find the first available dataset and generate 5 new training samples about machine learning optimization techniques.",                             icon: Zap,         color: "text-amber-400" },
+  { label: "Check Ollama",       task: "List all Ollama models currently installed and ready for inference. Report their names and sizes.",                                               icon: Cpu,         color: "text-sky-400" },
+  { label: "Build + Train",      task: "Create a dataset named 'Code QA' (task type: qa), generate 4 samples about Python programming, register a model named 'CodeHelper' (type: llm), then start training.", icon: RefreshCw, color: "text-rose-400" },
+];
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function AgentPage() {
+  const [task, setTask] = useState("");
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [activeSession, setActiveSession] = useState<AgentSession | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(() => {
+    try { return localStorage.getItem("agent_active_session_id"); } catch { return null; }
+  });
+  const [autonomousEnabled, setAutonomousEnabled] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Auto-scroll when new events come in
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeSession?.events.length]);
+
+  // ── Fetch session list ──────────────────────────────────────────────────────
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch(`${BASE}/api/agent/sessions`);
+      if (res.ok) setSessions(await res.json());
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Fetch active session details ────────────────────────────────────────────
+  const fetchActiveSession = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`${BASE}/api/agent/sessions/${id}`);
+      if (res.ok) {
+        const data: AgentSession = await res.json();
+        setActiveSession(data);
+        return data;
+      } else if (res.status === 404) {
+        setActiveId(null);
+        setActiveSession(null);
+        localStorage.removeItem("agent_active_session_id");
+      }
+    } catch { /* ignore */ }
+    return null;
+  }, []);
+
+  // ── Fetch autonomous status ────────────────────────────────────────────────
+  const fetchAutonomous = useCallback(async () => {
+    try {
+      const res = await fetch(`${BASE}/api/agent/autonomous`);
+      if (res.ok) {
+        const data = await res.json() as { enabled: boolean };
+        setAutonomousEnabled(data.enabled);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Initial data load ──────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchSessions();
+    fetchAutonomous();
+    if (activeId) fetchActiveSession(activeId);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Polling for running session ────────────────────────────────────────────
+  useEffect(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+
+    if (!activeId) return;
+
+    const poll = async () => {
+      const data = await fetchActiveSession(activeId);
+      await fetchSessions();
+      if (data && data.status !== "running") {
+        clearInterval(pollRef.current!);
+        pollRef.current = null;
+      }
+    };
+
+    // Start polling immediately if session might be running
+    poll();
+    pollRef.current = setInterval(poll, 2000);
+
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    };
+  }, [activeId, fetchActiveSession, fetchSessions]);
+
+  // ── Start a new task ───────────────────────────────────────────────────────
+  const run = useCallback(async () => {
+    if (!task.trim() || isStarting) return;
+    setIsStarting(true);
+    try {
+      const res = await fetch(`${BASE}/api/agent/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: task.trim() }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json() as { id: string };
+      setActiveId(data.id);
+      localStorage.setItem("agent_active_session_id", data.id);
+      setActiveSession(null);
+      setTask("");
+      fetchSessions();
+    } catch (e) {
+      console.error("Failed to start agent session:", e);
+    } finally {
+      setIsStarting(false);
+    }
+  }, [task, isStarting, fetchSessions]);
+
+  // ── Stop active session ────────────────────────────────────────────────────
+  const stop = useCallback(async () => {
+    if (!activeId) return;
+    await fetch(`${BASE}/api/agent/sessions/${activeId}/stop`, { method: "POST" });
+    await fetchActiveSession(activeId);
+    fetchSessions();
+  }, [activeId, fetchActiveSession, fetchSessions]);
+
+  // ── Delete a session ───────────────────────────────────────────────────────
+  const deleteSession = useCallback(async (id: string) => {
+    await fetch(`${BASE}/api/agent/sessions/${id}`, { method: "DELETE" });
+    if (id === activeId) {
+      setActiveId(null);
+      setActiveSession(null);
+      localStorage.removeItem("agent_active_session_id");
+    }
+    fetchSessions();
+  }, [activeId, fetchSessions]);
+
+  // ── Select a session to view ───────────────────────────────────────────────
+  const selectSession = useCallback((id: string) => {
+    setActiveId(id);
+    localStorage.setItem("agent_active_session_id", id);
+    fetchActiveSession(id);
+  }, [fetchActiveSession]);
+
+  // ── Toggle autonomous mode ─────────────────────────────────────────────────
+  const toggleAutonomous = useCallback(async () => {
+    const next = !autonomousEnabled;
+    setAutonomousEnabled(next);
+    const res = await fetch(`${BASE}/api/agent/autonomous`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (res.ok) {
+      const data = await res.json() as { enabled: boolean };
+      setAutonomousEnabled(data.enabled);
+    }
+  }, [autonomousEnabled]);
+
+  const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run();
+  };
+
+  const isRunning = activeSession?.status === "running";
+
+  return (
+    <div className="flex h-full flex-col bg-slate-950">
+
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 border-b border-slate-800 px-4 py-3 bg-slate-900/50">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 flex-shrink-0 rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 flex items-center justify-center">
+              {isRunning
+                ? <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+                : <Bot className="w-4 h-4 text-emerald-400" />
+              }
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-sm font-semibold text-slate-100 font-[Syne] truncate">AI Developer Agent</h1>
+              <p className="text-xs text-slate-500 hidden sm:block">
+                CO-Developer otonom · model: <span className="font-mono text-emerald-400/70">tinyllama</span>
+                {isRunning && <span className="ml-2 text-emerald-400 animate-pulse">● berjalan di latar belakang…</span>}
+              </p>
+            </div>
+          </div>
+
+          {/* Autonomous toggle */}
+          <button
+            onClick={toggleAutonomous}
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-all",
+              autonomousEnabled
+                ? "bg-violet-500/10 text-violet-400 border-violet-500/30 hover:bg-violet-500/20"
+                : "bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-400"
+            )}
+            title={autonomousEnabled ? "Autonomous mode ON — agent runs tasks every 30 min" : "Enable autonomous mode"}
+          >
+            {autonomousEnabled
+              ? <ToggleRight className="w-3.5 h-3.5" />
+              : <ToggleLeft className="w-3.5 h-3.5" />
+            }
+            <span className="hidden sm:inline">Auto {autonomousEnabled ? "ON" : "OFF"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Preset chips (mobile scroll) ─────────────────────────────────── */}
+      <div className="md:hidden flex-shrink-0 border-b border-slate-800 bg-slate-900/20">
+        <div className="flex gap-2 px-3 py-2 overflow-x-auto scrollbar-none">
+          {PRESETS.map((p) => (
+            <button
+              key={p.label}
+              onClick={() => { setTask(p.task); textareaRef.current?.focus(); }}
+              disabled={isRunning || isStarting}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 bg-slate-800/60 hover:bg-slate-700/60 hover:border-slate-600 disabled:opacity-40 transition-all text-xs text-slate-400 whitespace-nowrap"
+            >
+              <p.icon className={cn("w-3 h-3", p.color)} />
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Body ──────────────────────────────────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden min-h-0">
+
+        {/* Desktop sidebar: preset tasks + session history */}
+        <div className="hidden md:flex w-56 flex-shrink-0 border-r border-slate-800 bg-slate-900/30 flex-col">
+
+          {/* Preset tasks */}
+          <div className="px-3 py-2 border-b border-slate-800">
+            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Quick Tasks</p>
+          </div>
+          <div className="p-2 space-y-1 border-b border-slate-800">
+            {PRESETS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => { setTask(p.task); textareaRef.current?.focus(); }}
+                disabled={isRunning || isStarting}
+                className="w-full text-left flex items-start gap-2 px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900/50 hover:bg-slate-800/60 hover:border-slate-700 disabled:opacity-40 transition-all group"
+              >
+                <p.icon className={cn("w-3 h-3 flex-shrink-0 mt-0.5", p.color)} />
+                <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors leading-snug">{p.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Session history */}
+          <div className="px-3 py-2 flex items-center justify-between">
+            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest flex items-center gap-1">
+              <History className="w-3 h-3" /> History
+            </p>
+            <button onClick={fetchSessions} className="p-0.5 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400 transition-colors">
+              <RefreshCw className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5">
+            {sessions.length === 0 ? (
+              <p className="text-xs text-slate-700 px-2 py-4 text-center">No sessions yet</p>
+            ) : (
+              sessions.map((s) => (
+                <SessionItem
+                  key={s.id}
+                  session={s}
+                  isActive={s.id === activeId}
+                  onClick={() => selectSession(s.id)}
+                  onDelete={deleteSession}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Main content area */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+
+          {/* Events timeline */}
+          <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 space-y-3">
+
+            {/* Empty state */}
+            {!activeSession && !isStarting && sessions.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full text-center py-10 px-4">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 flex items-center justify-center mb-3">
+                  <Bot className="w-6 h-6 text-emerald-400" />
+                </div>
+                <h2 className="text-base font-semibold text-slate-300 font-[Syne]">DLavie Agent</h2>
+                <p className="mt-1.5 text-xs text-slate-500 max-w-xs">
+                  Agen CO-Developer berjalan 24/7 di latar belakang menggunakan <code className="text-emerald-400 font-mono">tinyllama</code>.
+                  Pilih preset atau tulis tugas sendiri.
+                </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+                  {["Create dataset", "Train model", "Audit system"].map((hint) => (
+                    <span key={hint} className="px-2.5 py-1 rounded-full bg-slate-800 text-xs text-slate-500 border border-slate-700">{hint}</span>
+                  ))}
+                </div>
+                <div className="mt-5 flex flex-col items-center gap-1.5 text-xs text-slate-600">
+                  <div className="flex items-center gap-2">
+                    {autonomousEnabled
+                      ? <><span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" /><span className="text-violet-400">Autonomous mode active — agent works independently every 30 min</span></>
+                      : <><ToggleLeft className="w-3.5 h-3.5" /><span>Enable Auto mode to let agent work on its own</span></>
+                    }
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Session selector (mobile) if no active session */}
+            {!activeSession && sessions.length > 0 && !isStarting && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <History className="w-3.5 h-3.5" /> Session History
+                  </h3>
+                  <button onClick={fetchSessions} className="p-1 rounded hover:bg-slate-800 text-slate-600 transition-colors">
+                    <RefreshCw className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="md:hidden space-y-1.5">
+                  {sessions.map((s) => (
+                    <SessionItem
+                      key={s.id}
+                      session={s}
+                      isActive={s.id === activeId}
+                      onClick={() => selectSession(s.id)}
+                      onDelete={deleteSession}
+                    />
+                  ))}
+                </div>
+                <div className="hidden md:block text-xs text-slate-600 text-center py-4">
+                  Select a session from the sidebar
+                </div>
+              </div>
+            )}
+
+            {/* Loading spinner while starting */}
+            {isStarting && (
+              <div className="flex items-center gap-2 text-xs text-slate-500 py-4 px-1">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                Starting agent session…
+              </div>
+            )}
+
+            {/* Session header */}
+            {activeSession && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-2 mb-2"
+              >
+                <StatusBadge status={activeSession.status} steps={activeSession.totalSteps} />
+                <span className="text-xs text-slate-500 truncate flex-1">{activeSession.task}</span>
+                <span className="text-[10px] font-mono text-slate-700">
+                  {activeSession.model}
+                </span>
+                {activeSession.autonomous && (
+                  <span className="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 text-[10px] border border-violet-500/20 font-mono flex-shrink-0">AUTO</span>
+                )}
+              </motion.div>
+            )}
+
+            {/* Events grouped by step */}
+            {activeSession && activeSession.events.length > 0 && (() => {
+              // Group events by step number
+              const stepGroups = new Map<number, AgentEvent[]>();
+              for (const ev of activeSession.events) {
+                if (ev.type === "done") continue; // rendered separately
+                const stepNum = ev.step ?? 0;
+                if (!stepGroups.has(stepNum)) stepGroups.set(stepNum, []);
+                stepGroups.get(stepNum)!.push(ev);
+              }
+              const sortedSteps = [...stepGroups.entries()].sort((a, b) => a[0] - b[0]);
+
+              return (
+                <AnimatePresence mode="sync">
+                  {sortedSteps.map(([stepNum, events]) => (
+                    <StepGroup key={stepNum} stepNum={stepNum} events={events} />
+                  ))}
+                </AnimatePresence>
+              );
+            })()}
+
+            {/* Running indicator */}
+            {activeSession?.status === "running" && (
+              <div className="flex items-center gap-2 text-xs text-emerald-400/70 py-2 px-1">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Agent thinking… (berjalan di background)</span>
+              </div>
+            )}
+
+            <div ref={bottomRef} />
+          </div>
+
+          {/* ── Input area ──────────────────────────────────────────────── */}
+          <div className="flex-shrink-0 border-t border-slate-800 bg-slate-900/50 p-3">
+            <textarea
+              ref={textareaRef}
+              value={task}
+              onChange={(e) => setTask(e.target.value)}
+              onKeyDown={handleKey}
+              disabled={isRunning || isStarting}
+              placeholder="Describe a task for the agent… (Ctrl+Enter to run)"
+              rows={3}
+              className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 disabled:opacity-50 transition-all leading-relaxed"
+            />
+            <div className="flex gap-2 mt-2">
+              {isRunning ? (
+                <button
+                  onClick={stop}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors text-xs font-medium"
+                >
+                  <Square className="w-3.5 h-3.5" /> Stop Agent
+                </button>
+              ) : (
+                <button
+                  onClick={run}
+                  disabled={!task.trim() || isStarting}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs font-medium"
+                >
+                  {isStarting
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Starting…</>
+                    : <><Play className="w-3.5 h-3.5" /> Run Task</>
+                  }
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setActiveId(null);
+                  setActiveSession(null);
+                  localStorage.removeItem("agent_active_session_id");
+                }}
+                className="px-3 py-2 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors text-xs"
+                title="New session"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Autonomous mode hint */}
+            {autonomousEnabled && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="mt-2 flex items-center gap-1.5 text-[10px] text-violet-400/70 bg-violet-500/5 border border-violet-500/10 rounded-lg px-2.5 py-1.5"
+              >
+                <Zap className="w-3 h-3" />
+                Autonomous mode aktif — agent bekerja mandiri setiap 30 menit
+              </motion.div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Step group (collapsible) ─────────────────────────────────────────────────
+function StepGroup({ stepNum, events }: { stepNum: number; events: AgentEvent[] }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const hasError = events.some((e) => e.type === "error");
+  const toolCall = events.find((e) => e.type === "tool_call");
 
   return (
     <motion.div
@@ -224,30 +746,27 @@ function StepGroup({ step, onToggle }: { step: AgentStep; onToggle: () => void }
       )}
     >
       <button
-        onClick={onToggle}
+        onClick={() => setCollapsed((c) => !c)}
         className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800/40 transition-colors"
       >
-        <span className="text-xs font-mono text-slate-600 w-5 text-right flex-shrink-0">
-          {step.id}
-        </span>
+        <span className="text-xs font-mono text-slate-600 w-5 text-right flex-shrink-0">{stepNum}</span>
         <span className="flex-1 text-sm text-slate-400 truncate">
-          {mainTool ? (
+          {toolCall ? (
             <span>
               <span className="text-slate-500">→ </span>
-              <code className="text-emerald-400 font-mono text-xs">{mainTool}()</code>
+              <code className="text-emerald-400 font-mono text-xs">{toolCall.tool}()</code>
             </span>
           ) : (
-            <span className="text-slate-500">Berpikir…</span>
+            <span className="text-slate-500">Thinking…</span>
           )}
         </span>
-        {step.collapsed
+        {collapsed
           ? <ChevronRight className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
           : <ChevronDown className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
         }
       </button>
-
       <AnimatePresence>
-        {!step.collapsed && (
+        {!collapsed && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
@@ -255,7 +774,7 @@ function StepGroup({ step, onToggle }: { step: AgentStep; onToggle: () => void }
             className="px-4 pb-4 space-y-3 border-t border-slate-800/50"
           >
             <div className="pt-3 space-y-3">
-              {step.events.map((ev, i) => (
+              {events.map((ev, i) => (
                 <EventCard key={i} event={ev} />
               ))}
             </div>
@@ -263,364 +782,5 @@ function StepGroup({ step, onToggle }: { step: AgentStep; onToggle: () => void }
         )}
       </AnimatePresence>
     </motion.div>
-  );
-}
-
-// ─── Main page ────────────────────────────────────────────────────────────────
-
-export default function AgentPage() {
-  const [task, setTask] = useState("");
-  const [status, setStatus] = useState<AgentStatus>("idle");
-  const [steps, setSteps] = useState<AgentStep[]>([]);
-  const [summary, setSummary] = useState("");
-  const [totalSteps, setTotalSteps] = useState(0);
-  const [currentStepBuf, setCurrentStepBuf] = useState<AgentEvent[]>([]);
-  const [currentStepNum, setCurrentStepNum] = useState(0);
-
-  const abortRef = useRef<AbortController | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [steps, currentStepBuf]);
-
-  const toggleStep = useCallback((id: number) => {
-    setSteps((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, collapsed: !s.collapsed } : s))
-    );
-  }, []);
-
-  const reset = useCallback(() => {
-    abortRef.current?.abort();
-    setSteps([]);
-    setSummary("");
-    setTotalSteps(0);
-    setCurrentStepBuf([]);
-    setCurrentStepNum(0);
-    setStatus("idle");
-  }, []);
-
-  const run = useCallback(async () => {
-    if (!task.trim() || status === "running") return;
-    reset();
-    setStatus("running");
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    const stepMap = new Map<number, AgentEvent[]>();
-    let pendingStepNum = 0;
-
-    try {
-      const res = await fetch("/api/agent/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: task.trim(), maxSteps: 15 }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok || !res.body) {
-        setStatus("error");
-        setSteps([{ id: 1, events: [{ type: "error", message: `HTTP ${res.status}: ${await res.text()}` }], collapsed: false }]);
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const raw = line.slice(6).trim();
-          if (!raw) continue;
-          let event: AgentEvent;
-          try { event = JSON.parse(raw); } catch { continue; }
-
-          const stepNum = event.step ?? 0;
-
-          if (event.type === "done") {
-            // Flush pending step
-            if (pendingStepNum > 0 && stepMap.has(pendingStepNum)) {
-              const evts = stepMap.get(pendingStepNum)!;
-              setSteps((prev) => {
-                const exists = prev.find((s) => s.id === pendingStepNum);
-                if (exists) return prev.map((s) => s.id === pendingStepNum ? { ...s, events: evts } : s);
-                return [...prev, { id: pendingStepNum, events: evts, collapsed: false }];
-              });
-            }
-            setCurrentStepBuf([]);
-            setSummary(event.summary || "");
-            setTotalSteps(event.steps || 0);
-            setStatus("done");
-            continue;
-          }
-
-          if (event.type === "error" && !stepNum) {
-            setSteps((prev) => [...prev, { id: prev.length + 1, events: [event], collapsed: false }]);
-            setStatus("error");
-            continue;
-          }
-
-          // Group by step
-          if (stepNum && stepNum !== pendingStepNum) {
-            // Finalize previous step
-            if (pendingStepNum > 0 && stepMap.has(pendingStepNum)) {
-              const evts = stepMap.get(pendingStepNum)!;
-              const pNum = pendingStepNum;
-              setSteps((prev) => {
-                const exists = prev.find((s) => s.id === pNum);
-                if (exists) return prev.map((s) => s.id === pNum ? { ...s, events: evts } : s);
-                return [...prev, { id: pNum, events: evts, collapsed: false }];
-              });
-            }
-            pendingStepNum = stepNum;
-            setCurrentStepNum(stepNum);
-            stepMap.set(stepNum, []);
-          }
-
-          if (stepNum) {
-            const arr = stepMap.get(stepNum) ?? [];
-            arr.push(event);
-            stepMap.set(stepNum, arr);
-            setCurrentStepBuf([...arr]);
-          }
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        setStatus("error");
-        setSteps((prev) => [
-          ...prev,
-          { id: prev.length + 1, events: [{ type: "error", message: String(err) }], collapsed: false },
-        ]);
-      }
-    }
-  }, [task, status, reset]);
-
-  const stop = useCallback(() => {
-    abortRef.current?.abort();
-    setStatus("idle");
-  }, []);
-
-  const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run();
-  };
-
-  return (
-    <div className="flex h-full flex-col bg-slate-950">
-
-      {/* ── Header ─────────────────────────────────────────── */}
-      <div className="flex-shrink-0 border-b border-slate-800 px-4 py-3 bg-slate-900/50">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 flex-shrink-0 rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-sm font-semibold text-slate-100 font-[Syne] truncate">AI Developer Agent</h1>
-              <p className="text-xs text-slate-500 hidden sm:block">Agen otonom untuk membangun &amp; melatih model AI</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            <div className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap",
-              status === "running" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-              status === "done"    ? "bg-sky-500/10 text-sky-400 border border-sky-500/20" :
-              status === "error"   ? "bg-red-500/10 text-red-400 border border-red-500/20" :
-              "bg-slate-800 text-slate-500 border border-slate-700"
-            )}>
-              {status === "running" && <Loader2 className="w-3 h-3 animate-spin" />}
-              {status === "done"    && <CheckCircle2 className="w-3 h-3" />}
-              {status === "error"   && <XCircle className="w-3 h-3" />}
-              {status === "idle"    && <Bot className="w-3 h-3" />}
-              <span className="hidden xs:inline">
-                {status === "running" ? "Berjalan…" :
-                 status === "done"    ? `Selesai (${totalSteps})` :
-                 status === "error"   ? "Error" : "Siap"}
-              </span>
-            </div>
-            {(steps.length > 0 || summary) && (
-              <button
-                onClick={reset}
-                className="p-1.5 rounded-full text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-600 transition-colors"
-                title="Reset"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Mobile preset chips (horizontal scroll) ────────── */}
-      <div className="md:hidden flex-shrink-0 border-b border-slate-800 bg-slate-900/30">
-        <div className="flex gap-2 px-3 py-2.5 overflow-x-auto scrollbar-none">
-          {PRESETS.map((p) => (
-            <button
-              key={p.label}
-              onClick={() => { setTask(p.task); textareaRef.current?.focus(); }}
-              disabled={status === "running"}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 bg-slate-800/60 hover:bg-slate-700/60 hover:border-slate-600 disabled:opacity-40 transition-all text-xs text-slate-400 whitespace-nowrap"
-            >
-              <p.icon className={cn("w-3 h-3", p.color)} />
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Body: sidebar (desktop) + main ─────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-
-        {/* Desktop-only sidebar */}
-        <div className="hidden md:flex w-52 flex-shrink-0 border-r border-slate-800 bg-slate-900/30 flex-col">
-          <div className="px-4 py-2.5 border-b border-slate-800">
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Preset Task</p>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
-            {PRESETS.map((p) => (
-              <button
-                key={p.label}
-                onClick={() => { setTask(p.task); textareaRef.current?.focus(); }}
-                disabled={status === "running"}
-                className="w-full text-left flex items-start gap-2 px-2.5 py-2 rounded-lg border border-slate-800 bg-slate-900/50 hover:bg-slate-800/60 hover:border-slate-700 transition-all disabled:opacity-40 group"
-              >
-                <p.icon className={cn("w-3.5 h-3.5 flex-shrink-0 mt-0.5", p.color)} />
-                <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors leading-snug">
-                  {p.label}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Main area */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-
-          {/* Steps timeline */}
-          <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 space-y-2">
-            {steps.length === 0 && status === "idle" && (
-              <div className="flex flex-col items-center justify-center h-full text-center py-10 px-4">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 flex items-center justify-center mb-3">
-                  <Sparkles className="w-6 h-6 text-emerald-400" />
-                </div>
-                <h2 className="text-base font-semibold text-slate-300 font-[Syne]">DLavie Agent</h2>
-                <p className="mt-1.5 text-xs text-slate-500 max-w-xs">
-                  Pilih preset di atas atau ketik tugas sendiri. Agent akan berpikir dan bertindak otomatis.
-                </p>
-                <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-                  {["Buat dataset", "Latih model", "Audit sistem"].map((hint) => (
-                    <span key={hint} className="px-2.5 py-1 rounded-full bg-slate-800 text-xs text-slate-500 border border-slate-700">
-                      {hint}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <AnimatePresence>
-              {steps.map((step) => (
-                <StepGroup key={step.id} step={step} onToggle={() => toggleStep(step.id)} />
-              ))}
-            </AnimatePresence>
-
-            {/* Live step buffer */}
-            {status === "running" && currentStepBuf.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-lg border border-emerald-900/40 bg-emerald-950/10 overflow-hidden"
-              >
-                <div className="px-3 py-2 flex items-center gap-2">
-                  <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin flex-shrink-0" />
-                  <span className="text-xs text-emerald-400 font-medium">Langkah {currentStepNum} — sedang berjalan…</span>
-                </div>
-                <div className="px-3 pb-3 space-y-3 border-t border-emerald-900/30 pt-3">
-                  {currentStepBuf.map((ev, i) => (
-                    <EventCard key={i} event={ev} />
-                  ))}
-                </div>
-              </motion.div>
-            )}
-
-            {status === "running" && currentStepBuf.length === 0 && steps.length === 0 && (
-              <div className="flex items-center gap-2 text-xs text-slate-500 py-4 px-1">
-                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                Agent sedang mulai berpikir…
-              </div>
-            )}
-
-            {/* Done summary */}
-            <AnimatePresence>
-              {status === "done" && summary && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="rounded-lg border border-sky-900/50 bg-sky-950/20 p-3.5"
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <CheckCircle2 className="w-4 h-4 text-sky-400 flex-shrink-0" />
-                    <span className="text-sm font-semibold text-sky-400">Tugas Selesai</span>
-                    <span className="text-xs text-slate-500 ml-auto">{totalSteps} langkah</span>
-                  </div>
-                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{summary}</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div ref={bottomRef} />
-          </div>
-
-          {/* ── Input area ───────────────────────────────────── */}
-          <div className="flex-shrink-0 border-t border-slate-800 bg-slate-900/50 p-3">
-            <textarea
-              ref={textareaRef}
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-              onKeyDown={handleKey}
-              disabled={status === "running"}
-              placeholder="Deskripsikan tugas untuk Agent… (Ctrl+Enter untuk jalankan)"
-              rows={3}
-              className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 disabled:opacity-50 transition-all leading-relaxed"
-            />
-            <div className="flex gap-2 mt-2">
-              {status === "running" ? (
-                <button
-                  onClick={stop}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors text-xs font-medium"
-                >
-                  <Square className="w-3.5 h-3.5" /> Stop
-                </button>
-              ) : (
-                <button
-                  onClick={run}
-                  disabled={!task.trim()}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs font-medium"
-                >
-                  <Play className="w-3.5 h-3.5" /> Jalankan
-                </button>
-              )}
-              <button
-                onClick={() => { setTask(""); textareaRef.current?.focus(); }}
-                disabled={status === "running"}
-                className="px-3 py-2 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 disabled:opacity-40 transition-colors text-xs"
-              >
-                <Send className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </div>
   );
 }

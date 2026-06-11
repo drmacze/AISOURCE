@@ -29,6 +29,33 @@ import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
+// ─── Global Agent Running Indicator hook ─────────────────────────────────────
+function useAgentRunning() {
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    const base = (typeof window !== "undefined" && window.location.port === "5000")
+      ? `${window.location.protocol}//${window.location.hostname}:8080`
+      : "";
+
+    const check = async () => {
+      try {
+        const res = await fetch(`${base}/api/agent/sessions`);
+        if (res.ok) {
+          const sessions = await res.json() as Array<{ status: string }>;
+          setRunning(sessions.some((s) => s.status === "running"));
+        }
+      } catch { /* ignore */ }
+    };
+
+    check();
+    const interval = setInterval(check, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return running;
+}
+
 const NAV_GROUPS = [
   {
     label: "Core",
@@ -222,6 +249,7 @@ function GlobalSearch() {
 }
 
 function SidebarContent({ location, onClose }: { location: string; onClose?: () => void }) {
+  const agentRunning = useAgentRunning();
   return (
     <div className="flex flex-col h-full">
       {/* Logo */}
@@ -256,6 +284,7 @@ function SidebarContent({ location, onClose }: { location: string; onClose?: () 
               {group.items.map((item) => {
                 const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
                 const Icon = item.icon;
+                const isAgent = item.href === "/agent";
                 return (
                   <Link
                     key={item.href}
@@ -270,7 +299,10 @@ function SidebarContent({ location, onClose }: { location: string; onClose?: () 
                   >
                     <Icon className={cn("w-4 h-4 flex-shrink-0 transition-colors", isActive ? item.color : "opacity-60 group-hover:opacity-100")} />
                     <span className="flex-1 truncate">{item.label}</span>
-                    {isActive && <ChevronRight className="w-3 h-3 text-emerald-400 opacity-60 flex-shrink-0" />}
+                    {isAgent && agentRunning && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" title="Agent running in background" />
+                    )}
+                    {isActive && !agentRunning && <ChevronRight className="w-3 h-3 text-emerald-400 opacity-60 flex-shrink-0" />}
                   </Link>
                 );
               })}
