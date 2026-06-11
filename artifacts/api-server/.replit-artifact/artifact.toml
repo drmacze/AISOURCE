@@ -5,12 +5,12 @@ kind = "api"
   id = "3B4_FFSkEVBkAeYMFRJ2e"
 
   [[services]]
-  localPort = 8080
+  localPort = 3000
   name = "API Server"
   paths = ["/api"]
 
   [services.development]
-  run = "pnpm --filter @workspace/api-server run dev"
+  run = "PORT=3000 pnpm --filter @workspace/api-server run dev"
 
   [services.production]
   deploymentTarget = "vm"
@@ -25,9 +25,8 @@ kind = "api"
   args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
 
   [services.production.run.env]
-  PORT = "8080"
+  PORT = "3000"
   NODE_ENV = "production"
 
   [services.production.health.startup]
   path = "/api/healthz"
-  

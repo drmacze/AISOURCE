@@ -6,7 +6,6 @@ import { logger } from "./lib/logger";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import path from "path";
 import { existsSync } from "fs";
-import { createProxyMiddleware } from "http-proxy-middleware";
 
 const app: Express = express();
 
@@ -103,22 +102,6 @@ if (process.env.NODE_ENV === "production" && existsSync(FRONTEND_DIST)) {
     res.sendFile(path.join(FRONTEND_DIST, "index.html"));
   });
   logger.info({ dir: FRONTEND_DIST }, "Serving static frontend");
-} else {
-  // ─── Dev: proxy all non-API requests to the Vite dev server (port 5000) ──────
-  // The artifact system routes the main repl URL to this port (8080), so we
-  // forward non-API traffic to Vite so the UI loads correctly.
-  app.use(
-    createProxyMiddleware({
-      target: "http://localhost:5000",
-      changeOrigin: false,
-      ws: true,
-      on: {
-        error: (_err, _req, res) => {
-          (res as Response).status(502).send("Frontend not ready yet — Vite is starting up.");
-        },
-      },
-    })
-  );
 }
 
 // ─── Error handler ────────────────────────────────────────────────────────────

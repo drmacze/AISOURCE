@@ -1,0 +1,13 @@
+kind = "web"
+  previewPath = "/"
+  title = "DLavie OS"
+  version = "1.0.0"
+  id = "web-frontend-dlavie"
+
+  [[services]]
+  localPort = 5000
+  name = "Web App"
+  paths = ["/"]
+
+  [services.development]
+  run = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/ai-web-app run dev"
