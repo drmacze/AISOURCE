@@ -888,6 +888,7 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
   const [selectedBase, setSelectedBase] = useState("unsloth/Qwen2.5-7B-Instruct");
   const [repoName, setRepoName] = useState("");
   const [epochs, setEpochs] = useState("3");
+  const [manualUsername, setManualUsername] = useState("");
 
   const [pushLoading, setPushLoading] = useState(false);
   const [pushResult, setPushResult] = useState<HFPushResult | null>(null);
@@ -900,6 +901,10 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
     fetch(`${BASE}/api/hf/autotrain/models`).then((r) => r.json()).then(setBaseModels).catch(() => {});
   }, [BASE]);
 
+  // Effective username: from HF profile or manual input
+  const effectiveUsername = hfInfo?.username || manualUsername.trim();
+  const needsUsername = hfInfo?.configured && !hfInfo?.username;
+
   const handlePush = async () => {
     if (!selectedDatasetId) return;
     setPushLoading(true); setPushResult(null); setTrainResult(null);
@@ -907,7 +912,12 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
       const r = await fetch(`${BASE}/api/hf/dataset/push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ datasetId: Number(selectedDatasetId), repoName: repoName || undefined, private: false }),
+        body: JSON.stringify({
+          datasetId: Number(selectedDatasetId),
+          repoName: repoName || undefined,
+          private: false,
+          hfUsername: manualUsername.trim() || undefined,
+        }),
       });
       const data = await r.json() as HFPushResult;
       setPushResult(data);
@@ -929,6 +939,7 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
           datasetRepoId: pushResult.repoId,
           baseModel: selectedBase,
           epochs: Number(epochs),
+          hfUsername: manualUsername.trim() || undefined,
         }),
       });
       const data = await r.json() as HFTrainResult;
@@ -961,11 +972,31 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
             : "border-amber-500/30 bg-amber-500/5 text-amber-400"
         }`}>
           {hfInfo?.configured
-            ? <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /><span>Terhubung sebagai <b>{hfInfo.username}</b> (plan: {hfInfo.plan})</span></>
+            ? hfInfo.username
+              ? <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /><span>Terhubung sebagai <b>{hfInfo.username}</b> (plan: {hfInfo.plan})</span></>
+              : <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /><span>HF_TOKEN aktif — profil terbatas (fine-grained token). Masukkan username HF di bawah.</span></>
             : <><AlertCircle className="w-3.5 h-3.5 shrink-0" /><span>{hfInfo?.message ?? "Memeriksa HF_TOKEN…"} → Tambahkan di Settings → API Keys → HuggingFace</span></>
           }
           {!hfInfo && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
         </div>
+
+        {/* Manual username input — shown when token valid but profile not accessible */}
+        {needsUsername && (
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Username HuggingFace</label>
+            <Input
+              placeholder="contoh: johndoe  (lihat huggingface.co/settings/profile)"
+              value={manualUsername}
+              onChange={(e) => setManualUsername(e.target.value)}
+              className="h-8 text-xs font-mono"
+            />
+            {manualUsername && (
+              <p className="text-[10px] text-muted-foreground">
+                Dataset akan diupload ke: <code className="text-violet-400">huggingface.co/datasets/{manualUsername}/…</code>
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Step 1 */}

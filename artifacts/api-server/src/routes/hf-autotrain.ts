@@ -48,25 +48,45 @@ router.get("/hf/autotrain/info", async (_req: Request, res: Response) => {
     });
   }
 
+  // Token format valid — try whoami for extra info but don't fail if it errors
+  // (fine-grained/read-only tokens can still push datasets and launch AutoTrain)
   try {
-    const whoRes = await fetch(`${HF_API}/whoami`, { headers: hfHeaders() });
-    if (!whoRes.ok) {
-      return res.json({ configured: false, message: "HF_TOKEN tidak valid." });
+    const whoRes = await fetch(`${HF_API}/whoami`, {
+      headers: hfHeaders(),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (whoRes.ok) {
+      const who = await whoRes.json() as {
+        name: string; fullname?: string; email?: string;
+        plan?: { type?: string }; orgs?: Array<{ name: string }>;
+      };
+      return res.json({
+        configured: true,
+        username:   who.name,
+        fullname:   who.fullname ?? who.name,
+        plan:       who.plan?.type ?? "free",
+        orgs:       (who.orgs ?? []).map((o) => o.name),
+      });
     }
-    const who = await whoRes.json() as {
-      name: string; fullname?: string; email?: string;
-      plan?: { type?: string }; orgs?: Array<{ name: string }>;
-    };
-
+    // whoami failed (e.g. fine-grained token / scoped token) — token still usable
     return res.json({
       configured: true,
-      username:   who.name,
-      fullname:   who.fullname ?? who.name,
-      plan:       who.plan?.type ?? "free",
-      orgs:       (who.orgs ?? []).map((o) => o.name),
+      username:   null,
+      fullname:   null,
+      plan:       "unknown",
+      orgs:       [],
+      note:       "Token valid (format ok) — profil tidak tersedia. Masukkan username HF secara manual saat push dataset.",
     });
-  } catch (err) {
-    return res.status(502).json({ error: String(err) });
+  } catch {
+    // Network error — optimistically return configured if format is valid
+    return res.json({
+      configured: true,
+      username:   null,
+      fullname:   null,
+      plan:       "unknown",
+      orgs:       [],
+      note:       "Tidak dapat verifikasi token ke HuggingFace (network). Token akan digunakan langsung.",
+    });
   }
 });
 
@@ -76,18 +96,32 @@ router.post("/hf/dataset/push", async (req: Request, res: Response) => {
     return res.status(401).json({ error: "HF_TOKEN belum diset." });
   }
 
-  const { datasetId, repoName, private: isPrivate = true } = req.body as {
-    datasetId: number; repoName?: string; private?: boolean;
+  const { datasetId, repoName, private: isPrivate = true, hfUsername } = req.body as {
+    datasetId: number; repoName?: string; private?: boolean; hfUsername?: string;
   };
 
   if (!datasetId) return res.status(400).json({ error: "datasetId wajib diisi." });
 
   try {
-    // 1. Get user info
-    const whoRes = await fetch(`${HF_API}/whoami`, { headers: hfHeaders() });
-    if (!whoRes.ok) return res.status(401).json({ error: "HF_TOKEN tidak valid." });
-    const who = await whoRes.json() as { name: string };
-    const username = who.name;
+    // 1. Get user info — try whoami, fall back to provided username
+    let username = hfUsername?.trim() || "";
+    try {
+      const whoRes = await fetch(`${HF_API}/whoami`, {
+        headers: hfHeaders(),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (whoRes.ok) {
+        const who = await whoRes.json() as { name: string };
+        username = who.name;
+      }
+    } catch { /* whoami failed — use provided username */ }
+
+    if (!username) {
+      return res.status(400).json({
+        error: "Tidak bisa mendapatkan username HF. Masukkan field 'hfUsername' secara manual (lihat profil HuggingFace Anda).",
+        needsUsername: true,
+      });
+    }
 
     // 2. Load samples from DB
     const dataset = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, datasetId)).limit(1);
@@ -274,11 +308,28 @@ router.post("/hf/autotrain/create", async (req: Request, res: Response) => {
 
   if (!datasetRepoId) return res.status(400).json({ error: "datasetRepoId wajib diisi." });
 
+  const { hfUsername } = req.body as { hfUsername?: string };
+
   try {
-    const whoRes = await fetch(`${HF_API}/whoami`, { headers: hfHeaders() });
-    if (!whoRes.ok) return res.status(401).json({ error: "HF_TOKEN tidak valid." });
-    const who = await whoRes.json() as { name: string };
-    const username = who.name;
+    // Get username — try whoami, fall back to provided
+    let username = hfUsername?.trim() || "";
+    try {
+      const whoRes = await fetch(`${HF_API}/whoami`, {
+        headers: hfHeaders(),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (whoRes.ok) {
+        const who = await whoRes.json() as { name: string };
+        username = who.name;
+      }
+    } catch { /* whoami failed */ }
+
+    if (!username) {
+      return res.status(400).json({
+        error: "Tidak bisa mendapatkan username HF. Sertakan field 'hfUsername' (lihat profil HuggingFace Anda).",
+        needsUsername: true,
+      });
+    }
 
     const safeName = (projectName ?? `nexus-finetune-${Date.now()}`)
       .replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();

@@ -22,8 +22,10 @@ import {
   trainingJobsTable,
   aiModelsTable,
   agentMemoriesTable,
+  conversationsTable,
+  messagesTable,
 } from "@workspace/db";
-import { eq, desc, like, or, sql } from "drizzle-orm";
+import { eq, desc, like, or, sql, asc } from "drizzle-orm";
 import { execSync, exec } from "child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
@@ -891,6 +893,60 @@ Include: description, intended use, limitations, training data, evaluation, usag
 
 const TOOL_MAP = new Map(TOOLS.map((t) => [t.name, t]));
 
+// ─── Chat System Prompt (multilingual, conversational) ───────────────────────
+function buildChatSystemPrompt(memories: string): string {
+  return `You are NEXUS Agent — intelligent AI assistant inside DLavie OS / NEXUS_OS AI Command Center.
+Powered by Groq (Llama-3.3-70B), HuggingFace (Qwen2.5-Coder-32B), or local Ollama. Real AI, no simulations.
+
+⚠️ ATURAN BAHASA / LANGUAGE RULE (WAJIB / MANDATORY):
+Deteksi bahasa yang digunakan user, dan SELALU balas dalam bahasa yang SAMA persis.
+Detect the language the user writes in, and ALWAYS respond in that EXACT same language.
+- User menulis Bahasa Indonesia → balas dalam Bahasa Indonesia
+- User writes English → respond in English
+- User 写中文 → 用中文回复
+JANGAN PERNAH ganti bahasa kecuali user minta. NEVER switch languages unless explicitly asked.
+
+━━ KEMAMPUAN SAYA / MY CAPABILITIES ━━
+
+Jika ditanya "apa yang kamu bisa" atau "what can you do", jawab dengan daftar lengkap ini:
+
+1. 💬 CHAT & PENGETAHUAN — Jawab pertanyaan tentang AI/ML, coding, sains, matematika, topik umum apapun
+2. 🔍 PENCARIAN WEB — Cari informasi real-time dan berita terkini di internet (via Brave Search)
+3. 🤖 AUTONOMOUS AGENT — Jalankan tugas kompleks mandiri: buat kode, ML experiment, kelola dataset, analisis
+4. 📚 KNOWLEDGE BASE (RAG) — Upload dokumen, indeks, dan cari di basis pengetahuan Anda
+5. 🎨 GENERASI GAMBAR — Buat gambar dengan AI (deskripsikan yang Anda inginkan di halaman Image Gen)
+6. 📊 TRAINING HUB — Buat dataset training, tambah sampel, kelola job training model AI
+7. 💡 PROMPTS LIBRARY — Akses 15+ template prompt AI siap pakai (Code Reviewer, Bug Hunter, dll)
+8. ☁️ ONEDRIVE STORAGE — Hubungkan Microsoft OneDrive 1TB untuk penyimpanan & sinkronisasi dokumen
+9. 🧠 MEMORI PERSISTEN — Mengingat hal penting lintas sesi percakapan
+10. 🐍 EKSEKUSI KODE — Jalankan kode Python untuk analisis data, komputasi, dan otomasi
+
+In English — I can help with:
+1. 💬 CHAT & KNOWLEDGE — Answer questions on AI/ML, coding, science, math, any general topic
+2. 🔍 WEB SEARCH — Search the internet for real-time info (powered by Brave Search via Groq)
+3. 🤖 AUTONOMOUS AGENT — Run complex multi-step tasks: generate code, ML experiments, manage datasets
+4. 📚 KNOWLEDGE BASE (RAG) — Upload & search documents with semantic/keyword/hybrid search
+5. 🎨 IMAGE GENERATION — Create images with AI (describe what you want on the Image Gen page)
+6. 📊 TRAINING HUB — Create training datasets, add samples, manage AI model training jobs
+7. 💡 PROMPTS LIBRARY — Access 15+ curated AI prompt templates ready to use
+8. ☁️ ONEDRIVE STORAGE — Connect Microsoft OneDrive 1TB for cloud document storage & RAG sync
+9. 🧠 PERSISTENT MEMORY — I remember important things across conversation sessions
+10. 🐍 CODE EXECUTION — Run Python code for data analysis, computation, and automation
+
+━━ INFO SISTEM NYATA / REAL SYSTEM INFO ━━
+- RAM: 7.7GB fisik tersedia. Swap tidak bisa diaktifkan di container Replit (ini realita, bukan bug).
+- Model lokal terpasang: gemma3:4b (3.3GB). Untuk model lebih besar → gunakan Groq/HF cloud (gratis).
+- LLM Chain: HuggingFace (Qwen 32B) → Groq (Llama 70B) → Groq (Llama 8B) → Ollama lokal
+- OneDrive: bisa dihubungkan di halaman Storage untuk 1TB penyimpanan cloud.
+
+${memories ? `━━ MEMORI RELEVAN DARI SESI LALU ━━\n${memories}\n` : ""}
+━━ ATURAN PERCAKAPAN ━━
+- Selalu ramah, langsung, dan membantu
+- Ingat konteks percakapan sebelumnya dalam percakapan ini
+- Untuk tugas kompleks (buat kode besar, ML research, dsb): sarankan gunakan tab "AI Agent"
+- Semua data NYATA — tidak ada simulasi, tidak ada dummy data`;
+}
+
 // ─── System prompt ────────────────────────────────────────────────────────────
 function buildSystemPrompt(memories: string): string {
   const toolList = TOOLS.map((t) => `- **${t.name}**(${t.params}): ${t.description}`).join("\n");
@@ -1202,6 +1258,87 @@ router.get("/agent/status", async (_req, res) => {
   try { installedModels = await listOllamaModels(); } catch {}
   const activeCount = [...sessions.values()].filter((s) => s.status === "running").length;
   res.json({ hf: { configured: isHFConfigured(), primaryModel: HF_AGENT_MODELS[0], endpoint: "router.huggingface.co" }, autonomous: { enabled: autonomousEnabled, intervalMinutes: 10, activeSessions: activeCount }, memory: { totalMemories: Number(memCnt[0]?.c || 0) }, db: { datasets, models, recentJobs: jobs }, ollama: { installed: installedModels }, tools: { total: TOOLS.length } });
+});
+
+// ─── Agent Chat — conversational mode with persistent multilingual memory ─────
+
+router.post("/agent/chat", async (req: Request, res: Response) => {
+  const { message, conversationId } = req.body as { message?: string; conversationId?: number };
+  if (!message?.trim()) { res.status(400).json({ error: "message required" }); return; }
+
+  try {
+    let convId = conversationId;
+
+    if (!convId) {
+      const [conv] = await db.insert(conversationsTable).values({
+        title: `Agent Chat: ${message.trim().slice(0, 60)}`,
+        model: "agent-chat",
+      }).returning();
+      convId = conv.id;
+    } else {
+      await db.update(conversationsTable)
+        .set({ updatedAt: new Date() })
+        .where(eq(conversationsTable.id, convId));
+    }
+
+    const history = await db.select()
+      .from(messagesTable)
+      .where(eq(messagesTable.conversationId, convId))
+      .orderBy(asc(messagesTable.createdAt))
+      .limit(40);
+
+    const memories = await recallMemories(message.trim(), 5);
+
+    const msgs: ChatMessage[] = [
+      { role: "system", content: buildChatSystemPrompt(memories) },
+      ...history.map((m) => ({ role: m.role as "user" | "assistant" | "system", content: m.content })),
+      { role: "user", content: message.trim() },
+    ];
+
+    await db.insert(messagesTable).values({ conversationId: convId, role: "user", content: message.trim() });
+
+    const result = await agentLLMCall(msgs, { maxTokens: 2000, temperature: 0.3 });
+
+    await db.insert(messagesTable).values({ conversationId: convId, role: "assistant", content: result.text });
+
+    res.json({ reply: result.text, conversationId: convId, model: result.model, historyLength: history.length + 1 });
+  } catch (e) {
+    console.error("[Agent Chat]", e);
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+router.get("/agent/chat/conversations", async (_req, res) => {
+  try {
+    const convs = await db.select()
+      .from(conversationsTable)
+      .where(eq(conversationsTable.model, "agent-chat"))
+      .orderBy(desc(conversationsTable.updatedAt))
+      .limit(50);
+    res.json(convs);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+router.get("/agent/chat/conversations/:id/messages", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) { res.status(400).json({ error: "invalid id" }); return; }
+    const msgs = await db.select()
+      .from(messagesTable)
+      .where(eq(messagesTable.conversationId, id))
+      .orderBy(asc(messagesTable.createdAt));
+    res.json(msgs);
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+router.delete("/agent/chat/conversations/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) { res.status(400).json({ error: "invalid id" }); return; }
+    await db.delete(messagesTable).where(eq(messagesTable.conversationId, id));
+    await db.delete(conversationsTable).where(eq(conversationsTable.id, id));
+    res.json({ deleted: true });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
 });
 
 // Legacy SSE endpoint

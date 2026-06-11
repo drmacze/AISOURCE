@@ -23,6 +23,7 @@ import providersRouter from "./providers";
 import resourcesRouter from "./resources";
 import hfAutoTrainRouter from "./hf-autotrain";
 import trainingAdvancedRouter from "./training-advanced";
+import onedriveRouter from "./onedrive";
 
 const router: IRouter = Router();
 
@@ -88,5 +89,8 @@ router.use(settingsRouter);
 
 // Persistent auth session — store primary admin key in DB
 router.use(authSessionRouter);
+
+// Microsoft OneDrive — 1TB cloud storage + RAG sync
+router.use(onedriveRouter);
 
 export default router;

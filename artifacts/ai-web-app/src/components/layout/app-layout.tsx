@@ -24,6 +24,7 @@ import {
   FileText,
   Bot,
   BookMarked as PromptIcon,
+  HardDrive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
@@ -87,6 +88,7 @@ const NAV_GROUPS = [
   {
     label: "System",
     items: [
+      { href: "/storage",    label: "OneDrive",       icon: HardDrive,        color: "text-blue-400" },
       { href: "/api-keys",   label: "API Keys",       icon: KeyRound,         color: "text-violet-400" },
       { href: "/api-docs",   label: "API Docs",       icon: BookOpen,         color: "text-teal-400" },
       { href: "/settings",   label: "Settings",       icon: Settings,         color: "text-slate-400" },
