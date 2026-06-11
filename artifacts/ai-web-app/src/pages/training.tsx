@@ -863,6 +863,233 @@ function CliTerminal({
   );
 }
 
+// ── HF AutoTrain Panel ───────────────────────────────────────────────────────
+interface HFInfo {
+  configured: boolean; username?: string; fullname?: string; plan?: string; message?: string;
+}
+interface HFPushResult {
+  ok: boolean; repoId?: string; repoUrl?: string; samplesUploaded?: number; error?: string;
+}
+interface HFTrainResult {
+  ok: boolean; method?: string; projectName?: string; outputModelUrl?: string; launchUrl?: string; configYaml?: string; error?: string; message?: string;
+}
+interface HFBaseModel {
+  id: string; label: string; vram: string; recommended: boolean;
+}
+
+function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: string }> }) {
+  const BASE = (window as Window & { _apiBase?: string })._apiBase || getApiBase();
+  const [hfInfo, setHfInfo] = useState<HFInfo | null>(null);
+  const [baseModels, setBaseModels] = useState<HFBaseModel[]>([]);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string>("");
+  const [selectedBase, setSelectedBase] = useState("unsloth/Qwen2.5-7B-Instruct");
+  const [repoName, setRepoName] = useState("");
+  const [epochs, setEpochs] = useState("3");
+
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushResult, setPushResult] = useState<HFPushResult | null>(null);
+  const [trainLoading, setTrainLoading] = useState(false);
+  const [trainResult, setTrainResult] = useState<HFTrainResult | null>(null);
+  const [showYaml, setShowYaml] = useState(false);
+
+  useEffect(() => {
+    fetch(`${BASE}/api/hf/autotrain/info`).then((r) => r.json()).then(setHfInfo).catch(() => {});
+    fetch(`${BASE}/api/hf/autotrain/models`).then((r) => r.json()).then(setBaseModels).catch(() => {});
+  }, [BASE]);
+
+  const handlePush = async () => {
+    if (!selectedDatasetId) return;
+    setPushLoading(true); setPushResult(null); setTrainResult(null);
+    try {
+      const r = await fetch(`${BASE}/api/hf/dataset/push`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ datasetId: Number(selectedDatasetId), repoName: repoName || undefined, private: false }),
+      });
+      const data = await r.json() as HFPushResult;
+      setPushResult(data);
+    } catch (err) {
+      setPushResult({ ok: false, error: String(err) });
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const handleTrain = async () => {
+    if (!pushResult?.repoId) return;
+    setTrainLoading(true); setTrainResult(null);
+    try {
+      const r = await fetch(`${BASE}/api/hf/autotrain/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          datasetRepoId: pushResult.repoId,
+          baseModel: selectedBase,
+          epochs: Number(epochs),
+        }),
+      });
+      const data = await r.json() as HFTrainResult;
+      setTrainResult(data);
+    } catch (err) {
+      setTrainResult({ ok: false, error: String(err) });
+    } finally {
+      setTrainLoading(false);
+    }
+  };
+
+  const notConfigured = hfInfo && !hfInfo.configured;
+
+  return (
+    <Card className="glass-panel border-violet-500/20">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Brain className="w-4 h-4 text-violet-400" />
+          HuggingFace AutoTrain
+          <span className="text-[10px] font-mono font-normal text-muted-foreground ml-1">
+            fine-tuning di GPU HF — gratis
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* HF Token Status */}
+        <div className={`flex items-center gap-2 p-2.5 rounded border text-xs font-mono ${
+          hfInfo?.configured
+            ? "border-green-500/30 bg-green-500/5 text-green-400"
+            : "border-amber-500/30 bg-amber-500/5 text-amber-400"
+        }`}>
+          {hfInfo?.configured
+            ? <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /><span>Terhubung sebagai <b>{hfInfo.username}</b> (plan: {hfInfo.plan})</span></>
+            : <><AlertCircle className="w-3.5 h-3.5 shrink-0" /><span>{hfInfo?.message ?? "Memeriksa HF_TOKEN…"} → Tambahkan di Settings → API Keys → HuggingFace</span></>
+          }
+          {!hfInfo && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Step 1 */}
+          <div className="space-y-3 p-3 rounded border border-white/5 bg-white/2">
+            <p className="text-xs font-semibold text-white flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-violet-500/20 text-violet-400 text-[10px] flex items-center justify-center font-bold">1</span>
+              Push Dataset ke HF Hub
+            </p>
+            <div className="space-y-2">
+              <Select value={selectedDatasetId} onValueChange={setSelectedDatasetId} disabled={notConfigured ?? false}>
+                <SelectTrigger className="h-8 text-xs font-mono">
+                  <SelectValue placeholder="Pilih dataset…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(datasets ?? []).map((d) => (
+                    <SelectItem key={d.id} value={String(d.id)} className="text-xs font-mono">{d.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="Nama repo HF (opsional)"
+                value={repoName}
+                onChange={(e) => setRepoName(e.target.value)}
+                className="h-8 text-xs font-mono"
+                disabled={notConfigured ?? false}
+              />
+              <Button
+                size="sm" className="w-full gap-1.5 text-xs"
+                disabled={!selectedDatasetId || pushLoading || (notConfigured ?? false)}
+                onClick={handlePush}
+              >
+                {pushLoading
+                  ? <><Loader2 className="w-3 h-3 animate-spin" /> Uploading…</>
+                  : <><Download className="w-3 h-3" /> Push ke HF Hub</>
+                }
+              </Button>
+            </div>
+            {pushResult && (
+              <div className={`p-2 rounded text-[11px] font-mono ${pushResult.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                {pushResult.ok
+                  ? <><CheckCircle2 className="w-3 h-3 inline mr-1" />{pushResult.samplesUploaded} samples → <a href={pushResult.repoUrl} target="_blank" rel="noreferrer" className="underline">{pushResult.repoId}</a></>
+                  : <><AlertCircle className="w-3 h-3 inline mr-1" />{pushResult.error}</>
+                }
+              </div>
+            )}
+          </div>
+
+          {/* Step 2 */}
+          <div className="space-y-3 p-3 rounded border border-white/5 bg-white/2">
+            <p className="text-xs font-semibold text-white flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-full bg-violet-500/20 text-violet-400 text-[10px] flex items-center justify-center font-bold">2</span>
+              Launch AutoTrain di GPU HF
+            </p>
+            <div className="space-y-2">
+              <Select value={selectedBase} onValueChange={setSelectedBase} disabled={!pushResult?.ok}>
+                <SelectTrigger className="h-8 text-xs font-mono">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {baseModels.map((m) => (
+                    <SelectItem key={m.id} value={m.id} className="text-xs font-mono">
+                      {m.label} {m.recommended ? "⭐" : ""} · {m.vram} VRAM
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] font-mono text-muted-foreground shrink-0">Epochs</label>
+                <Input value={epochs} onChange={(e) => setEpochs(e.target.value)} className="h-8 text-xs font-mono" type="number" min="1" max="10" disabled={!pushResult?.ok} />
+              </div>
+              <Button
+                size="sm" className="w-full gap-1.5 text-xs bg-violet-600 hover:bg-violet-700 text-white"
+                disabled={!pushResult?.ok || trainLoading}
+                onClick={handleTrain}
+              >
+                {trainLoading
+                  ? <><Loader2 className="w-3 h-3 animate-spin" /> Launching…</>
+                  : <><Zap className="w-3 h-3" /> Launch AutoTrain Job</>
+                }
+              </Button>
+            </div>
+            {trainResult && (
+              <div className={`p-2 rounded text-[11px] font-mono space-y-1 ${trainResult.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                {trainResult.ok ? (
+                  <>
+                    <div><CheckCircle2 className="w-3 h-3 inline mr-1" />
+                      {trainResult.method === "autotrain-api"
+                        ? `Job dibuat: ${trainResult.projectName}`
+                        : trainResult.message ?? "Config siap"}
+                    </div>
+                    {trainResult.outputModelUrl && (
+                      <div><a href={trainResult.outputModelUrl} target="_blank" rel="noreferrer" className="underline">{trainResult.outputModelUrl}</a></div>
+                    )}
+                    <div className="flex gap-2 mt-1">
+                      {trainResult.launchUrl && (
+                        <a href={trainResult.launchUrl} target="_blank" rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-violet-500/20 text-violet-400 text-[10px] hover:bg-violet-500/30">
+                          <ExternalLink className="w-2.5 h-2.5" /> Buka AutoTrain
+                        </a>
+                      )}
+                      {trainResult.configYaml && (
+                        <button onClick={() => setShowYaml(!showYaml)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/5 text-muted-foreground text-[10px] hover:bg-white/10">
+                          <Terminal className="w-2.5 h-2.5" /> {showYaml ? "Sembunyikan" : "Lihat"} Config YAML
+                        </button>
+                      )}
+                    </div>
+                    {showYaml && trainResult.configYaml && (
+                      <pre className="mt-2 p-2 rounded bg-black/30 text-[10px] font-mono text-slate-300 overflow-x-auto whitespace-pre">{trainResult.configYaml}</pre>
+                    )}
+                  </>
+                ) : (
+                  <div><AlertCircle className="w-3 h-3 inline mr-1" />{trainResult.error}</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <p className="text-[10px] text-muted-foreground font-mono text-center">
+          Training berjalan di <b className="text-violet-400">GPU HuggingFace</b> — 0% RAM lokal digunakan. Model hasil training otomatis tersimpan di HF Hub kamu.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main Training Hub Page ───────────────────────────────────────────────────
 export default function Training() {
   const queryClient = useQueryClient();
@@ -1649,6 +1876,9 @@ export default function Training() {
           </Card>
         </div>
       </div>
+
+      {/* ── HF AutoTrain ─────────────────────────────────────────────────────── */}
+      <HFAutoTrainPanel datasets={(datasets ?? []).map((d) => ({ id: d.id, name: d.name }))} />
 
       {/* ── Model Catalogue ──────────────────────────────────────────────────── */}
       <Card className="glass-panel">

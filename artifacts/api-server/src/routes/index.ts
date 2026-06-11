@@ -21,6 +21,7 @@ import analyticsRouter from "./analytics";
 import agentRouter from "./agent";
 import providersRouter from "./providers";
 import resourcesRouter from "./resources";
+import hfAutoTrainRouter from "./hf-autotrain";
 
 const router: IRouter = Router();
 
@@ -74,6 +75,9 @@ router.use("/v1", v1Router);
 
 // Real system resource monitor — RAM/CPU/Disk from /proc and fs.statfs
 router.use(resourcesRouter);
+
+// HuggingFace AutoTrain — push datasets to HF Hub + launch fine-tuning jobs on HF GPU
+router.use(hfAutoTrainRouter);
 
 // Settings — manage API keys and integrations
 router.use(settingsRouter);

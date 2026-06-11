@@ -41,11 +41,15 @@ const KIMI_MODELS = [
 
 // Groq LPU — fastest cloud inference — routed via /api/conversations/:id/messages/stream
 const GROQ_MODELS = [
-  { name: "groq:llama-3.3-70b-versatile", label: "Llama 3.3 70B",      provider: "groq" as const, description: "70B · Groq LPU · Fastest" },
-  { name: "groq:llama-3.1-70b-versatile", label: "Llama 3.1 70B",      provider: "groq" as const, description: "70B · Groq LPU" },
-  { name: "groq:llama-3.1-8b-instant",   label: "Llama 3.1 8B",       provider: "groq" as const, description: "8B · Ultra-low latency" },
-  { name: "groq:gemma2-9b-it",           label: "Gemma 2 9B",          provider: "groq" as const, description: "9B · Google · Groq LPU" },
-  { name: "groq:mixtral-8x7b-32768",     label: "Mixtral 8x7B",        provider: "groq" as const, description: "MoE 8x7B · 32K ctx" },
+  { name: "groq:meta-llama/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout 17B", provider: "groq" as const, description: "17B MoE · 16 experts · 128K ctx · Terbaru" },
+  { name: "groq:openai/gpt-oss-120b",    label: "OpenAI OSS 120B",     provider: "groq" as const, description: "120B · Terbesar · 128K ctx · Gratis" },
+  { name: "groq:qwen/qwen3-32b",         label: "Qwen3 32B",           provider: "groq" as const, description: "32B · Alibaba · Reasoning · 32K ctx" },
+  { name: "groq:groq/compound",          label: "Groq Compound",        provider: "groq" as const, description: "Multi-model · Tool use · Groq native" },
+  { name: "groq:llama-3.3-70b-versatile",label: "Llama 3.3 70B",       provider: "groq" as const, description: "70B · Serbaguna · 128K ctx" },
+  { name: "groq:llama-3.1-8b-instant",   label: "Llama 3.1 8B",        provider: "groq" as const, description: "8B · Ultra-cepat · Latensi rendah" },
+  { name: "groq:gemma2-9b-it",           label: "Gemma 2 9B",           provider: "groq" as const, description: "9B · Google · Groq LPU" },
+  { name: "groq:mixtral-8x7b-32768",     label: "Mixtral 8x7B",         provider: "groq" as const, description: "MoE 8x7B · 32K ctx" },
+  { name: "groq:groq/compound-mini",     label: "Groq Compound Mini",   provider: "groq" as const, description: "Compound ringan · Tool use cepat" },
 ];
 
 // OpenRouter — free-tier cloud models
