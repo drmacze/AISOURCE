@@ -25,6 +25,7 @@ import {
   Bot,
   BookMarked as PromptIcon,
   HardDrive,
+  MessageCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
@@ -86,9 +87,15 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: "Integrations",
+    items: [
+      { href: "/whatsapp",   label: "WhatsApp Bot",   icon: MessageCircle,    color: "text-green-400" },
+      { href: "/storage",    label: "OneDrive",       icon: HardDrive,        color: "text-blue-400" },
+    ],
+  },
+  {
     label: "System",
     items: [
-      { href: "/storage",    label: "OneDrive",       icon: HardDrive,        color: "text-blue-400" },
       { href: "/api-keys",   label: "API Keys",       icon: KeyRound,         color: "text-violet-400" },
       { href: "/api-docs",   label: "API Docs",       icon: BookOpen,         color: "text-teal-400" },
       { href: "/settings",   label: "Settings",       icon: Settings,         color: "text-slate-400" },

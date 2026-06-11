@@ -25,6 +25,7 @@ import hfAutoTrainRouter from "./hf-autotrain";
 import trainingAdvancedRouter from "./training-advanced";
 import onedriveRouter from "./onedrive";
 import spotifyRouter from "./spotify";
+import whatsappRouter from "./whatsapp";
 
 const router: IRouter = Router();
 
@@ -96,5 +97,8 @@ router.use(onedriveRouter);
 
 // Spotify Now Playing — live widget for GitHub profile
 router.use(spotifyRouter);
+
+// WhatsApp Cloud API webhook + bot management
+router.use(whatsappRouter);
 
 export default router;
