@@ -19,6 +19,7 @@ import toolsRouter from "./tools";
 import promptsRouter from "./prompts";
 import analyticsRouter from "./analytics";
 import agentRouter from "./agent";
+import providersRouter from "./providers";
 
 const router: IRouter = Router();
 
@@ -63,6 +64,9 @@ router.use(analyticsRouter);
 
 // AI Developer Agent — autonomous ReAct agent for building/training models
 router.use(agentRouter);
+
+// Providers — list all AI providers + available models
+router.use(providersRouter);
 
 // Public API v1 — for external integrations (e.g. dlavie.vercel.app)
 router.use("/v1", v1Router);

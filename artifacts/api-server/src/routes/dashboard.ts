@@ -12,6 +12,8 @@ import {
 import { count, eq, desc, sql } from "drizzle-orm";
 import { isOllamaOnline, listOllamaModels } from "../ollama";
 import { isHFConfigured } from "../huggingface";
+import { isGroqConfigured, GROQ_MODELS } from "../groq";
+import { isOpenRouterConfigured, OPENROUTER_FREE_MODELS } from "../openrouter";
 import { getAutoTrainingStatus } from "../autotraining";
 
 const router: IRouter = Router();
@@ -68,6 +70,10 @@ router.get("/dashboard/stats", async (_req, res) => {
     ollamaModels:       (ollamaModels as Array<{ name: string }>).length,
     installedModels:    (ollamaModels as Array<{ name: string }>).map((m) => m.name),
     hfConnected:        isHFConfigured(),
+    groqConnected:      isGroqConfigured(),
+    groqModels:         isGroqConfigured() ? GROQ_MODELS.map((m) => m.id) : [],
+    openRouterConnected: isOpenRouterConfigured(),
+    openRouterModels:   isOpenRouterConfigured() ? OPENROUTER_FREE_MODELS.map((m) => m.id) : [],
     autoTraining: {
       running:          autoStatus.running,
       cyclesCompleted:  autoStatus.totalCyclesCompleted,

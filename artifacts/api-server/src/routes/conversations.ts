@@ -11,8 +11,54 @@ import {
   SendMessageParams,
 } from "@workspace/api-zod";
 import { generateOllamaResponse, streamOllamaResponse, OllamaError } from "../ollama";
+import { streamKimiResponse } from "../kimi";
+import { streamGroqResponse, generateGroqResponse, isGroqConfigured } from "../groq";
+import { streamOpenRouterResponse, generateOpenRouterResponse, isOpenRouterConfigured } from "../openrouter";
 import { generateEmbedding } from "./documents";
 import { ddgSearch } from "./search";
+
+/**
+ * Detect which provider to use based on model name prefix.
+ *  groq:<model>        → Groq LPU
+ *  openrouter:<model>  → OpenRouter
+ *  kimi                → Kimi K2
+ *  anything else       → Ollama (local)
+ */
+function detectProvider(model: string): "groq" | "openrouter" | "kimi" | "ollama" {
+  if (model.startsWith("groq:"))        return "groq";
+  if (model.startsWith("openrouter:"))  return "openrouter";
+  if (model === "kimi" || model.startsWith("kimi:")) return "kimi";
+  return "ollama";
+}
+
+async function streamToResponse(
+  message: string,
+  model: string,
+  ragContext: string | undefined,
+  res: Response
+): Promise<void> {
+  const provider = detectProvider(model);
+  if (provider === "groq")       return streamGroqResponse(message, model, ragContext, res);
+  if (provider === "openrouter") return streamOpenRouterResponse(message, model, ragContext, res);
+  if (provider === "kimi")       return streamKimiResponse(message, model, ragContext, res);
+  return streamOllamaResponse(message, model, ragContext, res);
+}
+
+async function generateToText(
+  message: string,
+  model: string,
+  ragContext: string | undefined
+): Promise<string> {
+  const provider = detectProvider(model);
+  const ctx = ragContext ? `Context:\n${ragContext}\n\nQuestion: ${message}` : message;
+  const msgs = [
+    { role: "system" as const, content: "You are NEXUS_OS, a helpful AI assistant." },
+    { role: "user" as const, content: ctx },
+  ];
+  if (provider === "groq" && isGroqConfigured())           return generateGroqResponse(msgs, model);
+  if (provider === "openrouter" && isOpenRouterConfigured()) return generateOpenRouterResponse(msgs, model);
+  return generateOllamaResponse(message, model, ragContext);
+}
 
 const router: IRouter = Router();
 
@@ -357,7 +403,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
   const ragContext = await retrieveRAGContext(parsed.content);
 
   try {
-    const response = await generateOllamaResponse(parsed.content, model, ragContext);
+    const response = await generateToText(parsed.content, model, ragContext);
 
     const [aiMsg] = await db
       .insert(messagesTable)
@@ -468,7 +514,7 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
     return (origEnd as (...a: unknown[]) => typeof res)(...args);
   } as typeof res.end;
 
-  await streamOllamaResponse(body.content, model, combinedContext, res);
+  await streamToResponse(body.content, model, combinedContext, res);
 });
 
 
