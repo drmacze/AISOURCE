@@ -22,6 +22,7 @@ import agentRouter from "./agent";
 import providersRouter from "./providers";
 import resourcesRouter from "./resources";
 import hfAutoTrainRouter from "./hf-autotrain";
+import trainingAdvancedRouter from "./training-advanced";
 
 const router: IRouter = Router();
 
@@ -78,6 +79,9 @@ router.use(resourcesRouter);
 
 // HuggingFace AutoTrain — push datasets to HF Hub + launch fine-tuning jobs on HF GPU
 router.use(hfAutoTrainRouter);
+
+// Advanced Training — 35 AI training enhancement features
+router.use(trainingAdvancedRouter);
 
 // Settings — manage API keys and integrations
 router.use(settingsRouter);

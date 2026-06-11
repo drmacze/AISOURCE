@@ -561,7 +561,7 @@ type DatasetRow = { id: number; name: string; taskType: string; description?: st
 
 const activePythonJobs = new Map<number, number>(); // jobId → PID
 
-async function runRealFineTuning(
+export async function runRealFineTuning(
   jobId: number,
   model: ModelRow,
   dataset: DatasetRow,
@@ -781,6 +781,18 @@ async function runRealFineTuning(
 
     console.log(`[Training] Job ${jobId} COMPLETED — ${validSamples.length} samples, ${opts.epochs} epochs, LoRA rank ${opts.loraRank}`);
 
+    // Fire webhooks
+    try {
+      const { fireWebhooks } = await import("./training-advanced");
+      await fireWebhooks("job.completed", {
+        jobId,
+        modelId: model.id,
+        modelName: model.name,
+        samples: validSamples.length,
+        epochs: opts.epochs,
+      });
+    } catch { /* webhook errors must not fail training */ }
+
   } catch (error) {
     console.error(`[Training] Job ${jobId} FAILED:`, error);
     activePythonJobs.delete(jobId);
@@ -794,6 +806,12 @@ async function runRealFineTuning(
       status: "inactive",
       updatedAt: new Date(),
     }).where(eq(aiModelsTable.id, model.id));
+
+    // Fire failure webhook
+    try {
+      const { fireWebhooks } = await import("./training-advanced");
+      await fireWebhooks("job.failed", { jobId, modelId: model.id, error: String(error) });
+    } catch { /* ignore */ }
   }
 }
 
