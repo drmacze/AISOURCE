@@ -878,12 +878,18 @@ export default function Training() {
   const [createDatasetOpen, setCreateDatasetOpen] = useState(false);
   const [dsName, setDsName] = useState("");
   const [dsDesc, setDsDesc] = useState("");
-  const [dsTaskType, setDsTaskType] = useState<"classification"|"generation"|"summarization"|"qa"|"translation">("generation");
+  const [dsTaskType, setDsTaskType] = useState("instruction_following");
 
   const [startJobOpen, setStartJobOpen] = useState(false);
   const [jobModelId, setJobModelId] = useState("");
   const [jobDatasetId, setJobDatasetId] = useState("");
   const [jobEpochs, setJobEpochs] = useState("3");
+  const [jobBackend, setJobBackend] = useState<"hf_api" | "local_cpu">("local_cpu");
+  const [jobLoraRank, setJobLoraRank] = useState("16");
+  const [jobLearningRate, setJobLearningRate] = useState("0.0002");
+  const [jobBatchSize, setJobBatchSize] = useState("2");
+  const [jobMaxSeq, setJobMaxSeq] = useState("512");
+  const [autoConfigInfo, setAutoConfigInfo] = useState<{ family: string; notes: string; chatTemplate: string } | null>(null);
 
   const [registerModelOpen, setRegisterModelOpen] = useState(false);
   const [rmName, setRmName] = useState("");
@@ -960,14 +966,43 @@ export default function Training() {
     e.preventDefault();
     if (!jobModelId || !jobDatasetId) return;
     startJobMutation.mutate({
-      data: { modelId: Number(jobModelId), datasetId: Number(jobDatasetId), epochs: Number(jobEpochs) || 3 },
+      data: {
+        modelId: Number(jobModelId),
+        datasetId: Number(jobDatasetId),
+        epochs: Number(jobEpochs) || 3,
+        trainingBackend: jobBackend,
+        loraRank: Number(jobLoraRank) || 16,
+        learningRate: parseFloat(jobLearningRate) || 0.0002,
+        batchSize: Number(jobBatchSize) || 2,
+        maxSeqLength: Number(jobMaxSeq) || 512,
+      },
     });
+  };
+
+  const handleModelSelectForJob = async (modelId: string) => {
+    setJobModelId(modelId);
+    const model = models?.find((m) => m.id === Number(modelId));
+    if (!model) return;
+    const ollamaName = model.ollamaName || model.architecture || model.name;
+    try {
+      const res = await fetch(`${BASE}/api/training-datasets/1/auto-config?modelName=${encodeURIComponent(ollamaName)}`);
+      const cfg = await res.json() as { modelFamily: string; notes: string; chatTemplate: string };
+      setAutoConfigInfo({ family: cfg.modelFamily, notes: cfg.notes, chatTemplate: cfg.chatTemplate });
+    } catch { setAutoConfigInfo(null); }
   };
 
   const handleRegisterModel = (e: React.FormEvent) => {
     e.preventDefault();
     registerModelMutation.mutate({
-      data: { name: rmName, type: rmType, version: rmVersion, architecture: rmArch || undefined, description: rmDesc || undefined },
+      data: {
+        name: rmName,
+        type: rmType,
+        version: rmVersion,
+        architecture: rmArch || undefined,
+        description: rmDesc || undefined,
+        ollamaName: rmArch || undefined,
+        baseOllamaModel: rmArch || undefined,
+      },
     });
   };
 
@@ -1058,47 +1093,128 @@ export default function Training() {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={startJobOpen} onOpenChange={setStartJobOpen}>
+          <Dialog open={startJobOpen} onOpenChange={(v) => { setStartJobOpen(v); if (!v) setAutoConfigInfo(null); }}>
             <DialogTrigger asChild>
               <Button className="gap-2 font-mono" variant="default">
                 <Play className="w-4 h-4" /> START_JOB
               </Button>
             </DialogTrigger>
-            <DialogContent className="border-border bg-card">
-              <DialogHeader><DialogTitle>Start Training Pipeline</DialogTitle></DialogHeader>
-              <form onSubmit={handleStartJob} className="space-y-4 pt-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-mono text-muted-foreground">SELECT_MODEL</label>
-                  <Select value={jobModelId} onValueChange={setJobModelId}>
+            <DialogContent className="border-border bg-card max-w-lg">
+              <DialogHeader><DialogTitle className="flex items-center gap-2"><Brain className="w-4 h-4 text-primary" /> Real LoRA Fine-Tuning</DialogTitle></DialogHeader>
+              <form onSubmit={handleStartJob} className="space-y-4 pt-2">
+                {/* Model selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-muted-foreground">BASE_MODEL</label>
+                  <Select value={jobModelId} onValueChange={handleModelSelectForJob}>
                     <SelectTrigger className="font-mono text-sm bg-background"><SelectValue placeholder="Select registered model" /></SelectTrigger>
                     <SelectContent>
                       {models?.map((m) => (
-                        <SelectItem key={m.id} value={m.id.toString()}>{m.name} ({m.version})</SelectItem>
+                        <SelectItem key={m.id} value={m.id.toString()}>
+                          {m.name} · {m.ollamaName || m.architecture || "—"}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {autoConfigInfo && (
+                    <div className="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-2 py-1.5 rounded border border-cyan-500/20 leading-relaxed">
+                      <span className="text-cyan-300 font-bold">Family: {autoConfigInfo.family}</span> · Template: {autoConfigInfo.chatTemplate}<br />
+                      {autoConfigInfo.notes}
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-mono text-muted-foreground">SELECT_DATASET</label>
+
+                {/* Dataset selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-muted-foreground">DATASET</label>
                   <Select value={jobDatasetId} onValueChange={setJobDatasetId}>
                     <SelectTrigger className="font-mono text-sm bg-background"><SelectValue placeholder="Select dataset" /></SelectTrigger>
                     <SelectContent>
                       {datasets?.map((d) => (
-                        <SelectItem key={d.id} value={d.id.toString()}>{d.name} ({d.sampleCount} samples)</SelectItem>
+                        <SelectItem key={d.id} value={d.id.toString()}>
+                          {d.name} · {d.sampleCount} samples · {d.taskType}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-mono text-muted-foreground">EPOCHS</label>
-                  <Input type="number" min="1" max="20" value={jobEpochs} onChange={(e) => setJobEpochs(e.target.value)} className="font-mono text-sm bg-background" />
+
+                {/* Backend selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-muted-foreground">TRAINING_BACKEND</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: "local_cpu", label: "Local CPU", icon: "🖥️", desc: "Real LoRA, CPU (slower)" },
+                      { value: "hf_api", label: "HF API", icon: "🤗", desc: "HuggingFace libs + local" },
+                    ] as const).map((b) => (
+                      <button
+                        key={b.value}
+                        type="button"
+                        onClick={() => setJobBackend(b.value)}
+                        className={`p-2.5 rounded-lg border text-left transition-all ${
+                          jobBackend === b.value
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-background text-muted-foreground hover:border-primary/50"
+                        }`}
+                      >
+                        <div className="text-sm font-mono">{b.icon} {b.label}</div>
+                        <div className="text-[10px] mt-0.5 opacity-70">{b.desc}</div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground font-mono bg-accent/30 p-3 rounded-md">
-                  ⚡ Training creates a real Ollama Modelfile from your dataset and registers it as a local model.
-                </p>
-                <Button type="submit" className="w-full" disabled={startJobMutation.isPending || !jobModelId || !jobDatasetId}>
-                  {startJobMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Launch Pipeline
+
+                {/* LoRA hyperparameters */}
+                <div className="p-3 rounded-lg border border-border bg-accent/20 space-y-3">
+                  <div className="text-xs font-mono text-muted-foreground font-semibold">LORA_HYPERPARAMETERS</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono text-muted-foreground">EPOCHS</label>
+                      <Input type="number" min="1" max="20" value={jobEpochs} onChange={(e) => setJobEpochs(e.target.value)} className="font-mono text-sm bg-background h-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono text-muted-foreground">LORA_RANK (r)</label>
+                      <Select value={jobLoraRank} onValueChange={setJobLoraRank}>
+                        <SelectTrigger className="font-mono text-sm bg-background h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {["4","8","16","32","64"].map((r) => (
+                            <SelectItem key={r} value={r}>r={r}{r === "16" ? " (default)" : r === "4" ? " (fast)" : r === "64" ? " (detailed)" : ""}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono text-muted-foreground">LEARNING_RATE</label>
+                      <Select value={jobLearningRate} onValueChange={setJobLearningRate}>
+                        <SelectTrigger className="font-mono text-sm bg-background h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {[["0.0001","1e-4 (conservative)"],["0.0002","2e-4 (default)"],["0.0005","5e-4 (aggressive)"],["0.001","1e-3 (fast)"]].map(([v, l]) => (
+                            <SelectItem key={v} value={v}>{l}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono text-muted-foreground">BATCH_SIZE</label>
+                      <Select value={jobBatchSize} onValueChange={setJobBatchSize}>
+                        <SelectTrigger className="font-mono text-sm bg-background h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {[["1","1 (memory safe)"],["2","2 (default)"],["4","4 (faster)"],["8","8 (GPU)"]].map(([v, l]) => (
+                            <SelectItem key={v} value={v}>{l}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] text-muted-foreground font-mono bg-primary/5 px-3 py-2 rounded border border-primary/20">
+                  ⚡ <span className="text-primary">Real LoRA fine-tuning</span> — actual gradient descent using PEFT + transformers.
+                  Saves adapter weights to disk + registers in Ollama.
+                </div>
+
+                <Button type="submit" className="w-full gap-2" disabled={startJobMutation.isPending || !jobModelId || !jobDatasetId}>
+                  {startJobMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                  Launch Real Fine-Tuning
                 </Button>
               </form>
             </DialogContent>
@@ -1137,7 +1253,14 @@ export default function Training() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {[...activeJobs, ...completedJobs].map((job) => (
+                  {[...activeJobs, ...completedJobs].map((job) => {
+                    const lossPoints: Array<{ step: number; loss: number }> = (() => {
+                      try { return job.lossHistory ? JSON.parse(job.lossHistory) : []; } catch { return []; }
+                    })();
+                    const maxLoss = lossPoints.length > 0 ? Math.max(...lossPoints.map((p) => p.loss)) : 1;
+                    const minLoss = lossPoints.length > 0 ? Math.min(...lossPoints.map((p) => p.loss)) : 0;
+                    const lossRange = maxLoss - minLoss || 1;
+                    return (
                     <div key={job.id} className="p-4 rounded-lg border border-border bg-background space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -1151,8 +1274,21 @@ export default function Training() {
                             <Play className="w-5 h-5 text-muted-foreground" />
                           )}
                           <div>
-                            <div className="font-mono text-sm font-medium">JOB_{job.id.toString().padStart(4, "0")}</div>
-                            <div className="text-xs text-muted-foreground">Model #{job.modelId} · Dataset #{job.datasetId} · {job.epochs} epochs</div>
+                            <div className="font-mono text-sm font-medium flex items-center gap-2">
+                              JOB_{job.id.toString().padStart(4, "0")}
+                              {job.trainingBackend && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                                  job.trainingBackend === "hf_api" ? "bg-yellow-500/20 text-yellow-400" : "bg-blue-500/20 text-blue-400"
+                                }`}>
+                                  {job.trainingBackend === "hf_api" ? "🤗 HF" : "🖥️ LoRA"}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Model #{job.modelId} · Dataset #{job.datasetId} · {job.epochs} ep
+                              {job.loraRank ? ` · r=${job.loraRank}` : ""}
+                              {job.learningRate ? ` · lr=${job.learningRate}` : ""}
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1189,14 +1325,33 @@ export default function Training() {
                           <Progress value={(job.progress || 0) * 100} className="h-1.5 bg-accent" />
                         </div>
                       )}
-                      <div className="flex gap-6 text-xs font-mono text-muted-foreground border-t border-border pt-2">
-                        <span>Loss: {job.loss?.toFixed(4) || "—"}</span>
-                        <span>Accuracy: {job.accuracy ? `${(job.accuracy * 100).toFixed(1)}%` : "—"}</span>
+                      {/* Loss sparkline */}
+                      {lossPoints.length > 2 && (
+                        <div className="flex items-end gap-px h-10 px-1 bg-accent/10 rounded border border-border/50">
+                          {lossPoints.slice(-60).map((p, i) => {
+                            const heightPct = ((p.loss - minLoss) / lossRange);
+                            const barH = Math.max(2, Math.round(heightPct * 36));
+                            return (
+                              <div
+                                key={i}
+                                title={`step ${p.step}: loss=${p.loss.toFixed(4)}`}
+                                className="flex-1 min-w-0 rounded-t-sm bg-primary/70 hover:bg-primary transition-colors cursor-default"
+                                style={{ height: `${barH}px`, alignSelf: "flex-end" }}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="flex gap-4 flex-wrap text-xs font-mono text-muted-foreground border-t border-border pt-2">
+                        <span className="text-green-400">Loss: {job.loss?.toFixed(4) || "—"}</span>
+                        <span className="text-blue-400">Acc: {job.accuracy ? `${(job.accuracy * 100).toFixed(1)}%` : "—"}</span>
+                        {job.outputModelPath && <span className="text-primary">✓ adapter saved</span>}
                         {job.error && <span className="text-destructive truncate max-w-48">⚠ {job.error}</span>}
                         <span className="ml-auto">{job.startedAt ? format(new Date(job.startedAt), "HH:mm:ss") : "—"}</span>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -1262,12 +1417,47 @@ export default function Training() {
                       </div>
                       <div className="space-y-2">
                         <label className="text-xs font-mono text-muted-foreground">TASK_TYPE</label>
-                        <Select value={dsTaskType} onValueChange={(v) => setDsTaskType(v as typeof dsTaskType)}>
+                        <Select value={dsTaskType} onValueChange={setDsTaskType}>
                           <SelectTrigger className="font-mono text-sm bg-background"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {["generation","qa","classification","summarization","translation"].map(t => (
-                              <SelectItem key={t} value={t}>{t}</SelectItem>
-                            ))}
+                          <SelectContent className="max-h-72">
+                            <div className="px-2 py-1 text-[10px] font-mono text-muted-foreground uppercase tracking-wider">General</div>
+                            {[
+                              ["instruction_following","📋 Instruction Following"],
+                              ["chat","💬 Chat / Dialogue"],
+                              ["multilingual","🌐 Multilingual"],
+                            ].map(([v, l]) => <SelectItem key={v} value={v} className="font-mono text-xs">{l}</SelectItem>)}
+                            <div className="px-2 py-1 text-[10px] font-mono text-muted-foreground uppercase tracking-wider border-t border-border mt-1 pt-2">Code</div>
+                            {[
+                              ["code_generation","💻 Code Generation"],
+                              ["code_review","🔍 Code Review"],
+                              ["text_to_sql","🗄️ Text-to-SQL"],
+                            ].map(([v, l]) => <SelectItem key={v} value={v} className="font-mono text-xs">{l}</SelectItem>)}
+                            <div className="px-2 py-1 text-[10px] font-mono text-muted-foreground uppercase tracking-wider border-t border-border mt-1 pt-2">Reasoning</div>
+                            {[
+                              ["reasoning","🧠 Reasoning"],
+                              ["math","➗ Math / STEM"],
+                              ["chain_of_thought","🔗 Chain of Thought"],
+                            ].map(([v, l]) => <SelectItem key={v} value={v} className="font-mono text-xs">{l}</SelectItem>)}
+                            <div className="px-2 py-1 text-[10px] font-mono text-muted-foreground uppercase tracking-wider border-t border-border mt-1 pt-2">NLP Tasks</div>
+                            {[
+                              ["ner","🏷️ Named Entity Recognition"],
+                              ["sentiment","❤️ Sentiment Analysis"],
+                              ["data_extraction","📤 Data Extraction"],
+                            ].map(([v, l]) => <SelectItem key={v} value={v} className="font-mono text-xs">{l}</SelectItem>)}
+                            <div className="px-2 py-1 text-[10px] font-mono text-muted-foreground uppercase tracking-wider border-t border-border mt-1 pt-2">Creative / Agentic</div>
+                            {[
+                              ["creative_writing","✍️ Creative Writing"],
+                              ["question_generation","❓ Question Generation"],
+                              ["function_calling","⚙️ Function Calling"],
+                            ].map(([v, l]) => <SelectItem key={v} value={v} className="font-mono text-xs">{l}</SelectItem>)}
+                            <div className="px-2 py-1 text-[10px] font-mono text-muted-foreground uppercase tracking-wider border-t border-border mt-1 pt-2">Classic</div>
+                            {[
+                              ["classification","📊 Classification"],
+                              ["generation","🪄 Generation"],
+                              ["summarization","📝 Summarization"],
+                              ["qa","❓ Q&A"],
+                              ["translation","🌍 Translation"],
+                            ].map(([v, l]) => <SelectItem key={v} value={v} className="font-mono text-xs">{l}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>

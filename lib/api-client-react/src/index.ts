@@ -74,11 +74,33 @@ export interface SearchResult {
   rank: number;
 }
 
+export type TaskType =
+  | "instruction_following"
+  | "chat"
+  | "multilingual"
+  | "code_generation"
+  | "code_review"
+  | "text_to_sql"
+  | "reasoning"
+  | "math"
+  | "chain_of_thought"
+  | "ner"
+  | "sentiment"
+  | "data_extraction"
+  | "creative_writing"
+  | "question_generation"
+  | "function_calling"
+  | "classification"
+  | "generation"
+  | "summarization"
+  | "qa"
+  | "translation";
+
 export interface TrainingDataset {
   id: number;
   name: string;
   description?: string | null;
-  taskType: "classification" | "generation" | "summarization" | "qa" | "translation";
+  taskType: TaskType;
   sampleCount: number;
   createdAt: string;
   updatedAt: string;
@@ -98,6 +120,8 @@ export interface TrainingDatasetDetail extends TrainingDataset {
   samples: TrainingSample[];
 }
 
+export type TrainingBackend = "hf_api" | "local_cpu";
+
 export interface TrainingJob {
   id: number;
   modelId: number;
@@ -108,9 +132,17 @@ export interface TrainingJob {
   currentEpoch: number;
   loss?: number | null;
   accuracy?: number | null;
+  trainingBackend: TrainingBackend;
+  loraRank?: number | null;
+  learningRate?: number | null;
+  baseModelName?: string | null;
+  lossHistory?: string | null;
+  outputModelPath?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
   error?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface AiModel {
@@ -121,8 +153,21 @@ export interface AiModel {
   version: string;
   architecture?: string | null;
   description?: string | null;
+  ollamaName?: string | null;
+  baseOllamaModel?: string | null;
+  parameterCount?: string | null;
+  quantization?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DatasetAutoConfig {
+  modelName: string;
+  modelFamily: string;
+  recommendedTaskTypes: TaskType[];
+  chatTemplate: string;
+  suggestedDatasetName: string;
+  notes?: string;
 }
 
 export interface DashboardStats {
@@ -158,13 +203,13 @@ export const getGetTrainingDatasetQueryKey = (id: number) => ["/api/training-dat
 export const getListTrainingJobsQueryKey = () => ["/api/training-jobs"] as const;
 export const getGetTrainingJobQueryKey = (id: number) => ["/api/training-jobs", id] as const;
 export const getListModelsQueryKey = () => ["/api/ai-models"] as const;
+export const getDatasetAutoConfigQueryKey = (id: number, modelName?: string) =>
+  ["/api/training-datasets", id, "auto-config", modelName] as const;
 
 export const getDashboardStatsQueryKey = () => ["/api/dashboard/stats"] as const;
 export const getRecentActivityQueryKey = () => ["/api/dashboard/recent-activity"] as const;
 
 // ─── Orval-compatible option wrappers ────────────────────────────────────────
-// Pages pass options as { mutation: {...} } or { query: {...} } (orval style).
-// These helpers extract the inner options so hooks stay compatible.
 
 type MutationOpts<TData, TErr, TVar> = {
   mutation?: Partial<UseMutationOptions<TData, TErr, TVar>>;
@@ -351,7 +396,28 @@ export function useAddTrainingSample(
   });
 }
 
+export function useGetDatasetAutoConfig(id: number, modelName?: string, options?: QueryOpts<DatasetAutoConfig>) {
+  return useQuery<DatasetAutoConfig>({
+    queryKey: getDatasetAutoConfigQueryKey(id, modelName),
+    queryFn: () => apiFetch(`/api/training-datasets/${id}/auto-config${modelName ? `?modelName=${encodeURIComponent(modelName)}` : ""}`),
+    enabled: !!id,
+    ...options?.query,
+  });
+}
+
 // ─── Training Jobs ────────────────────────────────────────────────────────────
+
+export interface StartTrainingJobData {
+  modelId: number;
+  datasetId: number;
+  epochs?: number;
+  hyperparameters?: string | null;
+  trainingBackend?: TrainingBackend;
+  loraRank?: number;
+  learningRate?: number;
+  batchSize?: number;
+  maxSeqLength?: number;
+}
 
 export function useListTrainingJobs(options?: QueryOpts<TrainingJob[]>) {
   return useQuery<TrainingJob[]>({
@@ -371,9 +437,9 @@ export function useGetTrainingJob(id: number, options?: QueryOpts<TrainingJob>) 
 }
 
 export function useStartTrainingJob(
-  options?: MutationOpts<TrainingJob, Error, { data: { modelId: number; datasetId: number; epochs?: number; hyperparameters?: string | null } }>
+  options?: MutationOpts<TrainingJob, Error, { data: StartTrainingJobData }>
 ) {
-  return useMutation<TrainingJob, Error, { data: { modelId: number; datasetId: number; epochs?: number; hyperparameters?: string | null } }>({
+  return useMutation<TrainingJob, Error, { data: StartTrainingJobData }>({
     mutationFn: ({ data }) =>
       apiFetch("/api/training-jobs", {
         method: "POST",
@@ -385,6 +451,18 @@ export function useStartTrainingJob(
 
 // ─── AI Models ────────────────────────────────────────────────────────────────
 
+export interface RegisterModelData {
+  name: string;
+  type: string;
+  version: string;
+  architecture?: string | null;
+  description?: string | null;
+  ollamaName?: string | null;
+  baseOllamaModel?: string | null;
+  parameterCount?: string | null;
+  quantization?: string | null;
+}
+
 export function useListModels(options?: QueryOpts<AiModel[]>) {
   return useQuery<AiModel[]>({
     queryKey: getListModelsQueryKey(),
@@ -394,9 +472,9 @@ export function useListModels(options?: QueryOpts<AiModel[]>) {
 }
 
 export function useRegisterModel(
-  options?: MutationOpts<AiModel, Error, { data: { name: string; type: string; version: string; architecture?: string | null; description?: string | null } }>
+  options?: MutationOpts<AiModel, Error, { data: RegisterModelData }>
 ) {
-  return useMutation<AiModel, Error, { data: { name: string; type: string; version: string; architecture?: string | null; description?: string | null } }>({
+  return useMutation<AiModel, Error, { data: RegisterModelData }>({
     mutationFn: ({ data }) =>
       apiFetch("/api/ai-models", {
         method: "POST",

@@ -55,10 +55,33 @@ export const SearchDocumentsBody = z.object({
 });
 
 // ─── Training Datasets ────────────────────────────────────────────────────────
+export const TASK_TYPE_ENUM = [
+  "instruction_following",
+  "chat",
+  "multilingual",
+  "code_generation",
+  "code_review",
+  "text_to_sql",
+  "reasoning",
+  "math",
+  "chain_of_thought",
+  "ner",
+  "sentiment",
+  "data_extraction",
+  "creative_writing",
+  "question_generation",
+  "function_calling",
+  "classification",
+  "generation",
+  "summarization",
+  "qa",
+  "translation",
+] as const;
+
 export const CreateTrainingDatasetBody = z.object({
   name: z.string(),
   description: z.string().optional(),
-  taskType: z.enum(["classification", "generation", "summarization", "qa", "translation"]),
+  taskType: z.enum(TASK_TYPE_ENUM),
 });
 
 export const GetTrainingDatasetParams = z.object({
@@ -82,6 +105,11 @@ export const StartTrainingJobBody = z.object({
   datasetId: z.number().int(),
   epochs: z.number().int().optional(),
   hyperparameters: z.string().nullable().optional(),
+  trainingBackend: z.enum(["hf_api", "local_cpu"]).optional(),
+  loraRank: z.number().int().optional(),
+  learningRate: z.number().optional(),
+  batchSize: z.number().int().optional(),
+  maxSeqLength: z.number().int().optional(),
 });
 
 export const GetTrainingJobParams = z.object({
@@ -95,4 +123,8 @@ export const RegisterModelBody = z.object({
   version: z.string(),
   architecture: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
+  ollamaName: z.string().nullable().optional(),
+  baseOllamaModel: z.string().nullable().optional(),
+  parameterCount: z.string().nullable().optional(),
+  quantization: z.string().nullable().optional(),
 });

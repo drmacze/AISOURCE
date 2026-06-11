@@ -1,12 +1,47 @@
-import { pgTable, serial, text, integer, timestamp, boolean, real } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+
+export const TASK_TYPES = [
+  // Language & Chat
+  "instruction_following",
+  "chat",
+  "multilingual",
+  // Code
+  "code_generation",
+  "code_review",
+  "text_to_sql",
+  // Reasoning
+  "reasoning",
+  "math",
+  "chain_of_thought",
+  // NLP
+  "ner",
+  "sentiment",
+  "data_extraction",
+  // Creative
+  "creative_writing",
+  "question_generation",
+  // Domain-specific
+  "function_calling",
+  // Classic
+  "classification",
+  "generation",
+  "summarization",
+  "qa",
+  "translation",
+] as const;
+
+export type TaskType = typeof TASK_TYPES[number];
+
+export const TRAINING_BACKENDS = ["hf_api", "local_cpu"] as const;
+export type TrainingBackend = typeof TRAINING_BACKENDS[number];
 
 export const trainingDatasetsTable = pgTable("training_datasets", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
-  taskType: text("task_type", { enum: ["classification", "generation", "summarization", "qa", "translation"] }).notNull(),
+  taskType: text("task_type").notNull(),
   sampleCount: integer("sample_count").default(0).notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
@@ -29,7 +64,7 @@ export const trainingJobsTable = pgTable("training_jobs", {
   datasetId: integer("dataset_id").notNull(),
   status: text("status", { enum: ["pending", "running", "completed", "failed"] }).default("pending").notNull(),
   progress: real("progress").default(0).notNull(),
-  epochs: integer("epochs").default(1).notNull(),
+  epochs: integer("epochs").default(3).notNull(),
   currentEpoch: integer("current_epoch").default(0).notNull(),
   loss: real("loss"),
   accuracy: real("accuracy"),
@@ -37,6 +72,13 @@ export const trainingJobsTable = pgTable("training_jobs", {
   completedAt: timestamp("completed_at", { mode: "date" }),
   error: text("error"),
   hyperparameters: text("hyperparameters"),
+  trainingBackend: text("training_backend").default("local_cpu").notNull(),
+  loraRank: integer("lora_rank").default(16),
+  learningRate: real("learning_rate").default(0.0002),
+  baseModelName: text("base_model_name"),
+  lossHistory: text("loss_history"),
+  outputModelPath: text("output_model_path"),
+  hfJobId: text("hf_job_id"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 });
@@ -49,13 +91,17 @@ export const aiModelsTable = pgTable("ai_models", {
   version: text("version").notNull(),
   architecture: text("architecture"),
   description: text("description"),
+  ollamaName: text("ollama_name"),
+  baseOllamaModel: text("base_ollama_model"),
+  parameterCount: text("parameter_count"),
+  quantization: text("quantization"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 });
 
 export const insertTrainingDatasetSchema = createInsertSchema(trainingDatasetsTable).omit({ id: true, sampleCount: true, createdAt: true, updatedAt: true });
 export const insertTrainingSampleSchema = createInsertSchema(trainingSamplesTable).omit({ id: true, createdAt: true });
-export const insertTrainingJobSchema = createInsertSchema(trainingJobsTable).omit({ id: true, startedAt: true, completedAt: true, error: true, loss: true, accuracy: true });
+export const insertTrainingJobSchema = createInsertSchema(trainingJobsTable).omit({ id: true, startedAt: true, completedAt: true, error: true, loss: true, accuracy: true, lossHistory: true, hfJobId: true, outputModelPath: true });
 export const insertAiModelSchema = createInsertSchema(aiModelsTable).omit({ id: true, createdAt: true, updatedAt: true, status: true });
 
 export type InsertTrainingDataset = z.infer<typeof insertTrainingDatasetSchema>;

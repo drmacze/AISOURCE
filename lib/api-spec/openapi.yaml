@@ -347,6 +347,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/TrainingSample"
 
+  /training-datasets/{id}/auto-config:
+    get:
+      operationId: getDatasetAutoConfig
+      tags: [training]
+      summary: Get auto dataset config for a model
+      description: Returns recommended task types and format for a given Ollama model
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: modelName
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Auto config recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetAutoConfig"
+
   /training-jobs:
     get:
       operationId: listTrainingJobs
@@ -366,7 +391,7 @@ paths:
       operationId: startTrainingJob
       tags: [training]
       summary: Start a training job
-      description: Starts a new model training job
+      description: Starts a new real LoRA fine-tuning job
       requestBody:
         required: true
         content:
@@ -386,7 +411,7 @@ paths:
       operationId: getTrainingJob
       tags: [training]
       summary: Get training job details
-      description: Returns training job progress
+      description: Returns training job progress and metrics
       parameters:
         - name: id
           in: path
@@ -426,7 +451,7 @@ paths:
       operationId: registerModel
       tags: [training]
       summary: Register a new model
-      description: Registers a new AI model
+      description: Registers a new AI model for fine-tuning
       requestBody:
         required: true
         content:
@@ -667,7 +692,27 @@ components:
           type: ["string", "null"]
         taskType:
           type: string
-          enum: [classification, generation, summarization, qa, translation]
+          enum:
+            - instruction_following
+            - chat
+            - multilingual
+            - code_generation
+            - code_review
+            - text_to_sql
+            - reasoning
+            - math
+            - chain_of_thought
+            - ner
+            - sentiment
+            - data_extraction
+            - creative_writing
+            - question_generation
+            - function_calling
+            - classification
+            - generation
+            - summarization
+            - qa
+            - translation
         sampleCount:
           type: integer
         createdAt:
@@ -693,7 +738,27 @@ components:
           type: string
         taskType:
           type: string
-          enum: [classification, generation, summarization, qa, translation]
+          enum:
+            - instruction_following
+            - chat
+            - multilingual
+            - code_generation
+            - code_review
+            - text_to_sql
+            - reasoning
+            - math
+            - chain_of_thought
+            - ner
+            - sentiment
+            - data_extraction
+            - creative_writing
+            - question_generation
+            - function_calling
+            - classification
+            - generation
+            - summarization
+            - qa
+            - translation
       required:
         - name
         - taskType
@@ -790,6 +855,19 @@ components:
           type: ["number", "null"]
         accuracy:
           type: ["number", "null"]
+        trainingBackend:
+          type: string
+          enum: [hf_api, local_cpu]
+        loraRank:
+          type: ["integer", "null"]
+        learningRate:
+          type: ["number", "null"]
+        baseModelName:
+          type: ["string", "null"]
+        lossHistory:
+          type: ["string", "null"]
+        outputModelPath:
+          type: ["string", "null"]
         startedAt:
           type: ["string", "null"]
           format: date-time
@@ -806,6 +884,7 @@ components:
         - progress
         - epochs
         - currentEpoch
+        - trainingBackend
 
     TrainingJobInput:
       type: object
@@ -818,6 +897,17 @@ components:
           type: integer
         hyperparameters:
           type: ["string", "null"]
+        trainingBackend:
+          type: string
+          enum: [hf_api, local_cpu]
+        loraRank:
+          type: integer
+        learningRate:
+          type: number
+        batchSize:
+          type: integer
+        maxSeqLength:
+          type: integer
       required:
         - modelId
         - datasetId
@@ -840,6 +930,14 @@ components:
         architecture:
           type: ["string", "null"]
         description:
+          type: ["string", "null"]
+        ollamaName:
+          type: ["string", "null"]
+        baseOllamaModel:
+          type: ["string", "null"]
+        parameterCount:
+          type: ["string", "null"]
+        quantization:
           type: ["string", "null"]
         createdAt:
           type: string
@@ -870,10 +968,42 @@ components:
           type: string
         description:
           type: string
+        ollamaName:
+          type: string
+        baseOllamaModel:
+          type: string
+        parameterCount:
+          type: string
+        quantization:
+          type: string
       required:
         - name
         - type
         - version
+
+    DatasetAutoConfig:
+      type: object
+      properties:
+        modelName:
+          type: string
+        modelFamily:
+          type: string
+        recommendedTaskTypes:
+          type: array
+          items:
+            type: string
+        chatTemplate:
+          type: string
+        suggestedDatasetName:
+          type: string
+        notes:
+          type: string
+      required:
+        - modelName
+        - modelFamily
+        - recommendedTaskTypes
+        - chatTemplate
+        - suggestedDatasetName
 
     DashboardStats:
       type: object

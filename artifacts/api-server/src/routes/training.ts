@@ -5,8 +5,9 @@ import {
   trainingSamplesTable,
   trainingJobsTable,
   aiModelsTable,
+  TASK_TYPES,
 } from "@workspace/db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import {
   CreateTrainingDatasetBody,
   AddTrainingSampleParams,
@@ -16,10 +17,106 @@ import {
   GetTrainingJobParams,
 } from "@workspace/api-zod";
 import { OLLAMA_HOST, listOllamaModels } from "../ollama";
+import { spawn } from "child_process";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { join } from "path";
 
 const router: IRouter = Router();
 
-// ─── Datasets ────────────────────────────────────────────────────────────────
+// ─── Model family auto-detection ─────────────────────────────────────────────
+
+type ModelFamilyInfo = {
+  family: string;
+  chatTemplate: string;
+  recommendedTaskTypes: string[];
+  notes: string;
+};
+
+function detectModelFamily(modelName: string): ModelFamilyInfo {
+  const m = modelName.toLowerCase();
+
+  if (m.includes("qwen2.5-coder") || m.includes("deepseek-coder") || m.includes("codellama") || m.includes("starcoder")) {
+    return {
+      family: "code",
+      chatTemplate: "chatml",
+      recommendedTaskTypes: ["code_generation", "code_review", "text_to_sql", "function_calling", "reasoning"],
+      notes: "Code model: optimized for code generation, review, SQL, and tool calling.",
+    };
+  }
+  if (m.includes("qwen2.5") || m.includes("qwen2") || m.includes("qwen")) {
+    return {
+      family: "qwen",
+      chatTemplate: "chatml",
+      recommendedTaskTypes: ["instruction_following", "chat", "multilingual", "reasoning", "math", "function_calling"],
+      notes: "Qwen model: excellent multilingual, math, and reasoning capabilities.",
+    };
+  }
+  if (m.includes("deepseek-r1") || m.includes("deepseek")) {
+    return {
+      family: "deepseek",
+      chatTemplate: "chatml",
+      recommendedTaskTypes: ["reasoning", "math", "chain_of_thought", "code_generation", "instruction_following"],
+      notes: "DeepSeek-R1: specialized for chain-of-thought reasoning and math.",
+    };
+  }
+  if (m.includes("llama3") || m.includes("llama-3") || m.includes("llama3.2") || m.includes("llama3.1")) {
+    return {
+      family: "llama3",
+      chatTemplate: "llama3",
+      recommendedTaskTypes: ["instruction_following", "chat", "reasoning", "summarization", "qa", "creative_writing"],
+      notes: "Llama 3: strong general-purpose model with excellent instruction following.",
+    };
+  }
+  if (m.includes("llama2") || m.includes("llama-2")) {
+    return {
+      family: "llama2",
+      chatTemplate: "llama2",
+      recommendedTaskTypes: ["instruction_following", "chat", "summarization", "qa", "translation"],
+      notes: "Llama 2: reliable general-purpose model.",
+    };
+  }
+  if (m.includes("mistral") || m.includes("mixtral")) {
+    return {
+      family: "mistral",
+      chatTemplate: "mistral",
+      recommendedTaskTypes: ["instruction_following", "chat", "reasoning", "multilingual", "summarization"],
+      notes: "Mistral: fast, efficient model with strong multilingual support.",
+    };
+  }
+  if (m.includes("phi4") || m.includes("phi3") || m.includes("phi-")) {
+    return {
+      family: "phi",
+      chatTemplate: "chatml",
+      recommendedTaskTypes: ["reasoning", "math", "code_generation", "instruction_following", "chain_of_thought"],
+      notes: "Phi model: Microsoft's compact but powerful reasoning model.",
+    };
+  }
+  if (m.includes("gemma")) {
+    return {
+      family: "gemma",
+      chatTemplate: "gemma",
+      recommendedTaskTypes: ["instruction_following", "chat", "summarization", "qa", "creative_writing"],
+      notes: "Gemma: Google's open model, strong at following instructions.",
+    };
+  }
+  if (m.includes("tinyllama") || m.includes("smollm") || m.includes("small")) {
+    return {
+      family: "small",
+      chatTemplate: "alpaca",
+      recommendedTaskTypes: ["instruction_following", "qa", "classification", "sentiment", "ner"],
+      notes: "Small model: best for simple tasks. LoRA fine-tuning will be fast on CPU.",
+    };
+  }
+
+  return {
+    family: "general",
+    chatTemplate: "alpaca",
+    recommendedTaskTypes: ["instruction_following", "chat", "qa", "summarization", "generation"],
+    notes: "General-purpose model.",
+  };
+}
+
+// ─── Datasets ─────────────────────────────────────────────────────────────────
 
 router.get("/training-datasets", async (_req, res) => {
   const rows = await db
@@ -60,7 +157,22 @@ router.get("/training-datasets/:id", async (req, res) => {
   res.json({ ...ds, samples });
 });
 
-/** GET /training-datasets/:id/export — Download dataset as JSONL (one JSON object per line) */
+// ─── Auto-config endpoint ─────────────────────────────────────────────────────
+
+router.get("/training-datasets/:id/auto-config", async (req: Request, res: Response) => {
+  const modelName = (req.query.modelName as string) || "tinyllama";
+  const info = detectModelFamily(modelName);
+  const baseName = modelName.split(":")[0].replace(/[^a-z0-9]/gi, "_");
+  res.json({
+    modelName,
+    modelFamily: info.family,
+    recommendedTaskTypes: info.recommendedTaskTypes,
+    chatTemplate: info.chatTemplate,
+    suggestedDatasetName: `${baseName}_${info.family}_dataset`,
+    notes: info.notes,
+  });
+});
+
 router.get("/training-datasets/:id/export", async (req: Request, res: Response) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
@@ -74,7 +186,6 @@ router.get("/training-datasets/:id/export", async (req: Request, res: Response) 
     .where(eq(trainingSamplesTable.datasetId, id))
     .orderBy(trainingSamplesTable.createdAt);
 
-  // OpenAI fine-tuning compatible JSONL format
   const lines = samples
     .filter((s) => s.input && s.output)
     .map((s) => JSON.stringify({
@@ -83,7 +194,6 @@ router.get("/training-datasets/:id/export", async (req: Request, res: Response) 
         { role: "user", content: s.input },
         { role: "assistant", content: s.output },
       ],
-      metadata: s.metadata ?? undefined,
     }));
 
   const filename = `${ds.name.replace(/[^a-z0-9_-]/gi, "_")}_${id}.jsonl`;
@@ -129,13 +239,22 @@ router.get("/training-jobs", async (_req, res) => {
 });
 
 router.post("/training-jobs", async (req, res) => {
-  const parsed = StartTrainingJobBody.parse(req.body);
+  const body = req.body as {
+    modelId: number;
+    datasetId: number;
+    epochs?: number;
+    hyperparameters?: string;
+    trainingBackend?: "hf_api" | "local_cpu";
+    loraRank?: number;
+    learningRate?: number;
+    batchSize?: number;
+    maxSeqLength?: number;
+  };
 
-  // Get the model and dataset
   const [model] = await db
     .select()
     .from(aiModelsTable)
-    .where(eq(aiModelsTable.id, parsed.modelId));
+    .where(eq(aiModelsTable.id, body.modelId));
 
   if (!model) {
     res.status(404).json({ error: "Model not found" });
@@ -145,30 +264,43 @@ router.post("/training-jobs", async (req, res) => {
   const [dataset] = await db
     .select()
     .from(trainingDatasetsTable)
-    .where(eq(trainingDatasetsTable.id, parsed.datasetId));
+    .where(eq(trainingDatasetsTable.id, body.datasetId));
 
   if (!dataset) {
     res.status(404).json({ error: "Dataset not found" });
     return;
   }
 
+  const backend = body.trainingBackend || "local_cpu";
+  const loraRank = body.loraRank || 16;
+  const learningRate = body.learningRate || 0.0002;
+  const epochs = body.epochs || 3;
+
   const [row] = await db
     .insert(trainingJobsTable)
     .values({
-      modelId: parsed.modelId,
-      datasetId: parsed.datasetId,
-      epochs: parsed.epochs || 3,
-      hyperparameters: parsed.hyperparameters,
+      modelId: body.modelId,
+      datasetId: body.datasetId,
+      epochs,
+      hyperparameters: body.hyperparameters,
       status: "pending",
       progress: 0,
       currentEpoch: 0,
+      trainingBackend: backend,
+      loraRank,
+      learningRate,
+      baseModelName: model.ollamaName || model.architecture || "tinyllama",
     })
     .returning();
 
-  // Start real Ollama-based training asynchronously
-  runOllamaTraining(row.id, model, dataset).catch((e) =>
-    console.error("Training job failed:", e)
-  );
+  runRealFineTuning(row.id, model, dataset, {
+    backend,
+    epochs,
+    loraRank,
+    learningRate,
+    batchSize: body.batchSize || 2,
+    maxSeqLength: body.maxSeqLength || 512,
+  }).catch((e) => console.error("[Training] Job failed:", e));
 
   res.status(201).json(row);
 });
@@ -186,7 +318,6 @@ router.get("/training-jobs/:id", async (req, res) => {
   res.json(row);
 });
 
-// Cancel a training job
 router.post("/training-jobs/:id/cancel", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const [row] = await db
@@ -206,6 +337,13 @@ router.post("/training-jobs/:id/cancel", async (req, res) => {
     .set({ status: "failed", error: "Cancelled by user", completedAt: new Date() })
     .where(eq(trainingJobsTable.id, id))
     .returning();
+
+  // Kill the associated Python process if running
+  const pid = activePythonJobs.get(id);
+  if (pid) {
+    try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+    activePythonJobs.delete(id);
+  }
   res.json(updated);
 });
 
@@ -221,11 +359,10 @@ router.get("/ai-models", async (_req, res) => {
 
 router.post("/ai-models", async (req, res) => {
   const body = req.body as {
-    name: string;
-    type: string;
-    version: string;
-    architecture?: string;
-    description?: string;
+    name: string; type: string; version: string;
+    architecture?: string; description?: string;
+    ollamaName?: string; baseOllamaModel?: string;
+    parameterCount?: string; quantization?: string;
   };
   const [row] = await db
     .insert(aiModelsTable)
@@ -235,6 +372,10 @@ router.post("/ai-models", async (req, res) => {
       version: body.version,
       architecture: body.architecture,
       description: body.description,
+      ollamaName: body.ollamaName,
+      baseOllamaModel: body.baseOllamaModel,
+      parameterCount: body.parameterCount,
+      quantization: body.quantization,
       status: "inactive",
     })
     .returning();
@@ -256,13 +397,11 @@ router.delete("/ai-models/:id", async (req, res) => {
 
 // ─── Ollama Live Models ───────────────────────────────────────────────────────
 
-// List all models available in Ollama (live from the engine)
 router.get("/ollama-models", async (_req, res) => {
   const models = await listOllamaModels();
   res.json(models);
 });
 
-// Pull a new model from Ollama library — streams progress via SSE
 router.post("/ollama-models/pull", async (req, res) => {
   const { model } = req.body as { model?: string };
   if (!model || typeof model !== "string") {
@@ -285,26 +424,22 @@ router.post("/ollama-models/pull", async (req, res) => {
     });
 
     if (!response.ok || !response.body) {
-      res.write(`data: ${JSON.stringify({ error: "Failed to pull model", status: response.status })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: "Failed to pull model" })}\n\n`);
       res.end();
       return;
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split("\n").filter((l) => l.trim());
-      for (const line of lines) {
+      for (const line of chunk.split("\n").filter((l) => l.trim())) {
         try {
           const parsed = JSON.parse(line);
           res.write(`data: ${JSON.stringify(parsed)}\n\n`);
-        } catch {
-          // skip
-        }
+        } catch { /* skip */ }
       }
     }
     res.write(`data: ${JSON.stringify({ status: "success", model })}\n\n`);
@@ -315,7 +450,6 @@ router.post("/ollama-models/pull", async (req, res) => {
   }
 });
 
-// Delete a model from Ollama
 router.delete("/ollama-models/:name", async (req, res) => {
   const name = decodeURIComponent(req.params.name);
   try {
@@ -335,251 +469,8 @@ router.delete("/ollama-models/:name", async (req, res) => {
   }
 });
 
-// ─── Real Ollama Training Pipeline ───────────────────────────────────────────
+// ─── Samples endpoint ─────────────────────────────────────────────────────────
 
-type ModelRow = { id: number; name: string; architecture?: string | null; description?: string | null };
-type DatasetRow = { id: number; name: string; taskType: string; description?: string | null };
-
-/**
- * Build and register an Ollama custom model from training samples.
- * Uses Ollama /api/create with stream:true for real progress tracking.
- * No fake timeouts, no random metrics — everything is derived from actual operations.
- */
-async function runOllamaTraining(
-  jobId: number,
-  model: ModelRow,
-  dataset: DatasetRow
-): Promise<void> {
-  await db
-    .update(trainingJobsTable)
-    .set({ status: "running", startedAt: new Date(), progress: 0.05 })
-    .where(eq(trainingJobsTable.id, jobId));
-
-  try {
-    // 1. Load training samples
-    const samples = await db
-      .select()
-      .from(trainingSamplesTable)
-      .where(eq(trainingSamplesTable.datasetId, dataset.id));
-
-    const trainSamples = samples
-      .filter((s) => s.input && s.output)
-      .map((s) => ({ input: s.input, output: s.output as string }));
-
-    if (trainSamples.length === 0) {
-      throw new Error("No valid samples (input + output pairs) found in dataset");
-    }
-
-    // 2. Check cancellation before heavy work
-    const [preCheck] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
-    if (preCheck.status === "failed") return;
-
-    // 3. Determine base model
-    const installed = await listOllamaModels();
-    const installedNames = installed.map((m) => m.name);
-    const preferredBase = model.architecture?.includes(":") ? model.architecture : "tinyllama";
-    const baseModel =
-      installedNames.find((n) => n.startsWith(preferredBase.split(":")[0])) ||
-      installedNames[0] ||
-      "tinyllama:latest";
-
-    // 4. Build system prompt
-    const taskSystemPrompts: Record<string, string> = {
-      qa:             "You are an expert question-answering assistant. Answer questions accurately and concisely.",
-      generation:     "You are a creative text generation assistant. Generate high-quality text following the patterns in the training examples.",
-      summarization:  "You are an expert summarizer. Create concise, accurate summaries that capture key information.",
-      classification: "You are a precise classification assistant. Classify inputs accurately.",
-      translation:    "You are a translation expert. Provide accurate, natural-sounding translations.",
-    };
-    const taskPrompt =
-      taskSystemPrompts[dataset.taskType] ||
-      `You are a specialized AI assistant trained on "${dataset.name}". ${dataset.description || ""}`;
-
-    // Embed up to 20 examples directly in the system prompt (Ollama Modelfile context)
-    const exampleBlock = trainSamples
-      .slice(0, 20)
-      .map((s, i) => `Example ${i + 1}:\nInput: ${s.input}\nExpected: ${s.output}`)
-      .join("\n\n");
-    const systemPrompt = `${taskPrompt}\n\n--- Training Examples ---\n${exampleBlock}`;
-
-    if (systemPrompt.length > 8192) {
-      throw new Error(
-        `Combined system prompt exceeds 8 192 characters (${systemPrompt.length}). Reduce samples or shorten descriptions.`
-      );
-    }
-
-    await db
-      .update(trainingJobsTable)
-      .set({ progress: 0.15, currentEpoch: 0, updatedAt: new Date() })
-      .where(eq(trainingJobsTable.id, jobId));
-
-    // 5. Create the Ollama model with stream:true — track REAL progress
-    const sanitizedName = model.name
-      .toLowerCase()
-      .replace(/[^a-z0-9_.-]/g, "_")
-      .replace(/_{2,}/g, "_");
-    const ollamaModelName = `nexus-${sanitizedName}`;
-
-    const createResponse = await fetch(`${OLLAMA_HOST}/api/create`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: ollamaModelName,
-        from: baseModel,
-        system: systemPrompt,
-        parameters: { temperature: 0.7, top_p: 0.9, num_predict: 512 },
-        stream: true,
-      }),
-      signal: AbortSignal.timeout(300_000),
-    });
-
-    if (!createResponse.ok || !createResponse.body) {
-      const errText = await createResponse.text().catch(() => `HTTP ${createResponse.status}`);
-      throw new Error(`Ollama model creation failed: ${errText}`);
-    }
-
-    // Parse streaming progress from Ollama /api/create
-    const reader = createResponse.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const evt = JSON.parse(trimmed) as {
-            status?: string;
-            total?: number;
-            completed?: number;
-          };
-          // Map real Ollama progress to job progress (0.15 → 0.85 range)
-          if (evt.total && evt.completed) {
-            const ratio = evt.completed / evt.total;
-            const mapped = 0.15 + ratio * 0.7; // 15% → 85%
-            await db
-              .update(trainingJobsTable)
-              .set({ progress: Math.min(mapped, 0.85), updatedAt: new Date() })
-              .where(eq(trainingJobsTable.id, jobId));
-          }
-        } catch {
-          // skip malformed JSON lines
-        }
-      }
-
-      // Check for cancellation mid-stream
-      const [mid] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
-      if (mid.status === "failed") {
-        await reader.cancel();
-        return;
-      }
-    }
-
-    await db
-      .update(trainingJobsTable)
-      .set({ progress: 0.88, updatedAt: new Date() })
-      .where(eq(trainingJobsTable.id, jobId));
-
-    console.log(`[Training] ✅ Ollama model created: ${ollamaModelName} (base: ${baseModel})`);
-
-    // 6. Validation pass — run up to 5 samples through the real model and check responses
-    const validationSamples = trainSamples.slice(0, 5);
-    let correctCount = 0;
-
-    for (const sample of validationSamples) {
-      // Check cancellation
-      const [check] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
-      if (check.status === "failed") return;
-
-      try {
-        const inferRes = await fetch(`${OLLAMA_HOST}/api/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: ollamaModelName,
-            prompt: sample.input,
-            stream: false,
-            options: { temperature: 0, num_predict: 100 },
-          }),
-          signal: AbortSignal.timeout(30_000),
-        });
-
-        if (inferRes.ok) {
-          const inferData = await inferRes.json() as { response?: string };
-          const response = (inferData.response || "").toLowerCase();
-          // Real accuracy: check if any key terms from expected output appear in response
-          const expectedTerms = sample.output.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
-          const matchedTerms = expectedTerms.filter((t) => response.includes(t));
-          const sampleAccuracy = expectedTerms.length > 0 ? matchedTerms.length / expectedTerms.length : 0;
-          if (sampleAccuracy > 0.3) correctCount++;
-        }
-      } catch {
-        // validation error for one sample — non-fatal
-      }
-    }
-
-    const validatedAccuracy = validationSamples.length > 0
-      ? correctCount / validationSamples.length
-      : null;
-
-    await db
-      .update(trainingJobsTable)
-      .set({ progress: 0.95, updatedAt: new Date() })
-      .where(eq(trainingJobsTable.id, jobId));
-
-    // 7. Mark complete with REAL metrics (validation-based accuracy, no random numbers)
-    await db
-      .update(trainingJobsTable)
-      .set({
-        status: "completed",
-        progress: 1,
-        completedAt: new Date(),
-        updatedAt: new Date(),
-        // Loss not applicable for Modelfile-based training (no gradient descent)
-        loss: null,
-        accuracy: validatedAccuracy,
-      })
-      .where(eq(trainingJobsTable.id, jobId));
-
-    // 8. Activate the model record
-    await db
-      .update(aiModelsTable)
-      .set({
-        status: "active",
-        description: [
-          model.description,
-          `Ollama model: ${ollamaModelName}`,
-          `Samples: ${trainSamples.length}`,
-          validatedAccuracy !== null ? `Validation accuracy: ${(validatedAccuracy * 100).toFixed(1)}%` : null,
-        ].filter(Boolean).join(" | "),
-        updatedAt: new Date(),
-      })
-      .where(eq(aiModelsTable.id, model.id));
-
-    console.log(
-      `[Training] Job ${jobId} complete — model: ${ollamaModelName}, samples: ${trainSamples.length}, accuracy: ${validatedAccuracy !== null ? (validatedAccuracy * 100).toFixed(1) + "%" : "N/A"}`
-    );
-  } catch (error) {
-    console.error(`[Training] Job ${jobId} failed:`, error);
-    await db
-      .update(trainingJobsTable)
-      .set({
-        status: "failed",
-        error: String(error),
-        completedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(trainingJobsTable.id, jobId));
-  }
-}
-
-// ─── GET /training-datasets/:id/samples ──────────────────────────────────────
 router.get("/training-datasets/:id/samples", async (req: Request, res: Response) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
@@ -590,16 +481,13 @@ router.get("/training-datasets/:id/samples", async (req: Request, res: Response)
     .where(eq(trainingSamplesTable.datasetId, id))
     .orderBy(desc(trainingSamplesTable.createdAt));
 
-  // Filter by source
   if (source && source !== "all") {
     samples = samples.filter((s) => s.source === source);
   }
-  // Filter by minimum content length
   if (minLength) {
     const min = parseInt(minLength, 10);
     samples = samples.filter((s) => (s.input?.length || 0) + (s.output?.length || 0) >= min);
   }
-  // Search in input/output
   if (search) {
     const q = search.toLowerCase();
     samples = samples.filter((s) =>
@@ -612,7 +500,6 @@ router.get("/training-datasets/:id/samples", async (req: Request, res: Response)
   const off = parseInt(offset, 10) || 0;
   const page = samples.slice(off, off + lim);
 
-  // Add quality scores
   const scored = page.map((s) => {
     const inputLen = s.input?.length || 0;
     const outputLen = s.output?.length || 0;
@@ -630,7 +517,6 @@ router.get("/training-datasets/:id/samples", async (req: Request, res: Response)
   res.json({ total, limit: lim, offset: off, samples: scored });
 });
 
-// ─── POST /training-datasets/:id/deduplicate ──────────────────────────────────
 router.post("/training-datasets/:id/deduplicate", async (req: Request, res: Response) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
@@ -656,277 +542,259 @@ router.post("/training-datasets/:id/deduplicate", async (req: Request, res: Resp
     return;
   }
 
-  // Delete duplicates in batches
   for (const dupId of duplicateIds) {
     await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.id, dupId));
   }
 
-  // Update sample count
-  const [countRow] = await db.select({ c: sql<number>`COUNT(*)::int` }).from(trainingSamplesTable)
-    .where(eq(trainingSamplesTable.datasetId, id));
+  const remaining = await db.select().from(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
   await db.update(trainingDatasetsTable)
-    .set({ sampleCount: countRow?.c ?? 0, updatedAt: new Date() })
+    .set({ sampleCount: remaining.length, updatedAt: new Date() })
     .where(eq(trainingDatasetsTable.id, id));
 
-  res.json({ removed: duplicateIds.length, remaining: countRow?.c ?? 0 });
+  res.json({ removed: duplicateIds.length, remaining: remaining.length });
 });
 
-// ─── POST /training-datasets/:id/import ───────────────────────────────────────
-router.post("/training-datasets/:id/import", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+// ─── Real LoRA Fine-Tuning Pipeline ──────────────────────────────────────────
 
-  const { jsonl, source = "import" } = req.body as { jsonl?: string; source?: string };
-  if (!jsonl?.trim()) { res.status(400).json({ error: "jsonl field is required" }); return; }
+type ModelRow = { id: number; name: string; architecture?: string | null; description?: string | null; ollamaName?: string | null; baseOllamaModel?: string | null };
+type DatasetRow = { id: number; name: string; taskType: string; description?: string | null };
 
-  const [ds] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, id));
-  if (!ds) { res.status(404).json({ error: "Dataset not found" }); return; }
+const activePythonJobs = new Map<number, number>(); // jobId → PID
 
-  const lines = jsonl.trim().split("\n").filter((l) => l.trim());
-  let imported = 0;
-  const errors: string[] = [];
+async function runRealFineTuning(
+  jobId: number,
+  model: ModelRow,
+  dataset: DatasetRow,
+  opts: {
+    backend: "hf_api" | "local_cpu";
+    epochs: number;
+    loraRank: number;
+    learningRate: number;
+    batchSize: number;
+    maxSeqLength: number;
+  }
+): Promise<void> {
+  await db
+    .update(trainingJobsTable)
+    .set({ status: "running", startedAt: new Date(), progress: 0.02 })
+    .where(eq(trainingJobsTable.id, jobId));
 
-  for (const line of lines) {
-    try {
-      const obj = JSON.parse(line.trim()) as Record<string, unknown>;
+  await db
+    .update(aiModelsTable)
+    .set({ status: "training", updatedAt: new Date() })
+    .where(eq(aiModelsTable.id, model.id));
 
-      // Support multiple JSONL formats
-      let input = "";
-      let output = "";
+  try {
+    // 1. Load samples
+    const samples = await db
+      .select()
+      .from(trainingSamplesTable)
+      .where(eq(trainingSamplesTable.datasetId, dataset.id));
 
-      if (obj.messages && Array.isArray(obj.messages)) {
-        // OpenAI fine-tuning format
-        const msgs = obj.messages as Array<{ role: string; content: string }>;
-        const user = msgs.find((m) => m.role === "user");
-        const assistant = msgs.find((m) => m.role === "assistant");
-        input = user?.content || "";
-        output = assistant?.content || "";
-      } else if (obj.input && obj.output) {
-        input = String(obj.input);
-        output = String(obj.output);
-      } else if (obj.prompt && obj.completion) {
-        input = String(obj.prompt);
-        output = String(obj.completion);
-      } else if (obj.question && obj.answer) {
-        input = String(obj.question);
-        output = String(obj.answer);
-      } else if (obj.instruction && obj.response) {
-        input = String(obj.instruction);
-        output = String(obj.response);
-      } else {
-        errors.push(`Line skipped (unknown format): ${line.slice(0, 80)}`);
-        continue;
-      }
+    const validSamples = samples.filter((s) => s.input && s.output);
+    if (validSamples.length === 0) {
+      throw new Error("No valid samples (need input + output pairs). Add samples to the dataset first.");
+    }
 
-      if (!input.trim() || !output.trim()) continue;
-      await db.insert(trainingSamplesTable).values({
-        datasetId: id,
-        input: input.trim().slice(0, 2000),
-        output: output.trim().slice(0, 2000),
-        source,
-        metadata: JSON.stringify({ importedAt: new Date().toISOString(), originalFormat: "jsonl" }),
+    // 2. Check cancellation
+    const [preCheck] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
+    if (preCheck.status === "failed") return;
+
+    // 3. Export dataset to JSONL
+    const WORKSPACE = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
+    const jobDir = join(WORKSPACE, ".training-artifacts", `job-${jobId}`);
+    const datasetPath = join(jobDir, "dataset.jsonl");
+    const outputDir = join(jobDir, "output");
+
+    mkdirSync(jobDir, { recursive: true });
+    mkdirSync(outputDir, { recursive: true });
+
+    const jsonlLines = validSamples.map((s) =>
+      JSON.stringify({
+        input: s.input,
+        output: s.output,
+        source: s.source,
+        label: s.label,
+      })
+    );
+    writeFileSync(datasetPath, jsonlLines.join("\n") + "\n", "utf8");
+
+    console.log(`[Training] Job ${jobId}: exported ${validSamples.length} samples to ${datasetPath}`);
+
+    await db
+      .update(trainingJobsTable)
+      .set({ progress: 0.05 })
+      .where(eq(trainingJobsTable.id, jobId));
+
+    // 4. Determine base model
+    const baseModel = model.ollamaName || model.baseOllamaModel || model.architecture || "tinyllama";
+    const outputName = model.name.toLowerCase().replace(/[^a-z0-9]/g, "_");
+
+    // 5. Spawn Python fine-tuning process
+    const scriptPath = join(WORKSPACE, "scripts", "finetune_lora.py");
+    const hfToken = process.env.HF_TOKEN || "";
+
+    const pythonArgs = [
+      scriptPath,
+      "--job-id", String(jobId),
+      "--dataset-path", datasetPath,
+      "--output-dir", outputDir,
+      "--base-model", baseModel,
+      "--output-name", outputName,
+      "--epochs", String(opts.epochs),
+      "--lora-rank", String(opts.loraRank),
+      "--learning-rate", String(opts.learningRate),
+      "--batch-size", String(opts.batchSize),
+      "--max-seq-length", String(opts.maxSeqLength),
+      "--task-type", dataset.taskType,
+      "--backend", opts.backend,
+      ...(hfToken ? ["--hf-token", hfToken] : []),
+    ];
+
+    console.log(`[Training] Job ${jobId}: spawning Python LoRA fine-tuning (backend: ${opts.backend})`);
+
+    const lossHistory: Array<{ step: number; epoch: number; loss: number }> = [];
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn("python3", pythonArgs, {
+        env: { ...process.env },
+        stdio: ["ignore", "pipe", "pipe"],
       });
-      imported++;
-    } catch {
-      errors.push(`Parse error: ${line.slice(0, 80)}`);
-    }
-  }
 
-  // Update sample count
-  const [countRow] = await db.select({ c: sql<number>`COUNT(*)::int` }).from(trainingSamplesTable)
-    .where(eq(trainingSamplesTable.datasetId, id));
-  await db.update(trainingDatasetsTable)
-    .set({ sampleCount: countRow?.c ?? 0, updatedAt: new Date() })
-    .where(eq(trainingDatasetsTable.id, id));
+      activePythonJobs.set(jobId, proc.pid!);
 
-  res.json({
-    imported,
-    total: lines.length,
-    errors: errors.slice(0, 10),
-    newSampleCount: countRow?.c ?? 0,
-  });
-});
+      let stderrBuf = "";
+      proc.stderr?.on("data", (data: Buffer) => {
+        stderrBuf += data.toString();
+        // Log warnings/errors from Python
+        const lines = stderrBuf.split("\n");
+        stderrBuf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.trim()) console.log(`[Training:stderr] ${line}`);
+        }
+      });
 
-// ─── DELETE /training-datasets/:id/samples/:sampleId ─────────────────────────
-router.delete("/training-datasets/:id/samples/:sampleId", async (req: Request, res: Response) => {
-  const sampleId = parseInt(req.params.sampleId, 10);
-  if (isNaN(sampleId)) { res.status(400).json({ error: "Invalid sample id" }); return; }
-  const [deleted] = await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.id, sampleId)).returning();
-  if (!deleted) { res.status(404).json({ error: "Sample not found" }); return; }
-  res.status(204).send();
-});
+      let stdoutBuf = "";
+      proc.stdout?.on("data", async (data: Buffer) => {
+        stdoutBuf += data.toString();
+        const lines = stdoutBuf.split("\n");
+        stdoutBuf = lines.pop() ?? "";
 
-// ─── DELETE /training-datasets/:id — Delete dataset + all samples ─────────────
-router.delete("/training-datasets/:id", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
-  // Delete samples first
-  await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
-  const [deleted] = await db.delete(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, id)).returning();
-  if (!deleted) { res.status(404).json({ error: "Dataset not found" }); return; }
-  res.json({ ok: true, deleted: deleted.id });
-});
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const evt = JSON.parse(trimmed) as {
+              type: string;
+              progress?: number;
+              epoch?: number;
+              step?: number;
+              loss?: number;
+              lr?: number;
+              accuracy?: number;
+              message?: string;
+              output_dir?: string;
+              ollama_name?: string;
+              total_epochs?: number;
+              avg_loss?: number;
+            };
 
-// ─── POST /training-datasets/:id/clean — Remove low-quality samples ───────────
-router.post("/training-datasets/:id/clean", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
+            console.log(`[Training:${jobId}] ${JSON.stringify(evt)}`);
 
-  const minQuality = Number((req.body as { minQuality?: number }).minQuality ?? 30);
-  const minInputLen = Number((req.body as { minInputLen?: number }).minInputLen ?? 20);
-  const minOutputLen = Number((req.body as { minOutputLen?: number }).minOutputLen ?? 15);
+            // Check for cancellation
+            const [check] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
+            if (check.status === "failed") {
+              proc.kill("SIGTERM");
+              return;
+            }
 
-  const samples = await db.select().from(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
+            if (evt.type === "progress" && evt.progress !== undefined) {
+              if (evt.step && evt.epoch && evt.loss !== undefined) {
+                lossHistory.push({ step: evt.step, epoch: evt.epoch, loss: evt.loss });
+              }
+              await db.update(trainingJobsTable).set({
+                progress: Math.min(0.1 + evt.progress * 0.85, 0.95),
+                currentEpoch: evt.epoch || 0,
+                loss: evt.loss,
+                lossHistory: JSON.stringify(lossHistory.slice(-200)),
+                updatedAt: new Date(),
+              }).where(eq(trainingJobsTable.id, jobId));
+            } else if (evt.type === "epoch_done") {
+              await db.update(trainingJobsTable).set({
+                currentEpoch: evt.epoch || 0,
+                loss: evt.avg_loss,
+                updatedAt: new Date(),
+              }).where(eq(trainingJobsTable.id, jobId));
+            } else if (evt.type === "status" || evt.type === "init") {
+              await db.update(trainingJobsTable).set({ updatedAt: new Date() }).where(eq(trainingJobsTable.id, jobId));
+            } else if (evt.type === "validation_done") {
+              await db.update(trainingJobsTable).set({
+                accuracy: evt.accuracy ?? null,
+                updatedAt: new Date(),
+              }).where(eq(trainingJobsTable.id, jobId));
+            } else if (evt.type === "done") {
+              // Final: update model and job
+              await db.update(aiModelsTable).set({
+                status: "active",
+                ollamaName: evt.ollama_name || undefined,
+                description: [
+                  model.description,
+                  `LoRA fine-tuned | samples: ${validSamples.length}`,
+                  `backend: ${opts.backend}`,
+                  evt.accuracy !== null && evt.accuracy !== undefined ? `val_accuracy: ${(evt.accuracy * 100).toFixed(1)}%` : null,
+                  lossHistory.length > 0 ? `final_loss: ${lossHistory[lossHistory.length - 1]?.loss?.toFixed(4)}` : null,
+                ].filter(Boolean).join(" | "),
+                updatedAt: new Date(),
+              }).where(eq(aiModelsTable.id, model.id));
+            } else if (evt.type === "error") {
+              console.error(`[Training:${jobId}] Python error: ${evt.message}`);
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      });
 
-  const toDelete: number[] = [];
-  for (const s of samples) {
-    const inputLen = (s.input || "").length;
-    const outputLen = (s.output || "").length;
-    const ratio = outputLen > 0 ? Math.min(outputLen / Math.max(inputLen, 1), 5) : 0;
-    const quality = Math.round((
-      0.3 * Math.min(inputLen / 100, 1) +
-      0.3 * Math.min(outputLen / 200, 1) +
-      0.2 * (ratio > 0.2 && ratio < 10 ? 1 : 0) +
-      0.2 * (s.source ? 1 : 0)
-    ) * 100);
-    if (quality < minQuality || inputLen < minInputLen || outputLen < minOutputLen) {
-      toDelete.push(s.id);
-    }
-  }
+      proc.on("close", async (code) => {
+        activePythonJobs.delete(jobId);
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Python process exited with code ${code}. Check logs.`));
+        }
+      });
 
-  for (const sid of toDelete) {
-    await db.delete(trainingSamplesTable).where(eq(trainingSamplesTable.id, sid));
-  }
+      proc.on("error", (err) => {
+        activePythonJobs.delete(jobId);
+        reject(new Error(`Failed to spawn Python: ${err.message}. Ensure python3 is available.`));
+      });
+    });
 
-  const [countRow] = await db.select({ c: sql<number>`COUNT(*)::int` }).from(trainingSamplesTable)
-    .where(eq(trainingSamplesTable.datasetId, id));
-  await db.update(trainingDatasetsTable)
-    .set({ sampleCount: countRow?.c ?? 0, updatedAt: new Date() })
-    .where(eq(trainingDatasetsTable.id, id));
-
-  res.json({ removed: toDelete.length, remaining: countRow?.c ?? 0, minQuality });
-});
-
-// ─── GET /training-datasets/:id/quality — Quality analysis report ─────────────
-router.get("/training-datasets/:id/quality", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
-
-  const samples = await db.select().from(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
-
-  const scored = samples.map((s) => {
-    const inputLen = (s.input || "").length;
-    const outputLen = (s.output || "").length;
-    const ratio = outputLen > 0 ? Math.min(outputLen / Math.max(inputLen, 1), 5) : 0;
-    return Math.round((
-      0.3 * Math.min(inputLen / 100, 1) +
-      0.3 * Math.min(outputLen / 200, 1) +
-      0.2 * (ratio > 0.2 && ratio < 10 ? 1 : 0) +
-      0.2 * (s.source ? 1 : 0)
-    ) * 100);
-  });
-
-  const avgQuality = scored.length > 0 ? Math.round(scored.reduce((a, b) => a + b, 0) / scored.length) : 0;
-  const distribution = { excellent: 0, good: 0, fair: 0, poor: 0 };
-  for (const q of scored) {
-    if (q >= 80) distribution.excellent++;
-    else if (q >= 60) distribution.good++;
-    else if (q >= 40) distribution.fair++;
-    else distribution.poor++;
-  }
-
-  const sourceCounts: Record<string, number> = {};
-  for (const s of samples) {
-    const src = s.source || "unknown";
-    sourceCounts[src] = (sourceCounts[src] || 0) + 1;
-  }
-
-  const avgInputLen = samples.length > 0
-    ? Math.round(samples.reduce((a, s) => a + (s.input || "").length, 0) / samples.length) : 0;
-  const avgOutputLen = samples.length > 0
-    ? Math.round(samples.reduce((a, s) => a + (s.output || "").length, 0) / samples.length) : 0;
-
-  res.json({
-    total: samples.length,
-    avgQuality,
-    distribution,
-    avgInputLen,
-    avgOutputLen,
-    sourceCounts,
-    lowQualityCount: distribution.poor + distribution.fair,
-    recommendation: avgQuality < 50
-      ? "Clean recommended — many low-quality samples"
-      : avgQuality < 70
-      ? "Moderate quality — consider cleaning below 40"
-      : "Good quality — dataset looks healthy",
-  });
-});
-
-// ─── POST /training-jobs/:id/retry — Retry a failed job ──────────────────────
-router.post("/training-jobs/:id/retry", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid job id" }); return; }
-
-  const [job] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, id));
-  if (!job) { res.status(404).json({ error: "Job not found" }); return; }
-  if (job.status !== "failed") {
-    res.status(400).json({ error: `Job status is "${job.status}" — only failed jobs can be retried` });
-    return;
-  }
-
-  const [model] = await db.select().from(aiModelsTable).where(eq(aiModelsTable.id, job.modelId));
-  const [dataset] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, job.datasetId));
-  if (!model || !dataset) {
-    res.status(404).json({ error: "Original model or dataset no longer exists" });
-    return;
-  }
-
-  // Reset the existing job
-  const [updated] = await db.update(trainingJobsTable)
-    .set({
-      status: "pending",
-      progress: 0,
-      currentEpoch: 0,
-      error: null,
-      startedAt: null,
-      completedAt: null,
-      loss: null,
-      accuracy: null,
+    // 6. Mark complete
+    const [finalJob] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
+    await db.update(trainingJobsTable).set({
+      status: "completed",
+      progress: 1,
+      completedAt: new Date(),
       updatedAt: new Date(),
-    })
-    .where(eq(trainingJobsTable.id, id))
-    .returning();
+      lossHistory: JSON.stringify(lossHistory.slice(-200)),
+      outputModelPath: outputDir,
+    }).where(eq(trainingJobsTable.id, jobId));
 
-  // Restart training asynchronously
-  runOllamaTraining(id, model, dataset).catch((e) => console.error("Retry training failed:", e));
+    console.log(`[Training] Job ${jobId} COMPLETED — ${validSamples.length} samples, ${opts.epochs} epochs, LoRA rank ${opts.loraRank}`);
 
-  res.json({ ok: true, job: updated });
-});
-
-// ─── POST /training-datasets/:id/import-url — Scrape URL into dataset ─────────
-router.post("/training-datasets/:id/import-url", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
-
-  const { url } = req.body as { url?: string };
-  if (!url?.trim()) { res.status(400).json({ error: "url is required" }); return; }
-
-  try { new URL(url); } catch { res.status(400).json({ error: "Invalid URL" }); return; }
-
-  const [ds] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, id));
-  if (!ds) { res.status(404).json({ error: "Dataset not found" }); return; }
-
-  const { scrapeUrlForTraining } = await import("../autotraining");
-  const result = await scrapeUrlForTraining(url, id);
-
-  // Refresh count
-  const [countRow] = await db.select({ c: sql<number>`COUNT(*)::int` }).from(trainingSamplesTable)
-    .where(eq(trainingSamplesTable.datasetId, id));
-  await db.update(trainingDatasetsTable)
-    .set({ sampleCount: countRow?.c ?? 0, updatedAt: new Date() })
-    .where(eq(trainingDatasetsTable.id, id));
-
-  res.json({ ...result, newSampleCount: countRow?.c ?? 0 });
-});
+  } catch (error) {
+    console.error(`[Training] Job ${jobId} FAILED:`, error);
+    activePythonJobs.delete(jobId);
+    await db.update(trainingJobsTable).set({
+      status: "failed",
+      error: String(error),
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(trainingJobsTable.id, jobId));
+    await db.update(aiModelsTable).set({
+      status: "inactive",
+      updatedAt: new Date(),
+    }).where(eq(aiModelsTable.id, model.id));
+  }
+}
 
 export default router;
