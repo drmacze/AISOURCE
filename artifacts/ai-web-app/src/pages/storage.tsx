@@ -108,20 +108,17 @@ export default function StoragePage() {
       if (!res.ok) { setError(data.error || "Auth failed"); return; }
       setDeviceInfo(data);
       setAuthStep("waiting");
+      // Poll server-side status — server keeps polling even if user navigates away
       pollRef.current = setInterval(async () => {
-        const pr = await fetch("/api/onedrive/auth/poll", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceCode: data.deviceCode, clientId: clientId.trim() }),
-        });
-        const pd = await pr.json() as { status: string };
+        const pr = await fetch(`/api/onedrive/auth/poll-status?deviceCode=${encodeURIComponent(data.deviceCode)}`);
+        const pd = await pr.json() as { status: string; error?: string };
         if (pd.status === "connected") {
           clearInterval(pollRef.current!);
           setAuthStep("done");
           await loadStatus();
         } else if (pd.status === "error") {
           clearInterval(pollRef.current!);
-          setError("Authentication failed. Try again.");
+          setError(pd.error || "Authentication failed. Try again.");
           setAuthStep("idle");
         }
       }, 3000);

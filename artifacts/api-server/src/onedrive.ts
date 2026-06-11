@@ -65,6 +65,10 @@ export function getOneDriveClientId(): string | undefined {
   return process.env.ONEDRIVE_CLIENT_ID;
 }
 
+export function persistClientId(clientId: string): void {
+  persistToken("ONEDRIVE_CLIENT_ID", clientId);
+}
+
 // ─── OAuth Device Code Flow ──────────────────────────────────────────────────
 
 export interface DeviceCodeResponse {

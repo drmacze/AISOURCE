@@ -9,6 +9,7 @@ import { documentsTable } from "@workspace/db";
 import {
   isOneDriveConfigured,
   getOneDriveClientId,
+  persistClientId,
   startDeviceAuth,
   pollDeviceAuth,
   getUserInfo,
@@ -24,6 +25,38 @@ import { desc } from "drizzle-orm";
 import crypto from "crypto";
 
 const router: IRouter = Router();
+
+// ─── Server-side background polling registry ──────────────────────────────────
+// Keyed by deviceCode; value is current status
+const bgPollStatus = new Map<string, { status: "pending" | "connected" | "error"; error?: string }>();
+
+function startBackgroundPoll(clientId: string, deviceCode: string, intervalSecs: number, expiresIn: number) {
+  bgPollStatus.set(deviceCode, { status: "pending" });
+  const deadline = Date.now() + expiresIn * 1000;
+  const iv = setInterval(async () => {
+    if (Date.now() > deadline) {
+      clearInterval(iv);
+      bgPollStatus.set(deviceCode, { status: "error", error: "Code expired" });
+      return;
+    }
+    try {
+      const result = await pollDeviceAuth(clientId, deviceCode);
+      if ("pending" in result) return; // keep polling
+      clearInterval(iv);
+      if ("error" in result) {
+        bgPollStatus.set(deviceCode, { status: "error", error: result.error });
+      } else {
+        // persistToken already called inside pollDeviceAuth
+        // Also persist clientId so it survives restart
+        persistClientId(clientId);
+        bgPollStatus.set(deviceCode, { status: "connected" });
+      }
+    } catch (e) {
+      clearInterval(iv);
+      bgPollStatus.set(deviceCode, { status: "error", error: String(e) });
+    }
+  }, intervalSecs * 1000);
+}
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
@@ -75,6 +108,8 @@ router.post("/onedrive/auth/start", async (req: Request, res: Response) => {
 
   try {
     const info = await startDeviceAuth(id);
+    // Start server-side background polling so token is saved even if frontend navigates away
+    startBackgroundPoll(id, info.device_code, info.interval || 5, info.expires_in || 900);
     res.json({
       userCode: info.user_code,
       verificationUri: info.verification_uri,
@@ -88,29 +123,31 @@ router.post("/onedrive/auth/start", async (req: Request, res: Response) => {
   }
 });
 
+// Check status of server-side background polling by deviceCode
+router.get("/onedrive/auth/poll-status", (req: Request, res: Response) => {
+  const deviceCode = req.query.deviceCode as string | undefined;
+  if (!deviceCode) { res.status(400).json({ error: "deviceCode required" }); return; }
+  const entry = bgPollStatus.get(deviceCode);
+  if (!entry) { res.json({ status: "pending" }); return; }
+  res.json(entry);
+});
+
 router.post("/onedrive/auth/poll", async (req: Request, res: Response) => {
   const { deviceCode, clientId } = req.body as { deviceCode?: string; clientId?: string };
   if (!deviceCode) { res.status(400).json({ error: "deviceCode required" }); return; }
 
-  const id = clientId || process.env.ONEDRIVE_CLIENT_ID;
-  if (!id) { res.status(400).json({ error: "clientId required" }); return; }
-
-  try {
-    const result = await pollDeviceAuth(id, deviceCode);
-
-    if ("pending" in result) {
-      res.json({ status: "pending", message: "User has not completed authentication yet. Keep polling." });
-      return;
-    }
-    if ("error" in result) {
-      res.status(400).json({ status: "error", error: result.error });
-      return;
-    }
-
+  // First check if server-side polling already finished
+  const bgEntry = bgPollStatus.get(deviceCode);
+  if (bgEntry?.status === "connected") {
     res.json({ status: "connected", message: "OneDrive connected successfully!" });
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
+    return;
   }
+  if (bgEntry?.status === "error") {
+    res.status(400).json({ status: "error", error: bgEntry.error });
+    return;
+  }
+
+  res.json({ status: "pending", message: "Waiting for user to complete authentication." });
 });
 
 router.post("/onedrive/auth/disconnect", (_req: Request, res: Response) => {
