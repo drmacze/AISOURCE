@@ -176,7 +176,12 @@ export default function WhatsAppPage() {
     setForm((f) => ({ ...f, verifyToken: token }));
   };
 
-  const webhookUrl = `${window.location.origin}/api/webhook/whatsapp`;
+  // Use the Replit public domain if available, otherwise fall back to window.location.origin
+  const replitDomain = (import.meta.env as Record<string, string>).VITE_REPLIT_DEV_DOMAIN;
+  const publicOrigin = replitDomain
+    ? `https://${replitDomain}`
+    : window.location.origin;
+  const webhookUrl = `${publicOrigin}/api/webhook/whatsapp`;
   const status = statusData;
 
   return (
