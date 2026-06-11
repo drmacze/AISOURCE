@@ -20,6 +20,7 @@ import promptsRouter from "./prompts";
 import analyticsRouter from "./analytics";
 import agentRouter from "./agent";
 import providersRouter from "./providers";
+import resourcesRouter from "./resources";
 
 const router: IRouter = Router();
 
@@ -70,6 +71,9 @@ router.use(providersRouter);
 
 // Public API v1 — for external integrations (e.g. dlavie.vercel.app)
 router.use("/v1", v1Router);
+
+// Real system resource monitor — RAM/CPU/Disk from /proc and fs.statfs
+router.use(resourcesRouter);
 
 // Settings — manage API keys and integrations
 router.use(settingsRouter);

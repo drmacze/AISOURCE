@@ -5,7 +5,8 @@ import {
   Activity, Database, MessageSquare, Network, Cpu, Clock,
   Wifi, WifiOff, Brain, Zap, TrendingUp, Globe, BookOpen,
   Server, Layers, BarChart3, RefreshCw, Terminal, GitBranch,
-  CheckCircle2, AlertCircle, Loader2,
+  CheckCircle2, AlertCircle, Loader2, HardDrive, MemoryStick,
+  Microchip,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 
@@ -60,6 +61,24 @@ function useDashboardStats() {
   });
 }
 
+interface ResourceData {
+  cpu:     { usagePercent: number; cores: number; model: string; speedMHz: number };
+  ram:     { totalMB: number; usedMB: number; freeMB: number; availableMB: number; cachedMB: number; usedPercent: number; swap: { totalMB: number; usedMB: number } };
+  disk:    { path: string; totalGB: number; usedGB: number; freeGB: number; usedPercent: number };
+  process: { pid: number; memoryMB: number; uptimeSec: number; nodeVersion: string };
+  system:  { uptimeSec: number };
+  ts:      number;
+}
+
+function useResources() {
+  return useQuery<ResourceData>({
+    queryKey: ["system-resources"],
+    queryFn: () => fetch(`${BASE}/api/system/resources`).then((r) => r.json()),
+    refetchInterval: 5_000,
+    staleTime: 4_000,
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatUptime(seconds: number): string {
   const s = Math.round(seconds);
@@ -69,6 +88,148 @@ function formatUptime(seconds: number): string {
   if (d > 0) return `${d}d ${h}h ${m}m`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m ${s % 60}s`;
+}
+
+// ── Resource Gauge ────────────────────────────────────────────────────────────
+function ResourceGauge({
+  label, usedPercent, detail, subDetail, icon: Icon, color, loading,
+}: {
+  label: string; usedPercent: number; detail: string; subDetail?: string;
+  icon: React.ElementType; color: string; loading?: boolean;
+}) {
+  const clamp = Math.min(100, Math.max(0, usedPercent));
+  const barColor =
+    clamp >= 90 ? "bg-red-500" :
+    clamp >= 70 ? "bg-amber-400" :
+    "bg-emerald-400";
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Icon className={cn("w-3.5 h-3.5", color)} />
+          <span className="text-xs font-semibold text-slate-300">{label}</span>
+        </div>
+        {loading
+          ? <Loader2 className="w-3 h-3 text-slate-600 animate-spin" />
+          : <span className={cn("text-xs font-mono font-bold", clamp >= 90 ? "text-red-400" : clamp >= 70 ? "text-amber-400" : "text-white")}>{clamp}%</span>
+        }
+      </div>
+      <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+        <motion.div
+          className={cn("h-full rounded-full transition-all duration-700", barColor)}
+          initial={{ width: 0 }}
+          animate={{ width: `${clamp}%` }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+        />
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-slate-400 font-mono">{detail}</span>
+        {subDetail && <span className="text-[10px] text-slate-600 font-mono">{subDetail}</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── Resource Monitor Panel ────────────────────────────────────────────────────
+function ResourceMonitor() {
+  const { data: r, isLoading, isFetching, dataUpdatedAt } = useResources();
+
+  const formatUptime2 = (s: number) => {
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (d > 0) return `${d}d ${h}h ${m}m`;
+    if (h > 0) return `${h}h ${m}m ${sec}s`;
+    return `${m}m ${sec}s`;
+  };
+
+  const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString("id-ID") : "—";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.28 }}
+      className="rounded-xl border border-white/5 bg-slate-900/60 p-5"
+    >
+      <div className="flex items-center gap-2 mb-5">
+        <Microchip className="w-4 h-4 text-cyan-400" />
+        <h2 className="text-sm font-semibold text-white">Resource Monitor</h2>
+        <span className="text-[10px] text-slate-600 ml-1">live · setiap 5s</span>
+        {isFetching && <RefreshCw className="w-3 h-3 text-slate-600 animate-spin ml-auto" />}
+        {!isFetching && <span className="text-[10px] text-slate-700 ml-auto font-mono">{lastUpdated}</span>}
+      </div>
+
+      <div className="space-y-5">
+        {/* CPU */}
+        <ResourceGauge
+          label="CPU"
+          usedPercent={r?.cpu?.usagePercent ?? 0}
+          detail={`${r?.cpu?.usagePercent ?? 0}% dari ${r?.cpu?.cores ?? 0} core`}
+          subDetail={r?.cpu?.model ? r.cpu.model.split(" ").slice(0, 3).join(" ") : undefined}
+          icon={Cpu}
+          color="text-blue-400"
+          loading={isLoading}
+        />
+
+        {/* RAM */}
+        <ResourceGauge
+          label="RAM"
+          usedPercent={r?.ram?.usedPercent ?? 0}
+          detail={`${r?.ram ? (r.ram.usedMB / 1024).toFixed(1) : "—"} GB / ${r?.ram ? (r.ram.totalMB / 1024).toFixed(1) : "—"} GB`}
+          subDetail={r?.ram ? `${(r.ram.availableMB / 1024).toFixed(1)} GB tersedia · cache ${(r.ram.cachedMB / 1024).toFixed(1)} GB` : undefined}
+          icon={MemoryStick}
+          color="text-violet-400"
+          loading={isLoading}
+        />
+
+        {/* Disk */}
+        <ResourceGauge
+          label="Disk"
+          usedPercent={r?.disk?.usedPercent ?? 0}
+          detail={`${r?.disk?.usedGB ?? "—"} GB / ${r?.disk?.totalGB ?? "—"} GB`}
+          subDetail={r?.disk ? `${r.disk.freeGB} GB bebas` : undefined}
+          icon={HardDrive}
+          color="text-amber-400"
+          loading={isLoading}
+        />
+      </div>
+
+      {/* Detail rows */}
+      {r?.process && (
+        <div className="mt-5 pt-4 border-t border-white/5 grid grid-cols-2 gap-x-4 gap-y-2 font-mono text-[11px]">
+          <div className="flex justify-between text-slate-500">
+            <span>API Process RAM</span>
+            <span className="text-slate-300">{r.process?.memoryMB} MB</span>
+          </div>
+          <div className="flex justify-between text-slate-500">
+            <span>Swap</span>
+            <span className={r.ram?.swap?.totalMB > 0 ? "text-amber-400" : "text-slate-500"}>
+              {r.ram?.swap?.totalMB > 0 ? `${r.ram.swap.usedMB}/${r.ram.swap.totalMB} MB` : "Tidak ada"}
+            </span>
+          </div>
+          <div className="flex justify-between text-slate-500">
+            <span>System Uptime</span>
+            <span className="text-slate-300">{formatUptime2(r.system?.uptimeSec ?? 0)}</span>
+          </div>
+          <div className="flex justify-between text-slate-500">
+            <span>Node.js</span>
+            <span className="text-slate-300">{r.process?.nodeVersion}</span>
+          </div>
+          <div className="flex justify-between text-slate-500">
+            <span>PID</span>
+            <span className="text-slate-300">{r.process?.pid}</span>
+          </div>
+          <div className="flex justify-between text-slate-500">
+            <span>CPU Cores</span>
+            <span className="text-slate-300">{r.cpu?.cores} core</span>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
 }
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
@@ -153,6 +314,7 @@ export default function Dashboard() {
   const health = useHealth();
   const at     = useAutoTraining();
   const stats  = useDashboardStats();
+  const _res   = useResources(); // prefetch for ResourceMonitor child
 
   const h = health.data;
   const a = at.data;
@@ -222,6 +384,9 @@ export default function Dashboard() {
         <StatCard icon={Database}      label="Knowledge Docs"   value={s?.totalDocuments ?? "—"}     sub={s?.embeddingCoverage != null ? `${s.embeddingCoverage}% vector-embedded` : "indexed in RAG"} color="text-amber-400"   delay={0.2} />
         <StatCard icon={Brain}         label="Training Samples" value={s?.totalTrainingSamples?.toLocaleString() ?? a?.totalSamplesAdded?.toLocaleString() ?? "—"} sub="in database" color="text-emerald-400" delay={0.25} />
       </div>
+
+      {/* Resource Monitor */}
+      <ResourceMonitor />
 
       {/* Middle row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5">
