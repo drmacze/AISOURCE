@@ -4,3 +4,4 @@ export * from "./training";
 export * from "./api-keys";
 export * from "./system-config";
 export * from "./prompts";
+export * from "./agent";

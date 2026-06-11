@@ -1,0 +1,50 @@
+Input: Write a Python function to calculate the Fibonacci sequence
+Output: def fibonacci(n):
+    if n <= 0:
+        return []
+    elif n == 1:
+        return [0]
+    elif n == 2:
+        return [0, 1]
+    else:
+        seq = [0, 1]
+        for i in range(2, n):
+            seq.append(seq[i-1] + seq[i-2])
+        return seq
+
+Input: Create a Python class for a student with name and grade attributes
+Output: class Student:
+    def __init__(self, name, grade):
+        self.name = name
+        self.grade = grade
+    
+    def __str__(self):
+        return f'Student(name={self.name}, grade={self.grade})'
+
+Input: Write a Python function to find the maximum element in a list
+Output: def find_max(lst):
+    if not lst:
+        raise ValueError('List is empty')
+    max_val = lst[0]
+    for item in lst:
+        if item > max_val:
+            max_val = item
+    return max_val
+
+Input: Implement a binary search algorithm in Python
+Output: def binary_search(arr, target):
+    left, right = 0, len(arr) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    return -1
+
+Input: Write a Python function to check if a string is a palindrome
+Output: def is_palindrome(s):
+    cleaned = ''.join(char.lower() for char in s if char.isalnum())
+    return cleaned == cleaned[::-1]

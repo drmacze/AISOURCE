@@ -16,17 +16,17 @@ try {
       secrets?: Record<string, string>;
       hfToken?: string; moonshotApiKey?: string; githubToken?: string; nexusApiKey?: string;
     };
-    // New generic secrets map
+    // New generic secrets map — always override (user set from Settings UI takes priority)
     if (cfg.secrets) {
       for (const [k, v] of Object.entries(cfg.secrets)) {
         if (k && v) process.env[k] = v;
       }
     }
-    // Legacy field migration
-    if (cfg.hfToken        && !process.env.HF_TOKEN)          process.env.HF_TOKEN          = cfg.hfToken;
-    if (cfg.moonshotApiKey && !process.env.MOONSHOT_API_KEY)  process.env.MOONSHOT_API_KEY  = cfg.moonshotApiKey;
-    if (cfg.githubToken    && !process.env.GITHUB_TOKEN)      process.env.GITHUB_TOKEN      = cfg.githubToken;
-    if (cfg.nexusApiKey    && !process.env.NEXUS_API_KEY)     process.env.NEXUS_API_KEY     = cfg.nexusApiKey;
+    // Legacy field migration — always override env var (UI-set value > Replit secret)
+    if (cfg.hfToken)        process.env.HF_TOKEN          = cfg.hfToken;
+    if (cfg.moonshotApiKey) process.env.MOONSHOT_API_KEY  = cfg.moonshotApiKey;
+    if (cfg.githubToken)    process.env.GITHUB_TOKEN      = cfg.githubToken;
+    if (cfg.nexusApiKey)    process.env.NEXUS_API_KEY     = cfg.nexusApiKey;
   }
 } catch { /* ignore parse errors */ }
 

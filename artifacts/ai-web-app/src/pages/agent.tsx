@@ -1,11 +1,12 @@
 /**
- * DLavie OS — AI Developer Agent Page
+ * NEXUS_OS — AI Developer Agent Page
  *
- * - Sessions run on the server as background processes (survive page navigation)
- * - Polls server every 2s for live event updates
- * - Session state persists in localStorage across navigation
- * - Autonomous mode: server runs self-directed tasks every 30 min
- * - Only uses tinyllama (RAM-safe, 0.6 GB)
+ * Brain: Qwen/Qwen2.5-Coder-32B-Instruct on HuggingFace GPU servers
+ *        → ZERO local RAM consumed
+ * - Sessions run as background processes (survive page navigation)
+ * - ReAct loop: up to 30 steps with 34 real tools
+ * - Memory system: cross-session persistent learning (agent remembers past work)
+ * - Autonomous mode: LLM-driven self-directed tasks every 10 min
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -15,13 +16,14 @@ import {
   AlertTriangle, Lightbulb, ChevronDown, ChevronRight, Sparkles,
   Database, Network, Cpu, Search, Package, Zap, RefreshCw,
   Clock, ToggleLeft, ToggleRight, PlusCircle, History,
+  Brain, FileCode2, FlaskConical, BookOpen, ScrollText, Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AgentEvent {
-  type: "thought" | "tool_call" | "tool_result" | "done" | "error";
+  type: "thought" | "tool_call" | "tool_result" | "done" | "error" | "info" | "memory";
   content?: string;
   tool?: string;
   args?: Record<string, unknown>;
@@ -31,6 +33,7 @@ interface AgentEvent {
   steps?: number;
   message?: string;
   step?: number;
+  model?: string;
   ts: number;
 }
 
@@ -43,6 +46,7 @@ interface AgentSession {
   totalSteps: number;
   model: string;
   autonomous: boolean;
+  memoriesLoaded: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -55,6 +59,7 @@ interface SessionSummary {
   summary: string;
   model: string;
   autonomous: boolean;
+  memoriesLoaded: number;
   eventCount: number;
   createdAt: string;
   updatedAt: string;
@@ -71,12 +76,19 @@ const BASE = apiBase();
 
 // ─── Tool icon ────────────────────────────────────────────────────────────────
 function ToolIcon({ tool }: { tool: string }) {
-  if (tool.includes("dataset") || tool.includes("sample")) return <Database className="w-3.5 h-3.5" />;
+  if (tool.includes("memory") || tool.includes("memories")) return <Brain className="w-3.5 h-3.5" />;
+  if (tool.includes("code") || tool.includes("file") || tool.includes("write")) return <FileCode2 className="w-3.5 h-3.5" />;
+  if (tool === "execute_python" || tool === "run_shell") return <Terminal className="w-3.5 h-3.5" />;
+  if (tool.includes("paper") || tool.includes("research")) return <BookOpen className="w-3.5 h-3.5" />;
+  if (tool.includes("plan") || tool.includes("think") || tool.includes("reason") || tool.includes("benchmark") || tool.includes("optimize")) return <FlaskConical className="w-3.5 h-3.5" />;
+  if (tool.includes("dataset") || tool.includes("sample") || tool.includes("augment") || tool.includes("fetch_hf")) return <Database className="w-3.5 h-3.5" />;
   if (tool.includes("model") || tool.includes("training") || tool.includes("job")) return <Network className="w-3.5 h-3.5" />;
-  if (tool.includes("installed")) return <Package className="w-3.5 h-3.5" />;
-  if (tool.includes("search")) return <Search className="w-3.5 h-3.5" />;
+  if (tool.includes("search") || tool.includes("hf_model")) return <Search className="w-3.5 h-3.5" />;
+  if (tool === "get_system_stats") return <Cpu className="w-3.5 h-3.5" />;
+  if (tool.includes("ollama") || tool.includes("local_model")) return <Package className="w-3.5 h-3.5" />;
   if (tool === "finish") return <CheckCircle2 className="w-3.5 h-3.5" />;
-  return <Cpu className="w-3.5 h-3.5" />;
+  if (tool.includes("card") || tool.includes("model_card")) return <ScrollText className="w-3.5 h-3.5" />;
+  return <Zap className="w-3.5 h-3.5" />;
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -191,6 +203,33 @@ function EventCard({ event }: { event: AgentEvent }) {
     );
   }
 
+  if (event.type === "memory") {
+    return (
+      <div className="flex gap-2.5 items-start">
+        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/20 flex items-center justify-center">
+          <Brain className="w-3 h-3 text-violet-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-medium text-violet-400 uppercase tracking-wider">Memory Loaded</span>
+          <p className="mt-0.5 text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{event.content}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (event.type === "info") {
+    return (
+      <div className="flex gap-2.5 items-start">
+        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-slate-700/50 flex items-center justify-center">
+          <Sparkles className="w-3 h-3 text-slate-500" />
+        </div>
+        <div className="flex-1">
+          <p className="text-xs text-slate-500 italic">{event.content}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (event.type === "error") {
     return (
       <div className="flex gap-2.5 items-start">
@@ -273,12 +312,12 @@ function SessionItem({
 
 // ─── Presets ──────────────────────────────────────────────────────────────────
 const PRESETS = [
-  { label: "Audit System",       task: "List all datasets, models, and training jobs. Summarize the current state of the AI system.",                                                     icon: Sparkles,    color: "text-emerald-400" },
-  { label: "Create Dataset",     task: "Create a new Q&A training dataset named 'General AI QA' and generate 5 training samples about artificial intelligence fundamentals.",              icon: Database,    color: "text-purple-400" },
-  { label: "Train a Model",      task: "List all registered models and datasets. Pick the best matching pair and start a training job.",                                                   icon: Network,     color: "text-orange-400" },
-  { label: "Generate Samples",   task: "Find the first available dataset and generate 5 new training samples about machine learning optimization techniques.",                             icon: Zap,         color: "text-amber-400" },
-  { label: "Check Ollama",       task: "List all Ollama models currently installed and ready for inference. Report their names and sizes.",                                               icon: Cpu,         color: "text-sky-400" },
-  { label: "Build + Train",      task: "Create a dataset named 'Code QA' (task type: qa), generate 4 samples about Python programming, register a model named 'CodeHelper' (type: llm), then start training.", icon: RefreshCw, color: "text-rose-400" },
+  { label: "Audit System",       task: "Get system stats, list all datasets, models, and training jobs. Recall relevant memories from past sessions. Summarize the current state of the AI system and store any key insights.",                                                     icon: Sparkles,    color: "text-emerald-400" },
+  { label: "Search + Build",     task: "Search HuggingFace for the top 3 text-generation models. Search arXiv for recent papers on instruction tuning. Then create a dataset named 'Instruction Tuning QA' and generate 5 training samples based on what you found.",              icon: BookOpen,    color: "text-purple-400" },
+  { label: "Code & Execute",     task: "Write a Python script that implements a simple neural network training loop using numpy only (no PyTorch). Execute it. Store the working code as a memory insight.",                                                                          icon: Terminal,    color: "text-amber-400" },
+  { label: "Plan Experiment",    task: "Plan a full ML experiment: what architecture to use for text classification, what hyperparameters to try, and why. Use the 'reason' tool to think through trade-offs. Store your plan as a memory.",                                        icon: FlaskConical, color: "text-orange-400" },
+  { label: "Train a Model",      task: "List all registered models and datasets. Pick the best matching pair and start a training job. Recall past training memories for context.",                                                                                                   icon: Network,     color: "text-sky-400" },
+  { label: "Full Pipeline",      task: "Create a dataset named 'Code QA' (task type: qa), generate 4 samples about Python best practices, register a model named 'CodeHelper-v1' (type: llm), start training, then store a summary insight in memory.", icon: RefreshCw, color: "text-rose-400" },
 ];
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -455,8 +494,8 @@ export default function AgentPage() {
             <div className="min-w-0">
               <h1 className="text-sm font-semibold text-slate-100 font-[Syne] truncate">AI Developer Agent</h1>
               <p className="text-xs text-slate-500 hidden sm:block">
-                CO-Developer otonom · model: <span className="font-mono text-emerald-400/70">tinyllama</span>
-                {isRunning && <span className="ml-2 text-emerald-400 animate-pulse">● berjalan di latar belakang…</span>}
+                34 tools · <span className="font-mono text-emerald-400/70">Qwen2.5-Coder-32B</span> on HF GPU
+                {isRunning && <span className="ml-2 text-emerald-400 animate-pulse">● running in background…</span>}
               </p>
             </div>
           </div>
@@ -470,7 +509,7 @@ export default function AgentPage() {
                 ? "bg-violet-500/10 text-violet-400 border-violet-500/30 hover:bg-violet-500/20"
                 : "bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-400"
             )}
-            title={autonomousEnabled ? "Autonomous mode ON — agent runs tasks every 30 min" : "Enable autonomous mode"}
+            title={autonomousEnabled ? "Autonomous mode ON — LLM picks tasks every 10 min using system state + memories" : "Enable autonomous mode"}
           >
             {autonomousEnabled
               ? <ToggleRight className="w-3.5 h-3.5" />
@@ -560,21 +599,21 @@ export default function AgentPage() {
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 flex items-center justify-center mb-3">
                   <Bot className="w-6 h-6 text-emerald-400" />
                 </div>
-                <h2 className="text-base font-semibold text-slate-300 font-[Syne]">DLavie Agent</h2>
-                <p className="mt-1.5 text-xs text-slate-500 max-w-xs">
-                  Agen CO-Developer berjalan 24/7 di latar belakang menggunakan <code className="text-emerald-400 font-mono">tinyllama</code>.
-                  Pilih preset atau tulis tugas sendiri.
+                <h2 className="text-base font-semibold text-slate-300 font-[Syne]">NEXUS Agent</h2>
+                <p className="mt-1.5 text-xs text-slate-500 max-w-xs leading-relaxed">
+                  Powered by <code className="text-emerald-400 font-mono">Qwen2.5-Coder-32B</code> on HuggingFace GPU servers.
+                  34 real tools. Persistent memory. Zero local RAM.
                 </p>
                 <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-                  {["Create dataset", "Train model", "Audit system"].map((hint) => (
+                  {["Search papers", "Execute code", "Build pipeline", "Recall memory"].map((hint) => (
                     <span key={hint} className="px-2.5 py-1 rounded-full bg-slate-800 text-xs text-slate-500 border border-slate-700">{hint}</span>
                   ))}
                 </div>
                 <div className="mt-5 flex flex-col items-center gap-1.5 text-xs text-slate-600">
                   <div className="flex items-center gap-2">
                     {autonomousEnabled
-                      ? <><span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" /><span className="text-violet-400">Autonomous mode active — agent works independently every 30 min</span></>
-                      : <><ToggleLeft className="w-3.5 h-3.5" /><span>Enable Auto mode to let agent work on its own</span></>
+                      ? <><span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" /><span className="text-violet-400">Autonomous mode active — LLM picks tasks every 10 min</span></>
+                      : <><ToggleLeft className="w-3.5 h-3.5" /><span>Enable Auto mode — LLM drives itself every 10 min</span></>
                     }
                   </div>
                 </div>
@@ -622,12 +661,17 @@ export default function AgentPage() {
               <motion.div
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 mb-2"
+                className="flex items-center gap-2 mb-2 flex-wrap"
               >
                 <StatusBadge status={activeSession.status} steps={activeSession.totalSteps} />
                 <span className="text-xs text-slate-500 truncate flex-1">{activeSession.task}</span>
-                <span className="text-[10px] font-mono text-slate-700">
-                  {activeSession.model}
+                {activeSession.memoriesLoaded > 0 && (
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 text-[10px] border border-violet-500/20 font-mono flex-shrink-0">
+                    <Brain className="w-2.5 h-2.5" />{activeSession.memoriesLoaded}m
+                  </span>
+                )}
+                <span className="text-[10px] font-mono text-slate-700 flex-shrink-0">
+                  {activeSession.model?.split("/").pop() ?? activeSession.model}
                 </span>
                 {activeSession.autonomous && (
                   <span className="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 text-[10px] border border-violet-500/20 font-mono flex-shrink-0">AUTO</span>
@@ -719,8 +763,8 @@ export default function AgentPage() {
                 animate={{ opacity: 1 }}
                 className="mt-2 flex items-center gap-1.5 text-[10px] text-violet-400/70 bg-violet-500/5 border border-violet-500/10 rounded-lg px-2.5 py-1.5"
               >
-                <Zap className="w-3 h-3" />
-                Autonomous mode aktif — agent bekerja mandiri setiap 30 menit
+                <Brain className="w-3 h-3" />
+                Autonomous mode active — Qwen2.5-Coder-32B picks &amp; runs tasks every 10 min using persistent memory
               </motion.div>
             )}
           </div>
