@@ -5,3 +5,5 @@
 - [Database schema push](aisource-project.md#db-push) — `pnpm --filter @workspace/db run push` needed after fresh import or schema changes
 - [Workflow config](aisource-project.md#workflows) — Use `artifacts/api-server: API Server` workflow only; `Start API Server` is duplicate/conflicting
 - [API Key Auth Bootstrap](api-key-auth.md) — DB-backed nxs_ keys; bootstrap mode lets first admin key be created without auth when DB empty + no NEXUS_API_KEY
+- [Provider Fallback Chain](provider-chain.md) — `src/lib/provider-chain.ts`; order: Groq→OpenRouter→HF→Ollama; generateUnified() returns `{text, provider, modelUsed}` not plain string
+- [Session API](provider-chain.md#sessions) — `/api/v1/sessions/:sessionId/message`; DB title = `session:<id>`; multi-turn history injected automatically; designed for WhatsApp bots

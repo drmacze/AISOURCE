@@ -2,13 +2,11 @@
  * DLavie OS — API Key Management
  *
  * Endpoints:
- *   GET    /api/keys          — List all API keys (admin only, keys are masked)
- *   POST   /api/keys          — Generate a new API key
- *   PATCH  /api/keys/:id      — Update key name / permissions / active
- *   DELETE /api/keys/:id      — Revoke (delete) an API key
+ *   GET    /api/keys           — List all API keys (admin only, keys are masked)
+ *   POST   /api/keys           — Generate a new API key
+ *   PATCH  /api/keys/:id       — Update key name / permissions / active / systemPrompt / webhookUrl / defaultModel
+ *   DELETE /api/keys/:id       — Revoke (delete) an API key
  *   GET    /api/keys/:id/stats — Usage stats for a specific key
- *
- * Admin auth: uses NEXUS_API_KEY env var OR any DB key with 'admin' permission.
  */
 
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
@@ -32,15 +30,10 @@ function extractKey(req: Request): string | null {
 
 async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   const key = extractKey(req);
-  // Always read dynamically — supports runtime updates via Settings page
   const masterKey = process.env.NEXUS_API_KEY || "";
 
-  // If master key is set, accept it directly
-  if (masterKey && key === masterKey) {
-    return next();
-  }
+  if (masterKey && key === masterKey) return next();
 
-  // Otherwise check DB for an admin key
   if (key) {
     try {
       const [found] = await db
@@ -48,30 +41,19 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction): Pr
         .from(apiKeysTable)
         .where(eq(apiKeysTable.key, key))
         .limit(1);
-
-      if (found && found.active && found.permissions === "admin") {
-        return next();
-      }
-    } catch {
-      // fall through
-    }
+      if (found && found.active && found.permissions === "admin") return next();
+    } catch { /* fall through */ }
   }
 
-  // ── Bootstrap mode ──────────────────────────────────────────────────────────
-  // When no NEXUS_API_KEY is set AND no keys exist in the DB yet,
-  // allow unauthenticated access so the first admin key can be created.
+  // Bootstrap mode — allow unauthenticated when DB empty + no master key
   if (!masterKey) {
     try {
-      const [countRow] = await db
-        .select({ c: count() })
-        .from(apiKeysTable);
+      const [countRow] = await db.select({ c: count() }).from(apiKeysTable);
       if ((countRow?.c ?? 0) === 0) {
-        console.warn("[ApiKeys] Bootstrap mode: no keys in DB — unauthenticated access allowed until first admin key is created.");
+        console.warn("[ApiKeys] Bootstrap mode: unauthenticated access allowed until first admin key is created.");
         return next();
       }
-    } catch {
-      // If DB query fails, still reject
-    }
+    } catch { /* fall through */ }
   }
 
   res.status(401).json({
@@ -81,7 +63,6 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction): Pr
   });
 }
 
-// ─── Generate key ─────────────────────────────────────────────────────────────
 function generateKey(): string {
   return "nxs_" + randomBytes(24).toString("hex");
 }
@@ -94,11 +75,7 @@ function maskKey(key: string): string {
 // ─── GET /api/keys ────────────────────────────────────────────────────────────
 router.get("/keys", requireAdmin, async (_req, res) => {
   try {
-    const keys = await db
-      .select()
-      .from(apiKeysTable)
-      .orderBy(desc(apiKeysTable.createdAt));
-
+    const keys = await db.select().from(apiKeysTable).orderBy(desc(apiKeysTable.createdAt));
     res.json({
       keys: keys.map((k) => ({
         id: k.id,
@@ -107,7 +84,11 @@ router.get("/keys", requireAdmin, async (_req, res) => {
         permissions: k.permissions,
         active: k.active,
         defaultModel: k.defaultModel,
+        systemPrompt: k.systemPrompt,
+        webhookUrl: k.webhookUrl,
         requestCount: k.requestCount,
+        dailyTokens: k.dailyTokens,
+        dailyTokensDate: k.dailyTokensDate,
         lastUsedAt: k.lastUsedAt,
         expiresAt: k.expiresAt,
         createdAt: k.createdAt,
@@ -121,11 +102,13 @@ router.get("/keys", requireAdmin, async (_req, res) => {
 
 // ─── POST /api/keys ───────────────────────────────────────────────────────────
 router.post("/keys", requireAdmin, async (req, res) => {
-  const { name, permissions = "write", expiresAt, defaultModel } = req.body as {
+  const { name, permissions = "write", expiresAt, defaultModel, systemPrompt, webhookUrl } = req.body as {
     name?: string;
     permissions?: "read" | "write" | "admin";
     expiresAt?: string;
     defaultModel?: string;
+    systemPrompt?: string;
+    webhookUrl?: string;
   };
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -135,10 +118,7 @@ router.post("/keys", requireAdmin, async (req, res) => {
 
   const validPerms: Array<"read" | "write" | "admin"> = ["read", "write", "admin"];
   if (!validPerms.includes(permissions)) {
-    res.status(400).json({
-      error: "BadRequest",
-      message: `permissions must be one of: ${validPerms.join(", ")}`,
-    });
+    res.status(400).json({ error: "BadRequest", message: `permissions must be one of: ${validPerms.join(", ")}` });
     return;
   }
 
@@ -154,11 +134,12 @@ router.post("/keys", requireAdmin, async (req, res) => {
         permissions,
         active: true,
         defaultModel: defaultModel || null,
+        systemPrompt: systemPrompt || null,
+        webhookUrl: webhookUrl || null,
         ...(expiry ? { expiresAt: expiry } : {}),
       })
       .returning();
 
-    // If this is an admin key and no primary key is set yet, auto-set it as primary
     if (permissions === "admin") {
       try {
         const existing = await getPrimaryKey();
@@ -169,7 +150,6 @@ router.post("/keys", requireAdmin, async (req, res) => {
       } catch { /* non-fatal */ }
     }
 
-    // Return the FULL key once — it won't be shown again
     res.status(201).json({
       id: created.id,
       name: created.name,
@@ -177,6 +157,8 @@ router.post("/keys", requireAdmin, async (req, res) => {
       permissions: created.permissions,
       active: created.active,
       defaultModel: created.defaultModel,
+      systemPrompt: created.systemPrompt,
+      webhookUrl: created.webhookUrl,
       expiresAt: created.expiresAt,
       createdAt: created.createdAt,
       warning: "Save this key now — it will not be shown again in full.",
@@ -194,18 +176,22 @@ router.patch("/keys/:id", requireAdmin, async (req, res) => {
     return;
   }
 
-  const { name, permissions, active } = req.body as {
+  const { name, permissions, active, defaultModel, systemPrompt, webhookUrl } = req.body as {
     name?: string;
     permissions?: "read" | "write" | "admin";
     active?: boolean;
+    defaultModel?: string | null;
+    systemPrompt?: string | null;
+    webhookUrl?: string | null;
   };
 
-  const updates: Partial<typeof apiKeysTable.$inferInsert> = {
-    updatedAt: new Date(),
-  };
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (name !== undefined) updates.name = name.trim();
   if (permissions !== undefined) updates.permissions = permissions;
   if (active !== undefined) updates.active = active;
+  if (defaultModel !== undefined) updates.defaultModel = defaultModel;
+  if (systemPrompt !== undefined) updates.systemPrompt = systemPrompt;
+  if (webhookUrl !== undefined) updates.webhookUrl = webhookUrl;
 
   try {
     const [updated] = await db
@@ -225,6 +211,9 @@ router.patch("/keys/:id", requireAdmin, async (req, res) => {
       key: maskKey(updated.key),
       permissions: updated.permissions,
       active: updated.active,
+      defaultModel: updated.defaultModel,
+      systemPrompt: updated.systemPrompt,
+      webhookUrl: updated.webhookUrl,
       requestCount: updated.requestCount,
       updatedAt: updated.updatedAt,
     });
@@ -278,13 +267,19 @@ router.get("/keys/:id/stats", requireAdmin, async (req, res) => {
       return;
     }
 
+    const today = new Date().toISOString().slice(0, 10);
+
     res.json({
       id: key.id,
       name: key.name,
       key: maskKey(key.key),
       permissions: key.permissions,
       active: key.active,
+      defaultModel: key.defaultModel,
+      systemPrompt: key.systemPrompt ? "set" : null,
+      webhookUrl: key.webhookUrl ? "set" : null,
       requestCount: key.requestCount,
+      dailyTokens: key.dailyTokensDate === today ? key.dailyTokens : 0,
       lastUsedAt: key.lastUsedAt,
       expiresAt: key.expiresAt,
       createdAt: key.createdAt,

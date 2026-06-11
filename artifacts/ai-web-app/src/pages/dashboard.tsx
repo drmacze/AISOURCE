@@ -16,8 +16,16 @@ function useHealth() {
   return useQuery({
     queryKey: ["v1-health"],
     queryFn: () => fetch(`${BASE}/api/v1/health`).then((r) => r.json()) as Promise<{
-      status: string; version: string; engine: string; ollama: boolean;
-      huggingface: boolean; kimi: boolean; uptime: number;
+      status: string; version: string; engine: string; uptime: number;
+      ollama: boolean; huggingface: boolean; kimi: boolean;
+      providers?: {
+        groq?:       { connected: boolean };
+        openrouter?: { connected: boolean };
+        huggingface?:{ connected: boolean };
+        kimi?:       { connected: boolean };
+        ollama?:     { connected: boolean };
+      };
+      memory?: { freeGB: number; totalGB: number };
     }>,
     refetchInterval: 15_000,
   });
@@ -199,11 +207,12 @@ export default function Dashboard() {
         transition={{ delay: 0.15 }}
         className="flex flex-wrap gap-2"
       >
-        <StatusBadge ok={h?.ollama ?? false}         label="Ollama (Local)" icon={Server} />
-        <StatusBadge ok={h?.huggingface ?? false}  label="HuggingFace"    icon={Brain} />
-        <StatusBadge ok={h?.kimi ?? false}         label="Kimi K2"        icon={Zap} />
+        <StatusBadge ok={h?.providers?.groq?.connected ?? false}       label="Groq LPU"       icon={Zap} />
+        <StatusBadge ok={h?.providers?.openrouter?.connected ?? false} label="OpenRouter"      icon={Globe} />
+        <StatusBadge ok={h?.providers?.huggingface?.connected ?? (h?.huggingface ?? false)} label="HuggingFace" icon={Brain} />
+        <StatusBadge ok={h?.providers?.kimi?.connected ?? (h?.kimi ?? false)} label="Kimi K2"  icon={Cpu} />
+        <StatusBadge ok={h?.providers?.ollama?.connected ?? (h?.ollama ?? false)} label="Ollama Local" icon={Server} />
         <StatusBadge ok={a?.running ?? false}      label="Auto-Training"  icon={Network} />
-        <StatusBadge ok={a?.githubConnected ?? true} label="GitHub"       icon={GitBranch} />
       </motion.div>
 
       {/* Stats Grid */}
@@ -240,7 +249,13 @@ export default function Dashboard() {
               { k: "HF Token",       v: h?.huggingface
                   ? <span className="text-emerald-400">● connected (embeddings + images)</span>
                   : <span className="text-amber-400">○ not set</span> },
-              { k: "Kimi K2",        v: h?.kimi
+              { k: "Groq LPU",       v: h?.providers?.groq?.connected
+                  ? <span className="text-emerald-400">● ready (fastest)</span>
+                  : <span className="text-slate-500">○ no key</span> },
+              { k: "OpenRouter",     v: h?.providers?.openrouter?.connected
+                  ? <span className="text-emerald-400">● ready (free tier)</span>
+                  : <span className="text-slate-500">○ no key</span> },
+              { k: "Kimi K2",        v: h?.providers?.kimi?.connected ?? h?.kimi
                   ? <span className="text-emerald-400">● ready (1T MoE)</span>
                   : <span className="text-slate-500">○ no key</span> },
               { k: "Vector Search",  v: s?.embeddingCoverage != null

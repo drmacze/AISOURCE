@@ -28,6 +28,23 @@ import {
   listOllamaModels,
   OllamaError,
 } from "../ollama";
+import {
+  generateGroqResponse,
+  streamGroqTokens,
+  isGroqConfigured,
+  resolveGroqModel,
+  GROQ_MODELS,
+  type GroqMessage,
+} from "../groq";
+import {
+  generateOpenRouterResponse,
+  streamOpenRouterTokens,
+  isOpenRouterConfigured,
+  resolveOpenRouterModel,
+  OPENROUTER_FREE_MODELS,
+  type OpenRouterMessage,
+} from "../openrouter";
+import { generateWithFallback, streamWithFallback } from "../lib/provider-chain";
 import { requireAuth } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -94,13 +111,15 @@ const requireApiKey = requireAuth("write");
 
 // ─── Multi-model router ───────────────────────────────────────────────────────
 
-type ModelProvider = "ollama" | "kimi" | "hf" | "unknown";
+type ModelProvider = "ollama" | "kimi" | "hf" | "groq" | "openrouter" | "auto";
 
 function detectProvider(model: string): ModelProvider {
-  const m = model.toLowerCase();
+  const m = (model || "").toLowerCase();
+  if (!m || m === "auto") return "auto";
+  if (m.startsWith("groq:")) return "groq";
+  if (m.startsWith("openrouter:")) return "openrouter";
   if (m.startsWith("kimi/") || m.startsWith("moonshotai/") || m === "kimi-k2") return "kimi";
   if (m.startsWith("hf/") || m.startsWith("huggingface/")) return "hf";
-  if (!m || m === "auto") return "ollama";
   return "ollama";
 }
 
@@ -108,18 +127,53 @@ async function generateUnified(
   message: string,
   model: string,
   ragContext?: string,
-  systemPrompt?: string
-): Promise<string> {
+  systemPrompt?: string,
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>
+): Promise<{ text: string; provider: ModelProvider; modelUsed: string }> {
   const provider = detectProvider(model);
+  const sysMsg = systemPrompt || "You are NEXUS_OS, a helpful AI assistant. Respond in the same language the user uses.";
+
+  // Build message history for chat providers
+  function buildMessages<T extends { role: "system" | "user" | "assistant"; content: string }>(
+    extraContent: string
+  ): T[] {
+    const msgs: T[] = [{ role: "system", content: sysMsg } as T];
+    if (conversationHistory) {
+      for (const h of conversationHistory.slice(-8)) {
+        msgs.push({ role: h.role, content: h.content } as T);
+      }
+    }
+    msgs.push({ role: "user", content: extraContent } as T);
+    return msgs;
+  }
+
+  const userContent = ragContext
+    ? `Context from knowledge base:\n${ragContext}\n\nUser: ${message}`
+    : message;
+
+  // ── Explicit provider selection ──────────────────────────────────────────────
+  if (provider === "groq") {
+    const groqModel = model.slice(5); // strip "groq:"
+    const msgs = buildMessages<GroqMessage>(userContent);
+    const text = await generateGroqResponse(msgs, groqModel);
+    return { text, provider: "groq", modelUsed: groqModel };
+  }
+
+  if (provider === "openrouter") {
+    const orModel = model.slice(11); // strip "openrouter:"
+    const msgs = buildMessages<OpenRouterMessage>(userContent);
+    const text = await generateOpenRouterResponse(msgs, orModel);
+    return { text, provider: "openrouter", modelUsed: orModel };
+  }
 
   if (provider === "kimi") {
     try {
       const { generateKimiResponse } = await import("../kimi");
       const kimiModel = model.replace(/^kimi\//i, "").replace(/^moonshotai\//i, "") || "kimi-k2-instruct";
-      return await generateKimiResponse(message, kimiModel, ragContext);
+      const text = await generateKimiResponse(message, kimiModel, ragContext);
+      return { text, provider: "kimi", modelUsed: kimiModel };
     } catch (e) {
-      console.warn("[v1] Kimi fallback to Ollama:", e);
-      return generateOllamaResponse(message, "tinyllama", ragContext, systemPrompt);
+      console.warn("[v1] Kimi failed, falling back to chain:", e);
     }
   }
 
@@ -129,36 +183,128 @@ async function generateUnified(
       if (!isHFConfigured()) throw new Error("HF_TOKEN not configured");
       const hfModel = model.replace(/^hf\//i, "").replace(/^huggingface\//i, "");
       const prompt = ragContext ? `Context:\n${ragContext}\n\nUser: ${message}` : message;
-      return await generateHFResponse(prompt, hfModel);
+      const text = await generateHFResponse(prompt, hfModel);
+      return { text, provider: "hf", modelUsed: hfModel };
     } catch (e) {
-      console.warn("[v1] HF fallback to Ollama:", e);
-      return generateOllamaResponse(message, "tinyllama", ragContext, systemPrompt);
+      console.warn("[v1] HF failed, falling back to chain:", e);
     }
   }
 
-  return generateOllamaResponse(message, model || "tinyllama", ragContext, systemPrompt);
+  if (provider === "ollama") {
+    try {
+      const text = await generateOllamaResponse(message, model || "tinyllama", ragContext, systemPrompt);
+      return { text, provider: "ollama", modelUsed: model || "tinyllama" };
+    } catch (e) {
+      console.warn("[v1] Ollama failed, falling back to chain:", e);
+    }
+  }
+
+  // ── "auto" or any fallback: use multi-provider chain ─────────────────────────
+  const result = await generateWithFallback(message, ragContext, systemPrompt);
+  return { text: result.text, provider: result.provider as ModelProvider, modelUsed: result.model };
 }
 
 async function streamUnified(
   message: string,
   model: string,
   ragContext: string | undefined,
-  res: Response
-): Promise<void> {
+  res: Response,
+  systemPrompt?: string
+): Promise<{ provider: ModelProvider; modelUsed: string }> {
   const provider = detectProvider(model);
+  const sysMsg = systemPrompt || "You are NEXUS_OS, a helpful AI assistant. Respond in the same language the user uses.";
+  const userContent = ragContext
+    ? `Context from knowledge base:\n${ragContext}\n\nUser: ${message}`
+    : message;
+
+  function setupSSE() {
+    if (!res.headersSent) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+    }
+  }
+
+  async function streamTokens(
+    tokens: AsyncGenerator<string>,
+    source: string,
+    modelName: string
+  ): Promise<{ provider: ModelProvider; modelUsed: string }> {
+    setupSSE();
+    let fullText = "";
+    for await (const token of tokens) {
+      fullText += token;
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify({ token, done: false, source })}\n\n`);
+    }
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ token: "", done: true, fullText, source })}\n\n`);
+      res.end();
+    }
+    return { provider: source as ModelProvider, modelUsed: modelName };
+  }
+
+  if (provider === "groq") {
+    const groqModel = model.slice(5);
+    const msgs: GroqMessage[] = [
+      { role: "system", content: sysMsg },
+      { role: "user", content: userContent },
+    ];
+    return streamTokens(streamGroqTokens(msgs, groqModel), "groq", groqModel);
+  }
+
+  if (provider === "openrouter") {
+    const orModel = model.slice(11);
+    const msgs: OpenRouterMessage[] = [
+      { role: "system", content: sysMsg },
+      { role: "user", content: userContent },
+    ];
+    return streamTokens(streamOpenRouterTokens(msgs, orModel), "openrouter", orModel);
+  }
 
   if (provider === "kimi") {
     try {
       const { streamKimiResponse } = await import("../kimi");
       const kimiModel = model.replace(/^kimi\//i, "").replace(/^moonshotai\//i, "") || "kimi-k2-instruct";
       await streamKimiResponse(message, kimiModel, ragContext, res);
-      return;
+      return { provider: "kimi", modelUsed: kimiModel };
     } catch (e) {
-      console.warn("[v1] Kimi stream fallback:", e);
+      console.warn("[v1/stream] Kimi failed, falling back:", e);
     }
   }
 
-  await streamOllamaResponse(message, model || "tinyllama", ragContext, res);
+  if (provider === "hf") {
+    try {
+      const { streamHFResponse, isHFConfigured } = await import("../huggingface");
+      if (isHFConfigured()) {
+        const hfModel = model.replace(/^hf\//i, "").replace(/^huggingface\//i, "");
+        const prompt = ragContext ? `Context:\n${ragContext}\n\nUser: ${message}\nAssistant:` : `User: ${message}\nAssistant:`;
+        setupSSE();
+        let fullText = "";
+        for await (const token of streamHFResponse(prompt, hfModel)) {
+          fullText += token;
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify({ token, done: false, source: "hf" })}\n\n`);
+        }
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ token: "", done: true, fullText, source: "hf" })}\n\n`);
+          res.end();
+        }
+        return { provider: "hf", modelUsed: hfModel };
+      }
+    } catch (e) {
+      console.warn("[v1/stream] HF failed, falling back:", e);
+    }
+  }
+
+  if (provider === "ollama") {
+    await streamOllamaResponse(message, model || "tinyllama", ragContext, res);
+    return { provider: "ollama", modelUsed: model || "tinyllama" };
+  }
+
+  // "auto" or all explicit fallbacks failed — use provider chain
+  const chainResult = await streamWithFallback(message, ragContext, res, systemPrompt);
+  return { provider: chainResult.provider as ModelProvider, modelUsed: chainResult.model };
 }
 
 // ─── RAG context helper — pgvector cosine similarity → BM25 fallback ─────────
@@ -404,15 +550,26 @@ router.get("/health", async (_req, res) => {
   const { isKimiConfigured } = await import("../kimi");
   const { freemem, totalmem } = await import("os");
   const ollamaOnline = await isOllamaOnline();
+  const groqOk = isGroqConfigured();
+  const orOk = isOpenRouterConfigured();
+  const primaryEngine =
+    groqOk ? "Groq (cloud)" :
+    orOk   ? "OpenRouter (cloud)" :
+    ollamaOnline ? "Ollama (local)" :
+    isHFConfigured() ? "HuggingFace (cloud)" : "unavailable";
   res.json({
     status: "online",
     version: "1.0.0",
     system: "DLavie OS",
-    engine: ollamaOnline ? "Ollama (local)" : isHFConfigured() ? "HuggingFace (fallback)" : "rule-based",
-    ollama: ollamaOnline,
-    ollamaHost: "127.0.0.1:11434",
-    huggingface: isHFConfigured(),
-    kimi: isKimiConfigured(),
+    engine: primaryEngine,
+    providers: {
+      groq:         { connected: groqOk,      priority: 1, type: "cloud-fast" },
+      openrouter:   { connected: orOk,        priority: 2, type: "cloud-free" },
+      huggingface:  { connected: isHFConfigured(), priority: 3, type: "cloud-gpu" },
+      kimi:         { connected: isKimiConfigured(), priority: 4, type: "cloud" },
+      ollama:       { connected: ollamaOnline, priority: 5, type: "local" },
+    },
+    fallbackChain: ["groq", "openrouter", "hf", "ollama"],
     rateLimit: { windowMs: RATE_WINDOW_MS, maxRequests: RATE_MAX },
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
@@ -447,63 +604,25 @@ router.get("/models/catalogue", async (_req, res) => {
   const ollamaModels = await listOllamaModels();
 
   const cloudModels = [
+    // Groq — fastest inference (LPU)
+    { id: "groq:llama-3.3-70b-versatile",   name: "Llama 3.3 70B",      provider: "groq",       backend: "Groq LPU",            parameters: "70B",   ready: isGroqConfigured(),        requiresKey: "GROQ_API_KEY",       description: "Meta Llama 3.3 70B via Groq LPU — fastest inference", useIn: "groq:llama-3.3-70b-versatile" },
+    { id: "groq:llama-3.1-8b-instant",      name: "Llama 3.1 8B Instant",provider: "groq",       backend: "Groq LPU",            parameters: "8B",    ready: isGroqConfigured(),        requiresKey: "GROQ_API_KEY",       description: "Meta Llama 3.1 8B via Groq — ultra-low latency",     useIn: "groq:llama-3.1-8b-instant" },
+    { id: "groq:llama-3.1-70b-versatile",   name: "Llama 3.1 70B",      provider: "groq",       backend: "Groq LPU",            parameters: "70B",   ready: isGroqConfigured(),        requiresKey: "GROQ_API_KEY",       description: "Meta Llama 3.1 70B via Groq LPU",                     useIn: "groq:llama-3.1-70b-versatile" },
+    { id: "groq:gemma2-9b-it",              name: "Gemma 2 9B",          provider: "groq",       backend: "Groq LPU",            parameters: "9B",    ready: isGroqConfigured(),        requiresKey: "GROQ_API_KEY",       description: "Google Gemma 2 9B Instruct via Groq",                 useIn: "groq:gemma2-9b-it" },
+    { id: "groq:mixtral-8x7b-32768",        name: "Mixtral 8x7B",        provider: "groq",       backend: "Groq LPU",            parameters: "8x7B",  ready: isGroqConfigured(),        requiresKey: "GROQ_API_KEY",       description: "Mistral Mixtral 8x7B MoE via Groq",                   useIn: "groq:mixtral-8x7b-32768" },
+    // OpenRouter — free & paid cloud models
+    { id: "openrouter:microsoft/phi-4",                         name: "Phi-4",              provider: "openrouter", backend: "OpenRouter",          parameters: "14B",   ready: isOpenRouterConfigured(),  requiresKey: "OPENROUTER_API_KEY", description: "Microsoft Phi-4 14B via OpenRouter (free tier)",       useIn: "openrouter:microsoft/phi-4" },
+    { id: "openrouter:qwen/qwen3-14b:free",                     name: "Qwen3 14B",          provider: "openrouter", backend: "OpenRouter",          parameters: "14B",   ready: isOpenRouterConfigured(),  requiresKey: "OPENROUTER_API_KEY", description: "Alibaba Qwen3 14B (free) via OpenRouter",              useIn: "openrouter:qwen/qwen3-14b:free" },
+    { id: "openrouter:meta-llama/llama-3.2-3b-instruct:free",  name: "Llama 3.2 3B",       provider: "openrouter", backend: "OpenRouter",          parameters: "3B",    ready: isOpenRouterConfigured(),  requiresKey: "OPENROUTER_API_KEY", description: "Meta Llama 3.2 3B (free) via OpenRouter",              useIn: "openrouter:meta-llama/llama-3.2-3b-instruct:free" },
+    { id: "openrouter:deepseek/deepseek-r1:free",               name: "DeepSeek R1",        provider: "openrouter", backend: "OpenRouter",          parameters: "671B",  ready: isOpenRouterConfigured(),  requiresKey: "OPENROUTER_API_KEY", description: "DeepSeek R1 reasoning model (free) via OpenRouter",   useIn: "openrouter:deepseek/deepseek-r1:free" },
+    { id: "openrouter:google/gemma-3-12b-it:free",              name: "Gemma 3 12B",        provider: "openrouter", backend: "OpenRouter",          parameters: "12B",   ready: isOpenRouterConfigured(),  requiresKey: "OPENROUTER_API_KEY", description: "Google Gemma 3 12B Instruct (free) via OpenRouter",   useIn: "openrouter:google/gemma-3-12b-it:free" },
     // Kimi K2
-    {
-      id: "kimi/kimi-k2-instruct",
-      name: "Kimi K2 Instruct",
-      provider: "kimi",
-      backend: "HuggingFace Router",
-      parameters: "1T MoE",
-      ready: isKimiConfigured(),
-      requiresKey: "HF_TOKEN",
-      description: "MoonshotAI Kimi K2 — 1 trillion parameter MoE via HuggingFace Router",
-      useIn: "model field as 'kimi/kimi-k2-instruct'",
-    },
-    {
-      id: "kimi/kimi-k2-0711-preview",
-      name: "Kimi K2 Preview",
-      provider: "kimi",
-      backend: "Moonshot API",
-      parameters: "1T MoE",
-      ready: !!process.env.MOONSHOT_API_KEY,
-      requiresKey: "MOONSHOT_API_KEY",
-      description: "MoonshotAI Kimi K2 Preview — official Moonshot API",
-      useIn: "model field as 'kimi/kimi-k2-0711-preview'",
-    },
+    { id: "kimi/kimi-k2-instruct",    name: "Kimi K2 Instruct", provider: "kimi",       backend: "HuggingFace Router",  parameters: "1T MoE", ready: isKimiConfigured(),        requiresKey: "HF_TOKEN",           description: "MoonshotAI Kimi K2 — 1T MoE via HuggingFace Router", useIn: "kimi/kimi-k2-instruct" },
+    { id: "kimi/kimi-k2-0711-preview",name: "Kimi K2 Preview",  provider: "kimi",       backend: "Moonshot API",        parameters: "1T MoE", ready: !!process.env.MOONSHOT_API_KEY, requiresKey: "MOONSHOT_API_KEY", description: "MoonshotAI Kimi K2 Preview — official Moonshot API",  useIn: "kimi/kimi-k2-0711-preview" },
     // HuggingFace
-    {
-      id: "hf/meta-llama/Llama-3.1-8B-Instruct",
-      name: "Llama 3.1 8B",
-      provider: "hf",
-      backend: "HuggingFace Inference",
-      parameters: "8B",
-      ready: isHFConfigured(),
-      requiresKey: "HF_TOKEN",
-      description: "Meta Llama 3.1 8B Instruct via HuggingFace Inference API",
-      useIn: "model field as 'hf/meta-llama/Llama-3.1-8B-Instruct'",
-    },
-    {
-      id: "hf/mistralai/Mistral-7B-Instruct-v0.3",
-      name: "Mistral 7B Instruct",
-      provider: "hf",
-      backend: "HuggingFace Inference",
-      parameters: "7B",
-      ready: isHFConfigured(),
-      requiresKey: "HF_TOKEN",
-      description: "Mistral 7B Instruct via HuggingFace",
-      useIn: "model field as 'hf/mistralai/Mistral-7B-Instruct-v0.3'",
-    },
-    {
-      id: "hf/Qwen/Qwen2.5-72B-Instruct",
-      name: "Qwen 2.5 72B",
-      provider: "hf",
-      backend: "HuggingFace Inference",
-      parameters: "72B",
-      ready: isHFConfigured(),
-      requiresKey: "HF_TOKEN",
-      description: "Qwen 2.5 72B Instruct via HuggingFace",
-      useIn: "model field as 'hf/Qwen/Qwen2.5-72B-Instruct'",
-    },
+    { id: "hf/meta-llama/Llama-3.1-8B-Instruct",  name: "Llama 3.1 8B",    provider: "hf", backend: "HuggingFace Inference", parameters: "8B",  ready: isHFConfigured(), requiresKey: "HF_TOKEN", description: "Meta Llama 3.1 8B Instruct via HuggingFace",  useIn: "hf/meta-llama/Llama-3.1-8B-Instruct" },
+    { id: "hf/mistralai/Mistral-7B-Instruct-v0.3",name: "Mistral 7B",       provider: "hf", backend: "HuggingFace Inference", parameters: "7B",  ready: isHFConfigured(), requiresKey: "HF_TOKEN", description: "Mistral 7B Instruct via HuggingFace",         useIn: "hf/mistralai/Mistral-7B-Instruct-v0.3" },
+    { id: "hf/Qwen/Qwen2.5-72B-Instruct",         name: "Qwen 2.5 72B",    provider: "hf", backend: "HuggingFace Inference", parameters: "72B", ready: isHFConfigured(), requiresKey: "HF_TOKEN", description: "Qwen 2.5 72B Instruct via HuggingFace",       useIn: "hf/Qwen/Qwen2.5-72B-Instruct" },
   ];
 
   res.json({
@@ -642,11 +761,11 @@ router.post("/ask", requireApiKey, rateLimit, async (req, res) => {
   if (extraContext) ragContext = extraContext + (ragContext ? "\n\n" + ragContext : "");
 
   try {
-    const answer = await generateUnified(question, resolvedModel, ragContext);
+    const { text: answer, provider, modelUsed } = await generateUnified(question, resolvedModel, ragContext);
     res.json({
       answer,
-      model: resolvedModel,
-      provider: detectProvider(resolvedModel),
+      model: modelUsed,
+      provider,
       ragUsed: !!ragContext,
       latencyMs: Date.now() - start,
     });
@@ -681,8 +800,8 @@ router.post("/batch", requireApiKey, rateLimit, async (req, res) => {
   const results = await Promise.allSettled(
     questions.map(async (q, i) => {
       const ragContext = useRAG ? await retrieveRAGContext(q) : undefined;
-      const answer = await generateUnified(q, resolvedModel, ragContext);
-      return { index: i, question: q, answer, model: resolvedModel, provider: detectProvider(resolvedModel) };
+      const { text: answer, provider, modelUsed } = await generateUnified(q, resolvedModel, ragContext);
+      return { index: i, question: q, answer, model: modelUsed, provider };
     })
   );
 
@@ -693,8 +812,6 @@ router.post("/batch", requireApiKey, rateLimit, async (req, res) => {
         : { index: i, question: questions[i], answer: null, error: r.reason?.message || "Failed" }
     ),
     count: questions.length,
-    model: resolvedModel,
-    provider: detectProvider(model),
     latencyMs: Date.now() - start,
   });
 });
@@ -832,6 +949,8 @@ router.post("/chat", requireApiKey, rateLimit, async (req, res) => {
   const start = Date.now();
   let convId = conversationId;
   let resolvedModel = model || req.apiKey?.defaultModel || "tinyllama";
+  // Key-level persona: key's systemPrompt overrides default, request body overrides both
+  const resolvedSystemPrompt = systemPrompt || req.apiKey?.systemPrompt || undefined;
 
   if (convId) {
     const [conv] = await db.select().from(conversationsTable).where(eq(conversationsTable.id, convId));
@@ -845,11 +964,23 @@ router.post("/chat", requireApiKey, rateLimit, async (req, res) => {
 
   await db.insert(messagesTable).values({ conversationId: convId, role: "user", content: message });
 
-  let ragContext = useRAG ? await retrieveRAGContext(message) : undefined;
-  const prompt = systemPrompt ? `${systemPrompt}\n\nUser: ${message}` : message;
+  // Load conversation history for multi-turn context (last 8 exchanges)
+  const history = await db
+    .select()
+    .from(messagesTable)
+    .where(eq(messagesTable.conversationId, convId!))
+    .orderBy(messagesTable.createdAt);
+  const conversationHistory = history
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-16)
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+  const ragContext = useRAG ? await retrieveRAGContext(message) : undefined;
 
   try {
-    const reply = await generateUnified(prompt, resolvedModel, ragContext, systemPrompt);
+    const { text: reply, provider, modelUsed } = await generateUnified(
+      message, resolvedModel, ragContext, resolvedSystemPrompt, conversationHistory
+    );
     const [aiMsg] = await db.insert(messagesTable).values({
       conversationId: convId,
       role: "assistant",
@@ -860,8 +991,8 @@ router.post("/chat", requireApiKey, rateLimit, async (req, res) => {
 
     res.json({
       reply,
-      model: resolvedModel,
-      provider: detectProvider(resolvedModel),
+      model: modelUsed,
+      provider,
       conversationId: convId,
       messageId: aiMsg.id,
       tokens: aiMsg.tokens,
@@ -936,9 +1067,10 @@ router.post("/chat/stream", requireApiKey, rateLimit, async (req: Request, res: 
   } as typeof res.end;
 
   res.setHeader("X-Conversation-Id", String(convId));
-  res.setHeader("X-Model-Provider", detectProvider(resolvedModel));
 
-  await streamUnified(message, resolvedModel, ragContext, res);
+  const { provider: streamProvider, modelUsed: streamModel } = await streamUnified(message, resolvedModel, ragContext, res);
+  res.setHeader("X-Model-Provider", streamProvider);
+  res.setHeader("X-Model-Used", streamModel);
 });
 
 // ─── POST /api/v1/rag/search — real pgvector + BM25 hybrid ────────────────────
@@ -1030,6 +1162,247 @@ router.post("/rag/search", requireApiKey, rateLimit, async (req, res) => {
   }
 });
 
+// ─── Session API (WhatsApp / bot clients) ────────────────────────────────────
+// Sessions map an external ID (phone number, user ID, etc.) to a DB conversation.
+// Title format: "session:<sessionId>" — looked up on every request.
+
+async function getOrCreateSession(
+  sessionId: string,
+  model: string
+): Promise<{ conversationId: number; isNew: boolean }> {
+  const title = `session:${sessionId}`;
+  const [existing] = await db
+    .select()
+    .from(conversationsTable)
+    .where(eq(conversationsTable.title, title))
+    .limit(1);
+
+  if (existing) return { conversationId: existing.id, isNew: false };
+
+  const [created] = await db
+    .insert(conversationsTable)
+    .values({ title, model })
+    .returning();
+  return { conversationId: created.id, isNew: true };
+}
+
+/**
+ * POST /api/v1/sessions/:sessionId/message
+ * Send a message in a named session — auto-creates if new.
+ * Perfect for WhatsApp bots: sessionId = phone number.
+ */
+router.post("/sessions/:sessionId/message", requireApiKey, rateLimit, async (req, res) => {
+  const sessionId = String(req.params.sessionId);
+  const { message, model, systemPrompt, useRAG = true } = req.body as {
+    message?: string;
+    model?: string;
+    systemPrompt?: string;
+    useRAG?: boolean;
+  };
+
+  if (!sessionId?.trim()) { res.status(400).json({ error: "sessionId is required" }); return; }
+  if (!message?.trim()) { res.status(400).json({ error: "message is required" }); return; }
+
+  const resolvedModel = model || req.apiKey?.defaultModel || "groq:llama-3.3-70b-versatile";
+  // Key-level persona overrides request-level systemPrompt if request doesn't supply one
+  const resolvedSystemPrompt = systemPrompt || req.apiKey?.systemPrompt || undefined;
+  const start = Date.now();
+
+  const { conversationId, isNew } = await getOrCreateSession(sessionId, resolvedModel);
+
+  await db.insert(messagesTable).values({ conversationId, role: "user", content: message });
+
+  // Load real conversation history (last 16 messages for multi-turn memory)
+  const historyRows = await db
+    .select()
+    .from(messagesTable)
+    .where(eq(messagesTable.conversationId, conversationId))
+    .orderBy(messagesTable.createdAt);
+  const conversationHistory = historyRows
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-16)
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+
+  const ragContext = useRAG ? await retrieveRAGContext(message) : undefined;
+
+  try {
+    const { text: reply, provider, modelUsed } = await generateUnified(
+      message, resolvedModel, ragContext, resolvedSystemPrompt, conversationHistory
+    );
+
+    const [aiMsg] = await db.insert(messagesTable).values({
+      conversationId,
+      role: "assistant",
+      content: reply,
+      tokens: Math.round(reply.length / 4),
+    }).returning();
+
+    await db
+      .update(conversationsTable)
+      .set({ updatedAt: new Date() })
+      .where(eq(conversationsTable.id, conversationId));
+
+    const responsePayload = {
+      reply,
+      sessionId,
+      conversationId,
+      messageId: aiMsg.id,
+      model: modelUsed,
+      provider,
+      isNewSession: isNew,
+      ragContext: !!ragContext,
+      historyLength: conversationHistory.length,
+      latencyMs: Date.now() - start,
+    };
+
+    // ── Async webhook dispatch — fire and forget ──────────────────────────────
+    const webhookUrl = req.apiKey?.webhookUrl;
+    if (webhookUrl) {
+      fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-DLavie-Event": "session.message.reply" },
+        body: JSON.stringify({ ...responsePayload, timestamp: new Date().toISOString() }),
+        signal: AbortSignal.timeout(15_000),
+      }).catch((e: unknown) => console.warn("[webhook] dispatch failed for", webhookUrl, String(e)));
+    }
+
+    res.json(responsePayload);
+  } catch (error) {
+    res.status(500).json({
+      error: "InferenceError",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+/**
+ * GET /api/v1/sessions/:sessionId
+ * Get session info and recent message count.
+ */
+router.get("/sessions/:sessionId", requireApiKey, rateLimit, async (req, res) => {
+  const sessionId = String(req.params.sessionId);
+  const title = `session:${sessionId}`;
+
+  const [conv] = await db
+    .select()
+    .from(conversationsTable)
+    .where(eq(conversationsTable.title, title))
+    .limit(1);
+
+  if (!conv) {
+    res.status(404).json({ error: "SessionNotFound", message: `No session for '${sessionId}'` });
+    return;
+  }
+
+  const [cnt] = await db.select({ c: count() }).from(messagesTable).where(eq(messagesTable.conversationId, conv.id));
+  const lastMsg = await db
+    .select()
+    .from(messagesTable)
+    .where(eq(messagesTable.conversationId, conv.id))
+    .orderBy(desc(messagesTable.createdAt))
+    .limit(1);
+
+  res.json({
+    sessionId,
+    conversationId: conv.id,
+    model: conv.model,
+    messageCount: cnt.c,
+    lastMessage: lastMsg[0]
+      ? { role: lastMsg[0].role, content: lastMsg[0].content.slice(0, 200), createdAt: lastMsg[0].createdAt }
+      : null,
+    createdAt: conv.createdAt,
+    updatedAt: conv.updatedAt,
+  });
+});
+
+/**
+ * GET /api/v1/sessions/:sessionId/history
+ * Get full conversation history for a session.
+ */
+router.get("/sessions/:sessionId/history", requireApiKey, rateLimit, async (req, res) => {
+  const sessionId = String(req.params.sessionId);
+  const limit = Math.min(parseInt(String(req.query.limit || "50"), 10), 200);
+  const title = `session:${sessionId}`;
+
+  const [conv] = await db
+    .select()
+    .from(conversationsTable)
+    .where(eq(conversationsTable.title, title))
+    .limit(1);
+
+  if (!conv) {
+    res.status(404).json({ error: "SessionNotFound", message: `No session for '${sessionId}'` });
+    return;
+  }
+
+  const messages = await db
+    .select()
+    .from(messagesTable)
+    .where(eq(messagesTable.conversationId, conv.id))
+    .orderBy(messagesTable.createdAt);
+
+  res.json({
+    sessionId,
+    conversationId: conv.id,
+    messages: messages.slice(-limit),
+    total: messages.length,
+  });
+});
+
+/**
+ * DELETE /api/v1/sessions/:sessionId
+ * Reset (delete) a session — clears all history.
+ */
+router.delete("/sessions/:sessionId", requireApiKey, rateLimit, async (req, res) => {
+  const sessionId = String(req.params.sessionId);
+  const title = `session:${sessionId}`;
+
+  const [conv] = await db
+    .select()
+    .from(conversationsTable)
+    .where(eq(conversationsTable.title, title))
+    .limit(1);
+
+  if (!conv) {
+    res.status(404).json({ error: "SessionNotFound", message: `No session for '${sessionId}'` });
+    return;
+  }
+
+  await db.delete(messagesTable).where(eq(messagesTable.conversationId, conv.id));
+  await db.delete(conversationsTable).where(eq(conversationsTable.id, conv.id));
+
+  res.json({ success: true, sessionId, deletedConversationId: conv.id });
+});
+
+/**
+ * GET /api/v1/sessions
+ * List all active sessions.
+ */
+router.get("/sessions", requireApiKey, rateLimit, async (_req, res) => {
+  const sessions = await db
+    .select()
+    .from(conversationsTable)
+    .orderBy(desc(conversationsTable.updatedAt));
+
+  const filtered = sessions.filter((s) => s.title.startsWith("session:"));
+
+  const withCounts = await Promise.all(
+    filtered.map(async (s) => {
+      const [cnt] = await db.select({ c: count() }).from(messagesTable).where(eq(messagesTable.conversationId, s.id));
+      return {
+        sessionId: s.title.replace(/^session:/, ""),
+        conversationId: s.id,
+        model: s.model,
+        messageCount: cnt.c,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      };
+    })
+  );
+
+  res.json({ sessions: withCounts, total: withCounts.length });
+});
+
 // ─── Conversation endpoints ───────────────────────────────────────────────────
 router.get("/conversations", requireApiKey, rateLimit, async (_req, res) => {
   const rows = await db.select().from(conversationsTable).orderBy(desc(conversationsTable.updatedAt));
@@ -1071,6 +1444,49 @@ router.delete("/conversations/:id", requireApiKey, rateLimit, async (req, res) =
   res.status(204).send();
 });
 
+// ─── POST /api/v1/benchmark ───────────────────────────────────────────────────
+// Test all active providers with the same prompt, return a comparison table.
+router.post("/benchmark", requireApiKey, rateLimit, async (req, res) => {
+  const { message = "Respond with exactly: BENCHMARK_OK", providers: reqProviders } = req.body as {
+    message?: string;
+    providers?: string[];
+  };
+
+  const activeProviders: Array<{ id: string; model: string; enabled: boolean }> = [
+    { id: "groq",        model: "groq:llama-3.1-8b-instant",   enabled: isGroqConfigured() },
+    { id: "openrouter",  model: "openrouter:microsoft/phi-4",   enabled: isOpenRouterConfigured() },
+    { id: "ollama",      model: "tinyllama",                    enabled: true },
+  ].filter((p) => {
+    if (reqProviders && reqProviders.length > 0) return reqProviders.includes(p.id);
+    return p.enabled;
+  });
+
+  const results = await Promise.allSettled(
+    activeProviders.map(async (p) => {
+      const t0 = Date.now();
+      try {
+        const { text, modelUsed } = await generateUnified(message, p.model, undefined, undefined, undefined);
+        return { provider: p.id, model: modelUsed, ok: true, latencyMs: Date.now() - t0, reply: text.slice(0, 200) };
+      } catch (e) {
+        return { provider: p.id, model: p.model, ok: false, latencyMs: Date.now() - t0, error: String(e) };
+      }
+    })
+  );
+
+  const rows = results.map((r) =>
+    r.status === "fulfilled" ? r.value : { provider: "?", model: "?", ok: false, latencyMs: 0, error: String(r.reason) }
+  );
+
+  rows.sort((a, b) => (a.ok && !b.ok ? -1 : !a.ok && b.ok ? 1 : (a as { latencyMs: number }).latencyMs - (b as { latencyMs: number }).latencyMs));
+
+  res.json({
+    prompt: message,
+    results: rows,
+    fastest: rows.find((r) => r.ok)?.provider ?? null,
+    testedAt: new Date().toISOString(),
+  });
+});
+
 // ─── GET /api/v1/stats ────────────────────────────────────────────────────────
 router.get("/stats", requireApiKey, rateLimit, async (_req, res) => {
   const { isOllamaOnline } = await import("../ollama");
@@ -1095,10 +1511,13 @@ router.get("/stats", requireApiKey, rateLimit, async (_req, res) => {
     ollamaModels: ollamaModels.length,
     installedModels: ollamaModels.map((m) => m.name),
     providers: {
-      ollama: { online: ollamaOnline, models: ollamaModels.length },
-      huggingface: { connected: isHFConfigured() },
-      kimi: { connected: isKimiConfigured() },
+      groq:        { connected: isGroqConfigured(),        priority: 1 },
+      openrouter:  { connected: isOpenRouterConfigured(),  priority: 2 },
+      huggingface: { connected: isHFConfigured(),          priority: 3 },
+      kimi:        { connected: isKimiConfigured(),        priority: 4 },
+      ollama:      { online: ollamaOnline, models: ollamaModels.length, priority: 5 },
     },
+    fallbackChain: ["groq", "openrouter", "hf", "ollama"],
     autoTraining: {
       running: at.running,
       cyclesCompleted: at.totalCyclesCompleted,

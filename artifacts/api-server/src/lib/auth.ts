@@ -20,6 +20,8 @@ declare global {
         name: string;
         permissions: "read" | "write" | "admin";
         defaultModel: string | null;
+        systemPrompt: string | null;
+        webhookUrl: string | null;
       };
     }
   }
@@ -43,10 +45,10 @@ export function extractRawKey(req: Request): string | null {
  */
 export async function resolveApiKey(
   rawKey: string
-): Promise<{ id: number | "master"; name: string; permissions: "read" | "write" | "admin"; defaultModel: string | null } | null> {
+): Promise<{ id: number | "master"; name: string; permissions: "read" | "write" | "admin"; defaultModel: string | null; systemPrompt: string | null; webhookUrl: string | null } | null> {
   // Master key bypass
   if (MASTER_KEY && rawKey === MASTER_KEY) {
-    return { id: "master", name: "Master Key", permissions: "admin", defaultModel: null };
+    return { id: "master", name: "Master Key", permissions: "admin", defaultModel: null, systemPrompt: null, webhookUrl: null };
   }
 
   if (!rawKey.startsWith("nxs_")) return null;
@@ -63,11 +65,15 @@ export async function resolveApiKey(
     // Check expiry
     if (found.expiresAt && new Date() > found.expiresAt) return null;
 
-    // Bump request count + lastUsedAt (fire and forget)
+    // Bump request count + lastUsedAt + daily token tracking (fire and forget)
+    const today = new Date().toISOString().slice(0, 10);
+    const isNewDay = found.dailyTokensDate !== today;
     db.update(apiKeysTable)
       .set({
         requestCount: found.requestCount + 1,
         lastUsedAt: new Date(),
+        dailyTokens: isNewDay ? 0 : found.dailyTokens,
+        dailyTokensDate: today,
         updatedAt: new Date(),
       })
       .where(eq(apiKeysTable.id, found.id))
@@ -78,10 +84,36 @@ export async function resolveApiKey(
       name: found.name,
       permissions: found.permissions as "read" | "write" | "admin",
       defaultModel: found.defaultModel,
+      systemPrompt: found.systemPrompt ?? null,
+      webhookUrl: found.webhookUrl ?? null,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Increment daily token count for an API key (fire and forget).
+ */
+export function trackTokens(keyId: number | "master", tokens: number): void {
+  if (keyId === "master") return;
+  const today = new Date().toISOString().slice(0, 10);
+  db.select()
+    .from(apiKeysTable)
+    .where(eq(apiKeysTable.id, keyId as number))
+    .limit(1)
+    .then(([k]) => {
+      if (!k) return;
+      const isNewDay = k.dailyTokensDate !== today;
+      return db.update(apiKeysTable)
+        .set({
+          dailyTokens: (isNewDay ? 0 : k.dailyTokens) + tokens,
+          dailyTokensDate: today,
+          updatedAt: new Date(),
+        })
+        .where(eq(apiKeysTable.id, keyId as number));
+    })
+    .catch(() => {});
 }
 
 /**
@@ -99,7 +131,7 @@ export function requireAuth(
     if (!rawKey) {
       // If neither master key nor DB keys are configured, open access for dev
       if (!MASTER_KEY) {
-        req.apiKey = { id: "master", name: "Open (no key set)", permissions: "admin", defaultModel: null };
+        req.apiKey = { id: "master", name: "Open (no key set)", permissions: "admin", defaultModel: null, systemPrompt: null, webhookUrl: null };
         return next();
       }
       res.status(401).json({

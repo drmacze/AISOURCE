@@ -39,6 +39,24 @@ const KIMI_MODELS = [
     description: "1T MoE · Official Moonshot API (needs MOONSHOT_API_KEY)" },
 ];
 
+// Groq LPU — fastest cloud inference — routed via /api/conversations/:id/messages/stream
+const GROQ_MODELS = [
+  { name: "groq:llama-3.3-70b-versatile", label: "Llama 3.3 70B",      provider: "groq" as const, description: "70B · Groq LPU · Fastest" },
+  { name: "groq:llama-3.1-70b-versatile", label: "Llama 3.1 70B",      provider: "groq" as const, description: "70B · Groq LPU" },
+  { name: "groq:llama-3.1-8b-instant",   label: "Llama 3.1 8B",       provider: "groq" as const, description: "8B · Ultra-low latency" },
+  { name: "groq:gemma2-9b-it",           label: "Gemma 2 9B",          provider: "groq" as const, description: "9B · Google · Groq LPU" },
+  { name: "groq:mixtral-8x7b-32768",     label: "Mixtral 8x7B",        provider: "groq" as const, description: "MoE 8x7B · 32K ctx" },
+];
+
+// OpenRouter — free-tier cloud models
+const OPENROUTER_MODELS = [
+  { name: "openrouter:microsoft/phi-4",                        label: "Phi-4",          provider: "openrouter" as const, description: "14B · Microsoft · Free" },
+  { name: "openrouter:qwen/qwen3-14b:free",                    label: "Qwen3 14B",      provider: "openrouter" as const, description: "14B · Alibaba · Free" },
+  { name: "openrouter:deepseek/deepseek-r1:free",              label: "DeepSeek R1",    provider: "openrouter" as const, description: "671B · Reasoning · Free" },
+  { name: "openrouter:meta-llama/llama-3.2-3b-instruct:free",  label: "Llama 3.2 3B",  provider: "openrouter" as const, description: "3B · Meta · Free" },
+  { name: "openrouter:google/gemma-3-12b-it:free",             label: "Gemma 3 12B",   provider: "openrouter" as const, description: "12B · Google · Free" },
+];
+
 interface OllamaModel {
   name: string;
   size: number;
@@ -179,7 +197,9 @@ export default function Chat() {
     const local = (ollamaModels || []).map((m) => ({ ...m, provider: "local" as const }));
     const cloud = PUTER_MODELS.map((m) => ({ ...m, provider: "cloud" as const }));
     const kimi  = KIMI_MODELS.map((m) => ({ ...m, size: 0, parameterSize: "1T", modified: "" }));
-    return [...local, ...cloud, ...kimi];
+    const groq  = GROQ_MODELS.map((m) => ({ ...m, size: 0, parameterSize: "", modified: "", quantization: "", family: "" }));
+    const or    = OPENROUTER_MODELS.map((m) => ({ ...m, size: 0, parameterSize: "", modified: "", quantization: "", family: "" }));
+    return [...local, ...groq, ...or, ...kimi, ...cloud];
   }, [ollamaModels]);
 
   // Sync model state when conversation loads or model list changes
@@ -786,6 +806,62 @@ export default function Chat() {
                               })}
                             </div>
                           )}
+                          {/* Groq Models */}
+                          <div>
+                            <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest border-t border-border mt-1 pt-2">
+                              ⚡ Groq LPU · Fastest
+                            </div>
+                            {GROQ_MODELS.map((m) => {
+                              const isActive = m.name === activeModel;
+                              return (
+                                <button
+                                  key={m.name}
+                                  onClick={() => handleSwitchModel(m.name)}
+                                  className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-accent/50 transition-colors ${
+                                    isActive ? "bg-accent text-primary" : "text-foreground"
+                                  }`}
+                                >
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium font-mono">{m.label}</span>
+                                    <span className="text-xs text-muted-foreground mt-0.5">{m.description}</span>
+                                  </div>
+                                  <div className="flex flex-col items-end ml-2 shrink-0">
+                                    <span className="text-[10px] text-orange-400 font-mono border border-orange-500/30 bg-orange-500/10 px-1.5 py-0.5 rounded-full">LPU</span>
+                                    {isActive && <span className="text-[10px] text-primary font-mono mt-0.5">ACTIVE</span>}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* OpenRouter Models */}
+                          <div>
+                            <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest border-t border-border mt-1 pt-2">
+                              🌐 OpenRouter · Free
+                            </div>
+                            {OPENROUTER_MODELS.map((m) => {
+                              const isActive = m.name === activeModel;
+                              return (
+                                <button
+                                  key={m.name}
+                                  onClick={() => handleSwitchModel(m.name)}
+                                  className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-accent/50 transition-colors ${
+                                    isActive ? "bg-accent text-primary" : "text-foreground"
+                                  }`}
+                                >
+                                  <div className="flex flex-col">
+                                    <span className="text-sm font-medium font-mono">{m.label}</span>
+                                    <span className="text-xs text-muted-foreground mt-0.5">{m.description}</span>
+                                  </div>
+                                  <div className="flex flex-col items-end ml-2 shrink-0">
+                                    <span className="text-[10px] text-blue-400 font-mono border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 rounded-full">FREE</span>
+                                    {isActive && <span className="text-[10px] text-primary font-mono mt-0.5">ACTIVE</span>}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+
                           {/* Kimi K2 Models */}
                           <div>
                             <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest border-t border-border mt-1 pt-2">
@@ -819,7 +895,7 @@ export default function Chat() {
                           {/* Cloud Puter Models */}
                           <div>
                             <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest border-t border-border mt-1 pt-2">
-                              Cloud · Puter.js
+                              ☁ Premium · Puter.js
                             </div>
                             {PUTER_MODELS.map((m) => {
                               const isActive = m.name === activeModel;
@@ -853,7 +929,7 @@ export default function Chat() {
                       )}
                       <div className="px-3 py-2 border-t border-border">
                         <p className="text-[10px] text-muted-foreground font-mono">
-                          🌙 Kimi K2 via HF Router · ☁ Cloud via Puter.js · ⚡ Local via Ollama
+                          ⚡ Groq LPU · 🌐 OpenRouter Free · 🌙 Kimi K2 · ☁ Puter · 💻 Ollama Local
                         </p>
                       </div>
                     </motion.div>
@@ -1022,11 +1098,15 @@ export default function Chat() {
                   {isStreaming
                     ? "Generating response — click ■ to stop"
                     : `${activeModel ? `${activeModel} ·` : ""} Enter to send · ${
-                        activeModel.startsWith("kimi/")
-                          ? "🌙 Kimi K2 via HuggingFace Router"
+                        activeModel.startsWith("groq:")
+                          ? "⚡ Groq LPU"
+                          : activeModel.startsWith("openrouter:")
+                          ? "🌐 OpenRouter Free"
+                          : activeModel.startsWith("kimi/")
+                          ? "🌙 Kimi K2 · MoonshotAI"
                           : activeModel.startsWith("puter/")
                           ? "☁ Cloud AI via Puter.js"
-                          : "⚡ Local AI via Ollama"
+                          : "💻 Local AI via Ollama"
                       }`}
                 </span>
               </div>
