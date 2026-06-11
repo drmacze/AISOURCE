@@ -565,15 +565,20 @@ router.get("/health", async (_req, res) => {
     orOk   ? "OpenRouter (cloud)" :
     ollamaOnline ? "Ollama (local)" :
     isHFConfigured() ? "HuggingFace (cloud)" : "unavailable";
+  const hfOk = isHFConfigured();
   res.json({
     status: "online",
     version: "1.0.0",
     system: "DLavie OS",
     engine: primaryEngine,
+    // Top-level booleans read directly by the frontend Models page
+    ollama: ollamaOnline,
+    huggingface: hfOk,
+    ollamaHost: process.env.OLLAMA_HOST || "127.0.0.1:11434",
     providers: {
       groq:         { connected: groqOk,      priority: 1, type: "cloud-fast" },
       openrouter:   { connected: orOk,        priority: 2, type: "cloud-free" },
-      huggingface:  { connected: isHFConfigured(), priority: 3, type: "cloud-gpu" },
+      huggingface:  { connected: hfOk,        priority: 3, type: "cloud-gpu" },
       kimi:         { connected: isKimiConfigured(), priority: 4, type: "cloud" },
       ollama:       { connected: ollamaOnline, priority: 5, type: "local" },
     },
