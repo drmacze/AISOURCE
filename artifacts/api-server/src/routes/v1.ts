@@ -151,19 +151,27 @@ async function generateUnified(
     ? `Context from knowledge base:\n${ragContext}\n\nUser: ${message}`
     : message;
 
-  // ── Explicit provider selection ──────────────────────────────────────────────
+  // ── Explicit provider selection — wrap each in try/catch to allow fallback ───
   if (provider === "groq") {
-    const groqModel = model.slice(5); // strip "groq:"
-    const msgs = buildMessages<GroqMessage>(userContent);
-    const text = await generateGroqResponse(msgs, groqModel);
-    return { text, provider: "groq", modelUsed: groqModel };
+    try {
+      const groqModel = model.slice(5); // strip "groq:"
+      const msgs = buildMessages<GroqMessage>(userContent);
+      const text = await generateGroqResponse(msgs, groqModel);
+      return { text, provider: "groq", modelUsed: groqModel };
+    } catch (e) {
+      console.warn("[v1] Groq explicit failed, falling back to chain:", String(e).slice(0, 120));
+    }
   }
 
   if (provider === "openrouter") {
-    const orModel = model.slice(11); // strip "openrouter:"
-    const msgs = buildMessages<OpenRouterMessage>(userContent);
-    const text = await generateOpenRouterResponse(msgs, orModel);
-    return { text, provider: "openrouter", modelUsed: orModel };
+    try {
+      const orModel = model.slice(11); // strip "openrouter:"
+      const msgs = buildMessages<OpenRouterMessage>(userContent);
+      const text = await generateOpenRouterResponse(msgs, orModel);
+      return { text, provider: "openrouter", modelUsed: orModel };
+    } catch (e) {
+      console.warn("[v1] OpenRouter explicit failed, falling back to chain:", String(e).slice(0, 120));
+    }
   }
 
   if (provider === "kimi") {

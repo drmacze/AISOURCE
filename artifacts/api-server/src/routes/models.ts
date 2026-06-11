@@ -366,6 +366,35 @@ router.get("/ollama-models", async (_req, res) => {
   }
 });
 
+/** GET /api/ollama/models — Alias: same as /api/ollama-models */
+router.get("/ollama/models", async (_req, res) => {
+  try {
+    const models = await listOllamaModels();
+    res.json({ models: models.map((m) => ({ ...m, sizeMB: Math.round(m.size / (1024 * 1024)) })) });
+  } catch (err) {
+    res.status(500).json(errorBody(err));
+  }
+});
+
+/** GET /api/ollama/status — Ollama health + installed models summary */
+router.get("/ollama/status", async (_req, res) => {
+  try {
+    const models = await listOllamaModels();
+    res.json({
+      online: true,
+      modelCount: models.length,
+      models: models.map((m) => ({ name: m.name, sizeMB: Math.round(m.size / (1024 * 1024)) })),
+    });
+  } catch (err) {
+    res.json({ online: false, modelCount: 0, models: [], error: String(err) });
+  }
+});
+
+/** GET /api/admin/api-keys — Admin alias for /api/keys */
+router.get("/admin/api-keys", async (req, res) => {
+  res.redirect(307, "/api/keys");
+});
+
 /** GET /api/models/catalogue — Return curated model catalogue grouped by category */
 router.get("/models/catalogue", async (_req, res) => {
   try {

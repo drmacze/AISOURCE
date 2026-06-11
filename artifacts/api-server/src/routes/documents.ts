@@ -450,11 +450,15 @@ router.post("/documents/search", async (req: Request, res: Response) => {
   // BM25 fallback or keyword mode
   if (results.length === 0 || searchType === "keyword") {
     if (searchType === "keyword") {
-      const q = query.toLowerCase();
+      const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
       const kwResults = docs.map((doc) => {
         const text = `${doc.title} ${doc.content || ""}`.toLowerCase();
-        const count = (text.match(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
-        return { doc, score: Math.min(count * 0.2, 1), searchMethod: "keyword" };
+        let count = 0;
+        for (const w of words) {
+          const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          count += (text.match(new RegExp(escaped, "g")) || []).length;
+        }
+        return { doc, score: Math.min(count * 0.15, 1), searchMethod: "keyword" };
       }).filter((s) => s.score > 0).sort((a, b) => b.score - a.score).slice(0, topK);
       results = kwResults;
     } else {

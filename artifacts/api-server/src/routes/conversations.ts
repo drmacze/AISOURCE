@@ -55,9 +55,35 @@ async function generateToText(
     { role: "system" as const, content: "You are NEXUS_OS, a helpful AI assistant." },
     { role: "user" as const, content: ctx },
   ];
-  if (provider === "groq" && isGroqConfigured())           return generateGroqResponse(msgs, model);
-  if (provider === "openrouter" && isOpenRouterConfigured()) return generateOpenRouterResponse(msgs, model);
-  return generateOllamaResponse(message, model, ragContext);
+
+  // Try explicit provider first
+  try {
+    if (provider === "groq" && isGroqConfigured())
+      return await generateGroqResponse(msgs, model.replace(/^groq:/i, ""));
+    if (provider === "openrouter" && isOpenRouterConfigured())
+      return await generateOpenRouterResponse(msgs, model.replace(/^openrouter:/i, ""));
+  } catch (e) {
+    console.warn(`[conversations] ${provider} failed, trying provider chain:`, String(e).slice(0, 100));
+  }
+
+  // Try Ollama
+  try {
+    return await generateOllamaResponse(message, model, ragContext);
+  } catch (ollamaErr) {
+    const errMsg = ollamaErr instanceof Error ? ollamaErr.message : String(ollamaErr);
+    // If Ollama fails (no models, not running), fall back to provider chain
+    if (errMsg.includes("NO_MODELS") || errMsg.includes("ECONNREFUSED") || errMsg.includes("OFFLINE")) {
+      console.warn("[conversations] Ollama unavailable, trying provider chain");
+      try {
+        const { generateWithFallback } = await import("../lib/provider-chain");
+        const result = await generateWithFallback(message, ragContext, "You are NEXUS_OS, a helpful AI assistant.");
+        return result.text;
+      } catch (chainErr) {
+        console.warn("[conversations] Provider chain also failed:", String(chainErr).slice(0, 100));
+      }
+    }
+    throw ollamaErr;
+  }
 }
 
 const router: IRouter = Router();
