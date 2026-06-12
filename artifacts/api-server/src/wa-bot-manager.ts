@@ -246,12 +246,13 @@ function extractText(msg: { message?: Record<string, unknown> | null }): string 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
 class WaBotManager {
-  private sock:         WASocket | null = null;
-  private config:       WaBotConfig     = loadConfig();
-  private status:       WaBotStatus     = { connected: false, pairingStep: "idle", messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
-  private logs:         WaBotLog[]      = [];
-  private startTime:    number | null   = null;
-  private reconnecting: boolean         = false;
+  private sock:             WASocket | null = null;
+  private config:           WaBotConfig     = loadConfig();
+  private status:           WaBotStatus     = { connected: false, pairingStep: "idle", messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
+  private logs:             WaBotLog[]      = [];
+  private startTime:        number | null   = null;
+  private reconnecting:     boolean         = false;
+  private wasEverConnected: boolean         = false;
 
   // ── Public getters ────────────────────────────────────────────────────────
 
@@ -316,7 +317,8 @@ class WaBotManager {
       try { this.sock.end(new Error("reconnect")); } catch { /* ignore */ }
       this.sock = null;
     }
-    this.reconnecting = false;
+    this.reconnecting     = false;
+    this.wasEverConnected = false;
 
     const cleaned = phoneNumber.replace(/[^0-9]/g, "");
     this.config.phoneNumber = cleaned;
@@ -403,6 +405,7 @@ class WaBotManager {
 
         if (connection === "open") {
           this.startTime = Date.now();
+          this.wasEverConnected = true;
           this.status = {
             connected:    true,
             pairingStep:  "connected",
@@ -432,18 +435,27 @@ class WaBotManager {
           const code      = (lastDisconnect?.error as Boom)?.output?.statusCode;
           const loggedOut = code === DisconnectReason.loggedOut;
 
-          this.status.connected   = false;
-          this.status.pairingStep = loggedOut ? "error" : "idle";
-          this.status.error       = loggedOut ? "Logged out — silakan hubungkan ulang" : undefined;
+          this.status.connected = false;
+          console.log(`[WaBot] Disconnected (code=${code}, wasConnected=${this.wasEverConnected})`);
 
-          console.log(`[WaBot] Disconnected (${code}), retry=${!loggedOut}`);
-
-          if (!loggedOut && !this.reconnecting) {
+          if (loggedOut) {
+            // Explicit logout — stop everything, let user reconnect manually
+            this.status.pairingStep = "error";
+            this.status.error       = "Logged out — silakan hubungkan ulang";
+          } else if (this.wasEverConnected && !this.reconnecting) {
+            // Was fully connected before — safe to auto-reconnect without disturbing user
+            this.status.pairingStep = "idle";
             this.reconnecting = true;
             setTimeout(async () => {
               this.reconnecting = false;
               try { await this.connect(cleaned); } catch { /* ignore */ }
             }, 5000);
+          } else {
+            // Never reached "open" — still in pairing phase; keep the pairing code
+            // visible and let the user retry manually (don't auto-reconnect and
+            // regenerate the code under their feet)
+            this.status.pairingStep = "error";
+            this.status.error       = "Koneksi terputus — tekan Hubungkan lagi";
           }
         }
       } catch (e) { console.error("[WaBot] connection.update error:", e); }
@@ -507,7 +519,8 @@ class WaBotManager {
   // ── Disconnect ────────────────────────────────────────────────────────────
 
   async disconnect(): Promise<void> {
-    this.reconnecting = true;
+    this.reconnecting     = true;
+    this.wasEverConnected = false;
     if (this.sock) {
       try { this.sock.end(new Error("user_disconnect")); } catch { /* ignore */ }
       this.sock = null;
