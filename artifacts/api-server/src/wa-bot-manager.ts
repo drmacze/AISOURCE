@@ -1,12 +1,11 @@
 /**
  * DLavie OS — WhatsApp Bot Manager (Baileys)
  * Pairing code auth — no QR needed.
- * v1.0: AI chat responses only.
  *
- * LID/JID safety:
- *  - Filters @lid, broadcast, status, newsletter JIDs
- *  - Normalises sender JID before every operation
- *  - Wraps every event handler in try/catch so one bad message never crashes the socket
+ * Features:
+ *  - AI replies with "Powered by DLavie OS" footer
+ *  - Auto-generated AI thumbnail (FLUX via HuggingFace) set as profile pic
+ *  - LID/JID safety (filters @lid, broadcast, status, newsletter)
  */
 
 import makeWASocket, {
@@ -24,25 +23,77 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { join } from "path";
-import { mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from "fs";
+import {
+  mkdirSync, existsSync, readFileSync, writeFileSync,
+  rmSync, unlinkSync,
+} from "fs";
 import { generateWithFallback } from "./lib/provider-chain.js";
 import pino from "pino";
 
-// ─── Paths ───────────────────────────────────────────────────────────────────
+// ─── Paths ────────────────────────────────────────────────────────────────────
 
-const BASE = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
-const SESSION_DIR = join(BASE, ".dlavie-wa-sessions");
+const BASE        = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
+const SESSION_DIR  = join(BASE, ".dlavie-wa-sessions");
 const CONFIG_PATH  = join(BASE, ".dlavie-wa-config.json");
+const THUMB_PATH   = join(BASE, ".dlavie-wa-thumb.jpg");
 
 if (!existsSync(SESSION_DIR)) mkdirSync(SESSION_DIR, { recursive: true });
 
-// Silent logger so Baileys internals don't spam the console
 const logger = pino({ level: "silent" });
+
+// ─── HuggingFace image generation ────────────────────────────────────────────
+
+const HF_IMAGE_MODEL = "black-forest-labs/FLUX.1-schnell";
+const HF_API_BASE    = "https://api-inference.huggingface.co";
+
+async function generateThumbnailImage(seed: number): Promise<Buffer> {
+  const token = process.env.HF_TOKEN || "";
+  if (!token.startsWith("hf_")) throw new Error("HF_TOKEN not configured");
+
+  // Unique elegant AI-tech prompt — no cyberpunk, no gaming
+  const prompt = [
+    "Professional AI software company logo, circular emblem design,",
+    "deep slate blue background, subtle hexagonal grid pattern,",
+    "bold clean typography 'DLavie OS' centered in white,",
+    "small tagline 'AI ENGINE' below in light gray,",
+    "electric green (#00ff88) thin accent ring border,",
+    "minimalist corporate tech aesthetic, flat vector style,",
+    "no gradients except background, elegant clean professional,",
+    `seed ${seed}, high quality 512x512`,
+  ].join(" ");
+
+  const res = await fetch(`${HF_API_BASE}/models/${HF_IMAGE_MODEL}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-Wait-For-Model": "true",
+    },
+    body: JSON.stringify({
+      inputs: prompt,
+      parameters: {
+        seed,
+        num_inference_steps: 4,
+        width: 512,
+        height: 512,
+      },
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`HF image API error ${res.status}: ${msg}`);
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  return buf;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type DeviceType = "personal" | "business" | "mac" | "windows";
-export type BotStyle   = "formal" | "santai" | "custom";
+export type DeviceType  = "personal" | "business" | "mac" | "windows";
+export type BotStyle    = "formal" | "santai" | "custom";
 export type PairingStep = "idle" | "waiting_code" | "waiting_scan" | "connected" | "error";
 
 export interface WaBotConfig {
@@ -54,22 +105,24 @@ export interface WaBotConfig {
   customPrompt:   string;
   activeModel:    string;
   autoReply:      boolean;
-  replyInGroup:   boolean;   // whether to reply in group chats too
+  replyInGroup:   boolean;
   welcomeMessage: string;
   phoneNumber:    string;
   deviceType:     DeviceType;
+  thumbnailSeed:  number;        // unique seed per "user" — changes on regenerate
 }
 
 export interface WaBotStatus {
-  connected:    boolean;
-  phoneNumber?: string;
-  botName?:     string;
-  deviceType?:  DeviceType;
-  pairingCode?: string;
-  pairingStep?: PairingStep;
-  error?:       string;
-  messageCount: number;
-  uptime?:      number;
+  connected:     boolean;
+  phoneNumber?:  string;
+  botName?:      string;
+  deviceType?:   DeviceType;
+  pairingCode?:  string;
+  pairingStep?:  PairingStep;
+  error?:        string;
+  messageCount:  number;
+  uptime?:       number;
+  hasThumb:      boolean;
 }
 
 export interface WaBotLog {
@@ -82,7 +135,7 @@ export interface WaBotLog {
   model:   string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Defaults & helpers ───────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: WaBotConfig = {
   botName:        "DLavie Bot",
@@ -97,6 +150,7 @@ const DEFAULT_CONFIG: WaBotConfig = {
   welcomeMessage: "Halo! Saya DLavie Bot, asisten AI Anda. Ketik apa saja untuk mulai.",
   phoneNumber:    "",
   deviceType:     "personal",
+  thumbnailSeed:  Math.floor(Math.random() * 999999),
 };
 
 function loadConfig(): WaBotConfig {
@@ -111,43 +165,43 @@ function saveConfig(cfg: WaBotConfig): void {
   try { writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2)); } catch { /* ignore */ }
 }
 
-/** Returns the Baileys browser tuple for the selected device type */
 function getBrowser(type: DeviceType): [string, string, string] {
   switch (type) {
-    case "business":  return Browsers.appropriate("Chrome");  // WA Business fingerprint
-    case "mac":       return Browsers.macOS("Desktop");
-    case "windows":   return Browsers.windows();
-    case "personal":
-    default:          return ["DLavie OS", "Chrome", "131.0.0"];
+    case "business": return Browsers.appropriate("Chrome");
+    case "mac":      return Browsers.macOS("Desktop");
+    case "windows":  return Browsers.windows();
+    default:         return ["DLavie OS", "Chrome", "131.0.0"];
   }
 }
 
-/** Build the AI system prompt from config */
 function buildSystemPrompt(cfg: WaBotConfig): string {
   if (cfg.style === "custom" && cfg.customPrompt) return cfg.customPrompt;
   const base = `Kamu adalah ${cfg.botName}, asisten AI milik ${cfg.ownerName}.`;
   if (cfg.style === "formal")
-    return `${base} Gunakan bahasa yang formal, sopan, dan profesional. Jawab pertanyaan dengan lengkap dan akurat.`;
-  return `${base} Gunakan bahasa santai dan ramah seperti teman ngobrol. Jawab dengan singkat tapi informatif.`;
+    return `${base} Gunakan bahasa yang formal, sopan, dan profesional. Jawab dengan lengkap dan akurat.`;
+  return `${base} Gunakan bahasa santai dan ramah seperti teman ngobrol. Jawab singkat tapi informatif.`;
 }
 
 /**
- * Returns true if the JID should be completely ignored.
- * Covers: broadcast lists, status updates, newsletters, and @lid phantom accounts.
+ * Footer appended to every bot reply.
+ * Uses WhatsApp italic + bold formatting.
  */
+function buildFooter(cfg: WaBotConfig): string {
+  return `\n\n_${cfg.botName}_ · _Powered by *DLavie OS*_`;
+}
+
 function shouldIgnoreJid(jid: string | null | undefined): boolean {
   if (!jid) return true;
-  if (jid.endsWith("@lid"))          return true;   // LID — linked-device proxy, not a real chat
-  if (isJidBroadcast(jid))          return true;
-  if (isJidStatusBroadcast(jid))    return true;
-  if (isJidNewsletter(jid))         return true;
+  if (jid.endsWith("@lid"))     return true;
+  if (isJidBroadcast(jid))     return true;
+  if (isJidStatusBroadcast(jid)) return true;
+  if (isJidNewsletter(jid))    return true;
   return false;
 }
 
-/** Extract the plain text from any WhatsApp message type */
 function extractText(msg: { message?: Record<string, unknown> | null }): string {
   if (!msg.message) return "";
-  const m = msg.message as Record<string, { text?: string; caption?: string } | string | undefined>;
+  const m = msg.message as Record<string, { text?: string; caption?: string; selectedDisplayText?: string; title?: string } | string | undefined>;
   return (
     (typeof m["conversation"] === "string" ? m["conversation"] : "") ||
     (m["extendedTextMessage"] as { text?: string } | undefined)?.text ||
@@ -165,7 +219,7 @@ function extractText(msg: { message?: Record<string, unknown> | null }): string 
 class WaBotManager {
   private sock:         WASocket | null = null;
   private config:       WaBotConfig     = loadConfig();
-  private status:       WaBotStatus     = { connected: false, pairingStep: "idle", messageCount: 0 };
+  private status:       WaBotStatus     = { connected: false, pairingStep: "idle", messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
   private logs:         WaBotLog[]      = [];
   private startTime:    number | null   = null;
   private reconnecting: boolean         = false;
@@ -177,6 +231,7 @@ class WaBotManager {
   getStatus(): WaBotStatus {
     return {
       ...this.status,
+      hasThumb: existsSync(THUMB_PATH),
       uptime: this.startTime ? Math.floor((Date.now() - this.startTime) / 1000) : undefined,
     };
   }
@@ -184,6 +239,37 @@ class WaBotManager {
   setConfig(partial: Partial<WaBotConfig>) {
     this.config = { ...this.config, ...partial };
     saveConfig(this.config);
+  }
+
+  // ── Thumbnail ─────────────────────────────────────────────────────────────
+
+  getThumbnailBase64(): string | null {
+    try {
+      if (!existsSync(THUMB_PATH)) return null;
+      const buf = readFileSync(THUMB_PATH);
+      return `data:image/jpeg;base64,${buf.toString("base64")}`;
+    } catch { return null; }
+  }
+
+  async generateThumbnail(newSeed?: boolean): Promise<string> {
+    if (newSeed) {
+      this.config.thumbnailSeed = Math.floor(Math.random() * 999999);
+      saveConfig(this.config);
+    }
+    console.log(`[WaBot] Generating thumbnail (seed=${this.config.thumbnailSeed})…`);
+    const buf = await generateThumbnailImage(this.config.thumbnailSeed);
+    writeFileSync(THUMB_PATH, buf);
+    console.log(`[WaBot] Thumbnail saved (${buf.length} bytes)`);
+    return `data:image/jpeg;base64,${buf.toString("base64")}`;
+  }
+
+  async applyProfilePic(): Promise<void> {
+    if (!this.sock || !this.status.connected) throw new Error("Bot belum terhubung");
+    if (!existsSync(THUMB_PATH)) throw new Error("Thumbnail belum di-generate");
+    const buf = readFileSync(THUMB_PATH);
+    const jid = (this.sock.user?.id ?? "").replace(/:.*@/, "@");
+    await this.sock.updateProfilePicture(jid, buf);
+    console.log(`[WaBot] Profile picture updated for ${jid}`);
   }
 
   // ── Session management ────────────────────────────────────────────────────
@@ -196,7 +282,6 @@ class WaBotManager {
   // ── Connect ───────────────────────────────────────────────────────────────
 
   async connect(phoneNumber: string): Promise<string> {
-    // Tear down any existing socket cleanly
     if (this.sock) {
       try { this.sock.end(new Error("reconnect")); } catch { /* ignore */ }
       this.sock = null;
@@ -206,9 +291,7 @@ class WaBotManager {
     this.config.phoneNumber = cleaned;
     saveConfig(this.config);
 
-    this.status = { connected: false, pairingStep: "waiting_code", messageCount: 0, phoneNumber: cleaned };
-
-    // ── Build socket ──────────────────────────────────────────────────────
+    this.status = { connected: false, pairingStep: "waiting_code", messageCount: 0, phoneNumber: cleaned, hasThumb: existsSync(THUMB_PATH) };
 
     const { version }          = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -224,34 +307,29 @@ class WaBotManager {
       printQRInTerminal:             false,
       syncFullHistory:               false,
       generateHighQualityLinkPreview: false,
-      // Provide a getMessage fallback so Baileys doesn't crash on retry
-      getMessage: async () => undefined,
+      getMessage:                    async () => undefined,
     });
 
     this.sock = sock;
     sock.ev.on("creds.update", saveCreds);
 
-    // ── Request pairing code (only on fresh session) ──────────────────────
+    // ── Pairing code ──────────────────────────────────────────────────────
 
     let pairingCode = "";
     if (!state.creds.registered) {
-      // Small delay so the socket handshake can settle
       await new Promise((r) => setTimeout(r, 3000));
       try {
         pairingCode = await sock.requestPairingCode(cleaned);
-        // Format as "XXXX-XXXX" if not already
-        if (pairingCode && !pairingCode.includes("-") && pairingCode.length === 8) {
+        if (pairingCode && !pairingCode.includes("-") && pairingCode.length === 8)
           pairingCode = `${pairingCode.slice(0, 4)}-${pairingCode.slice(4)}`;
-        }
-        this.status.pairingCode  = pairingCode;
-        this.status.pairingStep  = "waiting_scan";
-        console.log(`[WaBot] Pairing code issued for ${cleaned}`);
+        this.status.pairingCode = pairingCode;
+        this.status.pairingStep = "waiting_scan";
+        console.log(`[WaBot] Pairing code issued: ${pairingCode}`);
       } catch (e) {
-        this.status = { connected: false, pairingStep: "error", error: String(e), messageCount: 0 };
+        this.status = { connected: false, pairingStep: "error", error: String(e), messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
         throw e;
       }
     } else {
-      // Already registered — just wait for the connection to open
       this.status.pairingStep = "waiting_scan";
     }
 
@@ -270,22 +348,35 @@ class WaBotManager {
             botName:      this.config.botName,
             deviceType:   this.config.deviceType,
             messageCount: this.status.messageCount,
+            hasThumb:     existsSync(THUMB_PATH),
           };
           console.log(`[WaBot] ✅ Connected — ${cleaned} (${this.config.deviceType})`);
+
+          // Auto-apply profile pic if we have one, else generate first
+          setTimeout(async () => {
+            try {
+              if (!existsSync(THUMB_PATH)) {
+                console.log("[WaBot] No thumbnail found — generating one…");
+                await this.generateThumbnail(false);
+              }
+              await this.applyProfilePic();
+            } catch (e) {
+              console.warn("[WaBot] Could not apply profile pic:", e);
+            }
+          }, 4000);
         }
 
         if (connection === "close") {
-          const statusCode   = (lastDisconnect?.error as Boom)?.output?.statusCode;
-          const loggedOut    = statusCode === DisconnectReason.loggedOut;
-          const shouldRetry  = !loggedOut;
+          const code      = (lastDisconnect?.error as Boom)?.output?.statusCode;
+          const loggedOut = code === DisconnectReason.loggedOut;
 
           this.status.connected   = false;
           this.status.pairingStep = loggedOut ? "error" : "idle";
-          this.status.error       = loggedOut ? "Logged out — please reconnect" : undefined;
+          this.status.error       = loggedOut ? "Logged out — silakan hubungkan ulang" : undefined;
 
-          console.log(`[WaBot] Disconnected (${statusCode}), retry=${shouldRetry}`);
+          console.log(`[WaBot] Disconnected (${code}), retry=${!loggedOut}`);
 
-          if (shouldRetry && !this.reconnecting) {
+          if (!loggedOut && !this.reconnecting) {
             this.reconnecting = true;
             setTimeout(async () => {
               this.reconnecting = false;
@@ -293,9 +384,7 @@ class WaBotManager {
             }, 5000);
           }
         }
-      } catch (e) {
-        console.error("[WaBot] connection.update error:", e);
-      }
+      } catch (e) { console.error("[WaBot] connection.update error:", e); }
     });
 
     // ── Message handler ───────────────────────────────────────────────────
@@ -305,78 +394,47 @@ class WaBotManager {
 
       for (const msg of messages) {
         try {
-          // ── Guard: skip invalid / unwanted messages ──────────────────
-
-          if (!msg.message)    continue;  // no content
-          if (msg.key.fromMe)  continue;  // message sent by the bot itself
+          if (!msg.message)   continue;
+          if (msg.key.fromMe) continue;
 
           const rawJid = msg.key.remoteJid ?? "";
-
-          // LID + broadcast + status + newsletter — always skip
           if (shouldIgnoreJid(rawJid)) continue;
 
           const isGroup = isJidGroup(rawJid);
-
-          // Optionally skip group messages
           if (isGroup && !this.config.replyInGroup) continue;
 
-          // Normalise the JID (removes the device suffix, etc.)
           let jid: string;
-          try { jid = jidNormalizedUser(rawJid); }
-          catch { jid = rawJid; }  // fallback — keep raw if normalisation fails
+          try { jid = jidNormalizedUser(rawJid); } catch { jid = rawJid; }
 
-          // Auto-reply guard
           if (!this.config.autoReply) continue;
-
-          // ── Extract text ──────────────────────────────────────────────
 
           const text = extractText(msg as Parameters<typeof extractText>[0]);
           if (!text.trim()) continue;
 
           const senderName = msg.pushName || jid.split("@")[0];
 
-          // ── Typing indicator ──────────────────────────────────────────
-
           try { await sock.sendPresenceUpdate("composing", jid); } catch { /* ignore */ }
 
-          // ── AI response ───────────────────────────────────────────────
-
-          const systemPrompt = buildSystemPrompt(this.config);
           const { text: reply, provider, modelUsed } = await generateWithFallback(
-            text,
-            undefined,
-            systemPrompt
-          );
-          const finalReply = reply.trim();
-
-          // ── Send reply ────────────────────────────────────────────────
-
-          await sock.sendMessage(
-            jid,
-            { text: finalReply },
-            // Quote the original message so the user sees context
-            { quoted: msg }
+            text, undefined, buildSystemPrompt(this.config)
           );
 
+          // ✅ Footer watermark — DLavie OS branding on every message
+          const finalReply = reply.trim() + buildFooter(this.config);
+
+          await sock.sendMessage(jid, { text: finalReply }, { quoted: msg });
           try { await sock.sendPresenceUpdate("paused", jid); } catch { /* ignore */ }
-
-          // ── Record log ────────────────────────────────────────────────
 
           this.status.messageCount = (this.status.messageCount || 0) + 1;
           this.logs.push({
-            ts:      Date.now(),
-            from:    jid,
-            name:    senderName,
-            isGroup,
-            message: text,
-            reply:   finalReply,
-            model:   `${provider}/${modelUsed}`,
+            ts: Date.now(), from: jid, name: senderName, isGroup,
+            message: text, reply: finalReply,
+            model: `${provider}/${modelUsed}`,
           });
           if (this.logs.length > 500) this.logs = this.logs.slice(-500);
 
         } catch (e) {
-          // Never let a single bad message crash the whole listener
-          console.error("[WaBot] Error handling message:", e);
+          console.error("[WaBot] Message error:", e);
         }
       }
     });
@@ -387,13 +445,13 @@ class WaBotManager {
   // ── Disconnect ────────────────────────────────────────────────────────────
 
   async disconnect(): Promise<void> {
-    this.reconnecting = true; // prevent auto-reconnect
+    this.reconnecting = true;
     if (this.sock) {
       try { this.sock.end(new Error("user_disconnect")); } catch { /* ignore */ }
       this.sock = null;
     }
     this.clearSession();
-    this.status       = { connected: false, pairingStep: "idle", messageCount: 0 };
+    this.status       = { connected: false, pairingStep: "idle", messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
     this.startTime    = null;
     this.reconnecting = false;
   }

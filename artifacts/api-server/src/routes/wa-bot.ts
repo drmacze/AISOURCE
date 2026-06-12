@@ -22,7 +22,10 @@ router.post("/wa-bot/config", (req: Request, res: Response) => {
 
 router.post("/wa-bot/connect", async (req: Request, res: Response) => {
   const { phoneNumber } = req.body as { phoneNumber?: string };
-  if (!phoneNumber) { res.status(400).json({ error: "phoneNumber required (e.g. 6281234567890)" }); return; }
+  if (!phoneNumber) {
+    res.status(400).json({ error: "phoneNumber required (e.g. 6281234567890)" });
+    return;
+  }
   try {
     const pairingCode = await waBotManager.connect(phoneNumber.replace(/[^0-9]/g, ""));
     res.json({ pairingCode, message: "Enter this code in WhatsApp → Linked Devices → Link with phone number" });
@@ -38,6 +41,35 @@ router.post("/wa-bot/disconnect", async (_req: Request, res: Response) => {
 
 router.get("/wa-bot/logs", (_req: Request, res: Response) => {
   res.json({ logs: waBotManager.getLogs() });
+});
+
+// ── Thumbnail endpoints ───────────────────────────────────────────────────────
+
+/** GET current thumbnail as base64 data-URI */
+router.get("/wa-bot/thumbnail", (_req: Request, res: Response) => {
+  const data = waBotManager.getThumbnailBase64();
+  res.json({ data });   // null if not yet generated
+});
+
+/** POST — generate a new AI thumbnail (newSeed=true to randomise design) */
+router.post("/wa-bot/generate-thumbnail", async (req: Request, res: Response) => {
+  const { newSeed } = req.body as { newSeed?: boolean };
+  try {
+    const data = await waBotManager.generateThumbnail(newSeed ?? true);
+    res.json({ ok: true, data });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+/** POST — apply the stored thumbnail as the bot's WhatsApp profile picture */
+router.post("/wa-bot/apply-profile-pic", async (_req: Request, res: Response) => {
+  try {
+    await waBotManager.applyProfilePic();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
 });
 
 export default router;
