@@ -33,6 +33,7 @@ import {
   promptsTable,
 } from "@workspace/db";
 import { eq, and, desc, asc, lt, gte, sql, count, not, inArray } from "drizzle-orm";
+import { generateWithFallback } from "./lib/provider-chain.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -179,6 +180,35 @@ const state: WorkerState = {
   lastBenchmark:       0,
 };
 
+// ─── AI-Powered Agent Thinking ────────────────────────────────────────────────
+
+/**
+ * Each agent calls this to get an AI-generated description of what they are doing.
+ * Uses Groq llama-3.1-8b-instant (fastest) so it doesn't slow down the tick loop.
+ * Falls back gracefully — never blocks the agent from running.
+ */
+async function agentThink(
+  agentId: string,
+  role: string,
+  vision: string,
+  contextLines: string[]
+): Promise<string | null> {
+  try {
+    const context = contextLines.slice(0, 6).join("\n");
+    const { text } = await generateWithFallback(
+      `Current context:\n${context}\n\nWhat specific action are you taking RIGHT NOW?`,
+      undefined,
+      `You are the ${role} agent of DLavie OS AI Company. Your vision: "${vision}"\n` +
+      `Respond with EXACTLY 1 sentence (max 20 words) describing your current action. Be concrete. No preamble.`,
+      { maxTokens: 50, temperature: 0.8 }
+    );
+    const clean = text.trim().replace(/^["']|["']$/g, "").split("\n")[0] ?? "";
+    return clean.slice(0, 100) || null;
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AGENT 1: ORCHESTRATOR
 // Vision: "I see everything. I coordinate all agents, deliver mail, and ensure
@@ -186,7 +216,18 @@ const state: WorkerState = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tickOrchestrator() {
-  await heartbeat("orchestrator", "🎯 Orchestrator", "working", "coordinating agents");
+  const unreadMail = await db.select({ c: count() }).from(agentMailTable).where(eq(agentMailTable.read, false)).catch(() => [{ c: 0 }]);
+  const agentStatuses = await getAgentStatuses().catch(() => []);
+  const thought = await agentThink("orchestrator", "Orchestrator",
+    "I see everything. I coordinate all agents, deliver mail, and ensure DLavie OS never sleeps.",
+    [
+      `Undelivered mail in queue: ${unreadMail[0]?.c ?? 0}`,
+      `Active agents: ${agentStatuses.filter(a => a.status === "working").length}/${agentStatuses.length}`,
+      `Checking for stuck agents (no heartbeat >10min)`,
+      `Preparing periodic summary report`,
+    ]
+  );
+  await heartbeat("orchestrator", "🎯 Orchestrator", "working", thought ?? "coordinating agents and delivering mail");
 
   // 1. Deliver unread mail destined for OpenClaw agents
   const allMail = await db
@@ -241,7 +282,7 @@ async function tickOrchestrator() {
     } catch { /* non-fatal */ }
   }
 
-  await heartbeat("orchestrator", "🎯 Orchestrator", "idle");
+  await heartbeat("orchestrator", "🎯 Orchestrator", "idle", thought ?? "coordinating agents");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,7 +293,18 @@ async function tickOrchestrator() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tickTrainer() {
-  await heartbeat("trainer", "🧠 Trainer", "working", "scanning training queue");
+  const pending = await db.select({ c: count() }).from(trainingJobsTable).where(eq(trainingJobsTable.status, "pending")).catch(() => [{ c: 0 }]);
+  const datasets = await db.select({ c: count() }).from(trainingDatasetsTable).catch(() => [{ c: 0 }]);
+  const thought = await agentThink("trainer", "Trainer",
+    "I exist to make DLavie's AI smarter every day. Every dataset is fuel. Every benchmark is progress.",
+    [
+      `Pending training jobs: ${pending[0]?.c ?? 0}`,
+      `Available datasets: ${datasets[0]?.c ?? 0}`,
+      `Scanning for models needing benchmarking`,
+      `Searching HuggingFace for new datasets to import`,
+    ]
+  );
+  await heartbeat("trainer", "🧠 Trainer", "working", thought ?? "scanning training queue");
 
   try {
     // 1. Check for pending training jobs and activate them
@@ -398,7 +450,17 @@ async function tickTrainer() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tickLibrarian() {
-  await heartbeat("librarian", "📚 Librarian", "working", "auditing knowledge base");
+  const docs = await db.select({ c: count() }).from(documentsTable).catch(() => [{ c: 0 }]);
+  const thought = await agentThink("librarian", "Librarian",
+    "Knowledge in DLavie must be alive, clean, and searchable. I hunt duplicates and feed the RAG pipeline.",
+    [
+      `Documents in knowledge base: ${docs[0]?.c ?? 0}`,
+      `Scanning for stale or duplicate documents`,
+      `Re-indexing chunks for better RAG retrieval`,
+      `Optimizing vector embeddings`,
+    ]
+  );
+  await heartbeat("librarian", "📚 Librarian", "working", thought ?? "auditing knowledge base");
 
   try {
     // 1. Count documents and check health
@@ -466,7 +528,7 @@ async function tickLibrarian() {
     return;
   }
 
-  await heartbeat("librarian", "📚 Librarian", "idle");
+  await heartbeat("librarian", "📚 Librarian", "idle", thought ?? "auditing knowledge base");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -477,7 +539,17 @@ async function tickLibrarian() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tickGuardian() {
-  await heartbeat("guardian", "🛡️ Guardian", "working", "processing tickets");
+  const openTickets = await db.select({ c: count() }).from(botTicketsTable).where(eq(botTicketsTable.status, "open")).catch(() => [{ c: 0 }]);
+  const thought = await agentThink("guardian", "Guardian",
+    "No user report goes unanswered. I am the bridge between users and fixes.",
+    [
+      `Open tickets needing attention: ${openTickets[0]?.c ?? 0}`,
+      `Triaging by severity and category`,
+      `Routing critical issues to engineering team`,
+      `Verifying resolved tickets are truly fixed`,
+    ]
+  );
+  await heartbeat("guardian", "🛡️ Guardian", "working", thought ?? "processing tickets");
 
   try {
     // 1. Fetch open tickets
@@ -619,7 +691,7 @@ async function tickGuardian() {
     return;
   }
 
-  await heartbeat("guardian", "🛡️ Guardian", "idle");
+  await heartbeat("guardian", "🛡️ Guardian", "idle", thought ?? "processing support tickets");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -630,7 +702,17 @@ async function tickGuardian() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tickAnalyst() {
-  await heartbeat("analyst", "📊 Analyst", "working", "aggregating metrics");
+  const recentMetrics = await db.select({ c: count() }).from(agentMetricsTable).where(gte(agentMetricsTable.createdAt, new Date(Date.now() - 60*60*1000))).catch(() => [{ c: 0 }]);
+  const thought = await agentThink("analyst", "Analyst",
+    "I see patterns humans miss. I monitor all metrics and surface insights before problems become crises.",
+    [
+      `Metrics collected last hour: ${recentMetrics[0]?.c ?? 0}`,
+      `Analyzing conversation quality trends`,
+      `Detecting anomalies in agent performance`,
+      `Generating predictive insights for system health`,
+    ]
+  );
+  await heartbeat("analyst", "📊 Analyst", "working", thought ?? "aggregating metrics");
 
   try {
     // 1. Pull comprehensive analytics
@@ -726,7 +808,7 @@ async function tickAnalyst() {
     return;
   }
 
-  await heartbeat("analyst", "📊 Analyst", "idle");
+  await heartbeat("analyst", "📊 Analyst", "idle", thought ?? "aggregating system metrics");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -737,7 +819,16 @@ async function tickAnalyst() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tickBotmaster() {
-  await heartbeat("botmaster", "🤖 Botmaster", "working", "monitoring bots");
+  const thought = await agentThink("botmaster", "Botmaster",
+    "All bots must be online 24/7. I monitor, reconnect, and ensure no message is ever lost.",
+    [
+      `Checking Telegram bot connection status`,
+      `Verifying WhatsApp webhook is responding`,
+      `Scanning for unprocessed message queues`,
+      `Monitoring bot uptime and response latency`,
+    ]
+  );
+  await heartbeat("botmaster", "🤖 Botmaster", "working", thought ?? "monitoring bots");
 
   try {
     // 1. Check Telegram bot health
@@ -823,7 +914,7 @@ async function tickBotmaster() {
     return;
   }
 
-  await heartbeat("botmaster", "🤖 Botmaster", "idle");
+  await heartbeat("botmaster", "🤖 Botmaster", "idle", thought ?? "monitoring WhatsApp bots");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -834,7 +925,18 @@ async function tickBotmaster() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tickCurator() {
-  await heartbeat("curator", "✨ Curator", "working", "curating conversations");
+  const convs = await db.select({ c: count() }).from(conversationsTable).catch(() => [{ c: 0 }]);
+  const prompts = await db.select({ c: count() }).from(promptsTable).catch(() => [{ c: 0 }]);
+  const thought = await agentThink("curator", "Curator",
+    "Every conversation is a learning signal. I extract the best and build our AI legacy.",
+    [
+      `Conversations to analyze: ${convs[0]?.c ?? 0}`,
+      `Curated prompts in library: ${prompts[0]?.c ?? 0}`,
+      `Mining conversations for high-quality training pairs`,
+      `Scoring and ranking prompts by effectiveness`,
+    ]
+  );
+  await heartbeat("curator", "✨ Curator", "working", thought ?? "curating conversations");
 
   try {
     // 1. Analyze recent conversations and extract training pairs
@@ -951,7 +1053,7 @@ async function tickCurator() {
     return;
   }
 
-  await heartbeat("curator", "✨ Curator", "idle");
+  await heartbeat("curator", "✨ Curator", "idle", thought ?? "curating conversations");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -963,7 +1065,16 @@ async function tickCurator() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function tickEngineer() {
-  await heartbeat("engineer", "⚙️ Engineer", "working", "checking infrastructure");
+  const thought = await agentThink("engineer", "Engineer",
+    "DLavie OS infrastructure must always be optimal. If something breaks, I fix it before anyone notices.",
+    [
+      `Checking Ollama LLM server health`,
+      `Verifying database connection pool`,
+      `Monitoring API server response times`,
+      `Scanning for memory leaks and performance bottlenecks`,
+    ]
+  );
+  await heartbeat("engineer", "⚙️ Engineer", "working", thought ?? "checking infrastructure");
 
   try {
     // 1. Check Ollama health
@@ -1061,7 +1172,7 @@ async function tickEngineer() {
     return;
   }
 
-  await heartbeat("engineer", "⚙️ Engineer", "idle");
+  await heartbeat("engineer", "⚙️ Engineer", "idle", thought ?? "checking infrastructure health");
 }
 
 // ─── Worker Registry & Scheduler ─────────────────────────────────────────────
@@ -1082,7 +1193,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "orchestrator",
     displayName: "🎯 Orchestrator",
     vision: "I see everything. I coordinate all agents, deliver mail, and ensure DLavie OS never sleeps.",
-    intervalMs: 30 * 1000,          // 30 seconds
+    intervalMs: 20 * 1000,          // 20 seconds — master coordinator, always active
     tick: tickOrchestrator,
     lastRun: 0, running: false,
   },
@@ -1090,7 +1201,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "trainer",
     displayName: "🧠 Trainer",
     vision: "I exist to make DLavie's AI smarter every day. Every dataset is fuel. Every benchmark is progress.",
-    intervalMs: 15 * 60 * 1000,     // 15 minutes
+    intervalMs: 90 * 1000,          // 90 seconds — training is critical, run often
     tick: tickTrainer,
     lastRun: 0, running: false,
   },
@@ -1098,7 +1209,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "librarian",
     displayName: "📚 Librarian",
     vision: "Knowledge in DLavie must be alive, clean, and searchable. I hunt duplicates and feed the RAG pipeline.",
-    intervalMs: 30 * 60 * 1000,     // 30 minutes
+    intervalMs: 3 * 60 * 1000,      // 3 minutes — knowledge base maintenance
     tick: tickLibrarian,
     lastRun: 0, running: false,
   },
@@ -1106,7 +1217,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "guardian",
     displayName: "🛡️ Guardian",
     vision: "No user report goes unanswered. I am the bridge between users and fixes.",
-    intervalMs: 60 * 1000,          // 60 seconds
+    intervalMs: 30 * 1000,          // 30 seconds — tickets need fast response
     tick: tickGuardian,
     lastRun: 0, running: false,
   },
@@ -1114,7 +1225,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "analyst",
     displayName: "📊 Analyst",
     vision: "I see patterns humans miss. I monitor all metrics and surface insights before problems become crises.",
-    intervalMs: 5 * 60 * 1000,      // 5 minutes
+    intervalMs: 90 * 1000,          // 90 seconds — anomaly detection needs to be frequent
     tick: tickAnalyst,
     lastRun: 0, running: false,
   },
@@ -1122,7 +1233,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "botmaster",
     displayName: "🤖 Botmaster",
     vision: "All bots must be online 24/7. I monitor, reconnect, and ensure no message is ever lost.",
-    intervalMs: 2 * 60 * 1000,      // 2 minutes
+    intervalMs: 60 * 1000,          // 60 seconds — bot health check
     tick: tickBotmaster,
     lastRun: 0, running: false,
   },
@@ -1130,7 +1241,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "curator",
     displayName: "✨ Curator",
     vision: "Every conversation is a learning signal. I extract the best and build our AI legacy.",
-    intervalMs: 20 * 60 * 1000,     // 20 minutes
+    intervalMs: 3 * 60 * 1000,      // 3 minutes — conversation mining
     tick: tickCurator,
     lastRun: 0, running: false,
   },
@@ -1138,7 +1249,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "engineer",
     displayName: "⚙️ Engineer",
     vision: "DLavie OS infrastructure must always be optimal. If something breaks, I fix it before anyone notices.",
-    intervalMs: 10 * 60 * 1000,     // 10 minutes
+    intervalMs: 90 * 1000,          // 90 seconds — infra health is critical
     tick: tickEngineer,
     lastRun: 0, running: false,
   },

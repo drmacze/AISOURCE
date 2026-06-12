@@ -1,48 +1,45 @@
 /**
- * DLavie OS — Autonomous Agent Command Center
- *
- * 8 specialist agents working 24/7 — NO run button needed.
- * Real-time 3D office visualization + live activity feed.
- * Agents think, act, coordinate, and learn autonomously.
+ * DLavie OS — Agent Command Center
+ * 3D isometric office — 8 autonomous AI agents working 24/7.
+ * Real-time SSE updates, animated characters, inter-agent mail particles.
  */
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Bot, Trash2, Loader2, CheckCircle2, XCircle,
-  AlertTriangle, Lightbulb, ChevronDown, ChevronRight, Sparkles,
-  Zap, RefreshCw,
-  Brain, BookOpen, Terminal,
-  Send, Activity, Mail, LayoutGrid, TerminalSquare,
-  Shield, BarChart2, Wrench, Star, Radio, Inbox,
-  Play, Square, PlusCircle,
+  Bot, Brain, BookOpen, Shield, BarChart2, Wrench, Star, Radio,
+  Mail, Activity, TerminalSquare, Zap, RefreshCw, Send,
+  Play, Square, PlusCircle, AlertTriangle, CheckCircle2,
+  XCircle, Loader2, Inbox, Sparkles, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ─── Agent definitions ────────────────────────────────────────────────────────
+// ─── Agent definitions with positions ────────────────────────────────────────
 
 const AGENT_DEFS = [
-  { id: "orchestrator", name: "Orchestrator", emoji: "🎯", icon: Radio,   color: "emerald", role: "Master coordinator", col: 1, row: 0 },
-  { id: "trainer",      name: "Trainer",       emoji: "🧠", icon: Brain,   color: "violet",  role: "AI model training",  col: 0, row: 1 },
-  { id: "librarian",    name: "Librarian",     emoji: "📚", icon: BookOpen, color: "sky",    role: "Knowledge base",     col: 2, row: 1 },
-  { id: "guardian",     name: "Guardian",      emoji: "🛡️", icon: Shield,  color: "amber",   role: "Tickets & quality",  col: 3, row: 1 },
-  { id: "analyst",      name: "Analyst",       emoji: "📊", icon: BarChart2,color: "blue",   role: "Data intelligence",  col: 0, row: 2 },
-  { id: "botmaster",    name: "Botmaster",     emoji: "🤖", icon: Bot,     color: "teal",    role: "Bot operations",     col: 1, row: 2 },
-  { id: "curator",      name: "Curator",       emoji: "✨", icon: Star,    color: "pink",    role: "Prompt curation",    col: 2, row: 2 },
-  { id: "engineer",     name: "Engineer",      emoji: "⚙️", icon: Wrench,  color: "orange",  role: "Infrastructure",     col: 3, row: 2 },
+  { id: "orchestrator", name: "Orchestrator", emoji: "🎯", colorHex: "#10b981", deskHex: "#064e3b", role: "Master coordinator"  },
+  { id: "trainer",      name: "Trainer",      emoji: "🧠", colorHex: "#8b5cf6", deskHex: "#3b0764", role: "AI model training"   },
+  { id: "librarian",    name: "Librarian",    emoji: "📚", colorHex: "#0ea5e9", deskHex: "#0c4a6e", role: "Knowledge base"      },
+  { id: "guardian",     name: "Guardian",     emoji: "🛡️", colorHex: "#f59e0b", deskHex: "#78350f", role: "Tickets & quality"   },
+  { id: "analyst",      name: "Analyst",      emoji: "📊", colorHex: "#3b82f6", deskHex: "#1e3a8a", role: "Data intelligence"   },
+  { id: "botmaster",    name: "Botmaster",    emoji: "🤖", colorHex: "#14b8a6", deskHex: "#134e4a", role: "Bot operations"      },
+  { id: "curator",      name: "Curator",      emoji: "✨", colorHex: "#ec4899", deskHex: "#831843", role: "Prompt curation"     },
+  { id: "engineer",     name: "Engineer",     emoji: "⚙️", colorHex: "#f97316", deskHex: "#7c2d12", role: "Infrastructure"      },
 ] as const;
 
 type AgentId = typeof AGENT_DEFS[number]["id"];
 
-const COLOR_MAP: Record<string, { bg: string; border: string; text: string; glow: string; ring: string }> = {
-  emerald: { bg: "bg-emerald-500/10", border: "border-emerald-500/40", text: "text-emerald-400", glow: "shadow-emerald-500/30", ring: "ring-emerald-500/40" },
-  violet:  { bg: "bg-violet-500/10",  border: "border-violet-500/40",  text: "text-violet-400",  glow: "shadow-violet-500/30",  ring: "ring-violet-500/40"  },
-  sky:     { bg: "bg-sky-500/10",     border: "border-sky-500/40",     text: "text-sky-400",     glow: "shadow-sky-500/30",     ring: "ring-sky-500/40"     },
-  amber:   { bg: "bg-amber-500/10",   border: "border-amber-500/40",   text: "text-amber-400",   glow: "shadow-amber-500/30",   ring: "ring-amber-500/40"   },
-  blue:    { bg: "bg-blue-500/10",    border: "border-blue-500/40",    text: "text-blue-400",    glow: "shadow-blue-500/30",    ring: "ring-blue-500/40"    },
-  teal:    { bg: "bg-teal-500/10",    border: "border-teal-500/40",    text: "text-teal-400",    glow: "shadow-teal-500/30",    ring: "ring-teal-500/40"    },
-  pink:    { bg: "bg-pink-500/10",    border: "border-pink-500/40",    text: "text-pink-400",    glow: "shadow-pink-500/30",    ring: "ring-pink-500/40"    },
-  orange:  { bg: "bg-orange-500/10",  border: "border-orange-500/40",  text: "text-orange-400",  glow: "shadow-orange-500/30",  ring: "ring-orange-500/40"  },
+// Desk top-face CENTER positions in the SVG (viewBox 0 0 700 420)
+// Arranged in isometric perspective: orchestrator top-center, rows below
+const DESK_POS: Record<string, [number, number]> = {
+  orchestrator: [350, 138],
+  trainer:      [174, 220],
+  librarian:    [293, 248],
+  guardian:     [448, 208],
+  analyst:      [142, 308],
+  botmaster:    [258, 326],
+  curator:      [368, 322],
+  engineer:     [488, 292],
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -50,1251 +47,988 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; glow
 interface AgentStatus {
   agentId: string;
   displayName: string;
-  status: "idle" | "working" | "sleeping" | "error";
+  status: "working" | "idle" | "error" | "offline";
   currentTask?: string | null;
   lastSeen: string;
   tickCount: number;
-  metadata?: Record<string, unknown> | null;
 }
 
-interface WorkerInfo {
-  id: string;
-  name: string;
-  intervalMs: number;
-  lastTick: number;
-  errorCount: number;
-}
-
-interface AgentMail {
+interface MailItem {
   id: number;
   fromAgent: string;
   toAgent: string;
   subject: string;
   body: string;
   priority: string;
+  createdAt: string;
   read: boolean;
-  createdAt: string;
 }
 
-interface AgentMetric {
-  id: number;
-  agentId: string;
-  metricType: string;
-  value: string;
-  label?: string;
-  createdAt: string;
-}
-
-interface AgentSession {
+interface WorkerInfo {
   id: string;
-  task: string;
-  status: "running" | "done" | "error" | "stopped";
-  events: AgentEvent[];
-  summary: string;
-  totalSteps: number;
-  model: string;
-  autonomous: boolean;
-  memoriesLoaded: number;
-  createdAt: string;
-  updatedAt: string;
+  displayName: string;
+  vision: string;
+  intervalMs: number;
+  lastRun: number;
+  running: boolean;
 }
 
-interface AgentEvent {
-  type: "thought" | "tool_call" | "tool_result" | "done" | "error" | "info" | "memory";
-  content?: string;
-  tool?: string;
-  args?: Record<string, unknown>;
-  data?: unknown;
-  ok?: boolean;
-  summary?: string;
-  steps?: number;
-  message?: string;
-  step?: number;
-  model?: string;
-  ts: number;
+// ─── SVG: Isometric floor tiles ───────────────────────────────────────────────
+
+function OfficeFloor() {
+  const HW = 36, HH = 18;
+  const OX = 348, OY = 20;
+  const tiles: React.ReactNode[] = [];
+
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 11; c++) {
+      const cx = OX + (c - r) * HW;
+      const cy = OY + (c + r) * HH;
+      if (cx < -40 || cx > 740 || cy < 0 || cy > 430) continue;
+      const alt = (c + r) % 2 === 0;
+      const pts = `${cx},${cy - HH} ${cx + HW},${cy} ${cx},${cy + HH} ${cx - HW},${cy}`;
+      tiles.push(
+        <polygon key={`${c}-${r}`} points={pts}
+          fill={alt ? "#0f172a" : "#0a1020"}
+          stroke="#06090f" strokeWidth={0.4} />,
+      );
+    }
+  }
+  return <g>{tiles}</g>;
 }
 
-// ─── Mail particle animation ──────────────────────────────────────────────────
+// ─── SVG: Isometric desk ──────────────────────────────────────────────────────
 
-interface MailParticle {
-  id: number;
-  from: AgentId;
-  to: AgentId;
-  subject: string;
-  createdAt: number;
-}
+const DESK_HW = 36, DESK_HH = 13, DESK_D = 11;
 
-// ─── Agent Desk Card ──────────────────────────────────────────────────────────
-
-function AgentDesk({
-  def, status, isSelected, onClick,
-}: {
-  def: typeof AGENT_DEFS[number];
-  status?: AgentStatus;
-  isSelected: boolean;
-  onClick: () => void;
+function IsoDesk({ cx, cy, colorHex, deskHex, isWorking }: {
+  cx: number; cy: number; colorHex: string; deskHex: string; isWorking: boolean;
 }) {
-  const c = COLOR_MAP[def.color];
-  const isWorking = status?.status === "working";
-  const isError = status?.status === "error";
-  const Icon = def.icon;
-
-  const timeAgo = (iso?: string) => {
-    if (!iso) return "never";
-    const diff = Date.now() - new Date(iso).getTime();
-    const s = Math.floor(diff / 1000);
-    if (s < 60) return `${s}s ago`;
-    const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m ago`;
-    return `${Math.floor(m / 60)}h ago`;
-  };
+  const top   = `${cx},${cy - DESK_HH} ${cx + DESK_HW},${cy} ${cx},${cy + DESK_HH} ${cx - DESK_HW},${cy}`;
+  const left  = `${cx - DESK_HW},${cy} ${cx},${cy + DESK_HH} ${cx},${cy + DESK_HH + DESK_D} ${cx - DESK_HW},${cy + DESK_D}`;
+  const right = `${cx + DESK_HW},${cy} ${cx},${cy + DESK_HH} ${cx},${cy + DESK_HH + DESK_D} ${cx + DESK_HW},${cy + DESK_D}`;
 
   return (
-    <motion.button
-      onClick={onClick}
-      layout
-      initial={{ opacity: 0, scale: 0.85, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      whileHover={{ scale: 1.04, y: -4 }}
-      whileTap={{ scale: 0.97 }}
-      transition={{ type: "spring", stiffness: 300, damping: 24 }}
-      className={cn(
-        "relative w-full text-left rounded-2xl border p-3 transition-all duration-300 group",
-        "backdrop-blur-sm",
-        isSelected
-          ? `${c.bg} ${c.border} ring-2 ${c.ring} shadow-lg ${c.glow}`
-          : "bg-slate-900/60 border-slate-800/70 hover:border-slate-700",
-        isWorking && !isSelected && `${c.border} ${c.bg}`,
-      )}
-    >
-      {/* Working pulse ring */}
+    <g>
       {isWorking && (
-        <motion.div
-          className={cn("absolute inset-0 rounded-2xl border-2", c.border)}
-          animate={{ opacity: [0.6, 0, 0.6], scale: [1, 1.04, 1] }}
-          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-        />
+        <ellipse cx={cx} cy={cy + DESK_HH + DESK_D * 0.5} rx={DESK_HW + 10} ry={DESK_D}
+          fill={colorHex} opacity={0.07} />
       )}
-
-      {/* Top row: icon + status */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className={cn(
-          "w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 transition-all",
-          isWorking ? `${c.bg} border ${c.border}` : "bg-slate-800/80 border border-slate-700/50",
-        )}>
-          {def.emoji}
-        </div>
-        <div className="flex-1 min-w-0 pt-0.5">
-          <p className="text-xs font-semibold text-slate-200 truncate">{def.name}</p>
-          <p className="text-[10px] text-slate-600 truncate">{def.role}</p>
-        </div>
-        <div className="flex-shrink-0">
-          {isError ? (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
-              <XCircle className="w-2.5 h-2.5" />ERR
-            </span>
-          ) : isWorking ? (
-            <span className={cn("flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium border", c.bg, c.border, c.text)}>
-              <Loader2 className="w-2.5 h-2.5 animate-spin" />WORK
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-slate-800 text-slate-500 border border-slate-700">
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />IDLE
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Current task */}
-      <div className="min-h-[28px]">
-        {status?.currentTask ? (
-          <p className={cn("text-[10px] leading-snug truncate", isWorking ? c.text : "text-slate-500")}>
-            {status.currentTask}
-          </p>
-        ) : (
-          <p className="text-[10px] text-slate-700">Standby…</p>
-        )}
-      </div>
-
-      {/* Footer: tick + last seen */}
-      <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/60">
-        <span className="text-[9px] text-slate-700 font-mono flex items-center gap-1">
-          <Zap className="w-2.5 h-2.5" />
-          {status?.tickCount ?? 0} ticks
-        </span>
-        <span className="text-[9px] text-slate-700 font-mono">
-          {timeAgo(status?.lastSeen)}
-        </span>
-      </div>
-
-      {/* Scan line animation when working */}
-      {isWorking && (
-        <motion.div
-          className={cn("absolute inset-x-0 h-[1px] opacity-40", `bg-gradient-to-r from-transparent via-current to-transparent`, c.text)}
-          animate={{ top: ["10%", "90%", "10%"] }}
-          transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
-          style={{ position: "absolute" }}
-        />
-      )}
-    </motion.button>
-  );
-}
-
-// ─── Connection line between two agents ──────────────────────────────────────
-
-function MailFlash({ subject }: { subject: string }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.6, y: 10 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.6, y: -10 }}
-      className="absolute -top-2 left-1/2 -translate-x-1/2 z-20 px-2 py-1 rounded-full bg-slate-900 border border-emerald-500/30 text-emerald-400 text-[9px] whitespace-nowrap shadow-lg shadow-emerald-500/10 max-w-[120px] truncate"
-    >
-      📨 {subject}
-    </motion.div>
-  );
-}
-
-// ─── Activity log item ────────────────────────────────────────────────────────
-
-function ActivityItem({ mail, isNew }: { mail: AgentMail; isNew: boolean }) {
-  const fromDef = AGENT_DEFS.find(a => a.id === mail.fromAgent);
-  const toDef   = AGENT_DEFS.find(a => a.id === mail.toAgent);
-  const fromColor = fromDef ? COLOR_MAP[fromDef.color] : null;
-
-  const ago = (iso: string) => {
-    const diff = Date.now() - new Date(iso).getTime();
-    const s = Math.floor(diff / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m`;
-    return `${Math.floor(m / 60)}h`;
-  };
-
-  return (
-    <motion.div
-      initial={isNew ? { opacity: 0, x: -16, backgroundColor: "rgba(16,185,129,0.08)" } : false}
-      animate={{ opacity: 1, x: 0, backgroundColor: "rgba(0,0,0,0)" }}
-      transition={{ duration: 0.4 }}
-      className="flex gap-2.5 items-start py-2 border-b border-slate-800/40 last:border-0"
-    >
-      <div className={cn(
-        "w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center text-xs mt-0.5",
-        fromColor ? `${fromColor.bg} border ${fromColor.border}` : "bg-slate-800 border border-slate-700"
-      )}>
-        {fromDef?.emoji ?? "?"}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className={cn("text-[10px] font-semibold", fromColor?.text ?? "text-slate-400")}>
-            {fromDef?.name ?? mail.fromAgent}
-          </span>
-          <span className="text-[10px] text-slate-600">→</span>
-          <span className="text-[10px] text-slate-400">{toDef?.name ?? mail.toAgent}</span>
-          {mail.priority === "critical" && (
-            <span className="px-1 py-0.5 rounded text-[9px] bg-red-500/10 text-red-400 border border-red-500/20 font-mono">CRIT</span>
-          )}
-          {mail.priority === "high" && (
-            <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">HIGH</span>
-          )}
-        </div>
-        <p className="text-[10px] text-slate-300 mt-0.5 leading-snug line-clamp-1">{mail.subject}</p>
-      </div>
-      <span className="flex-shrink-0 text-[9px] text-slate-700 font-mono mt-0.5">{ago(mail.createdAt)}</span>
-    </motion.div>
-  );
-}
-
-// ─── Event card (for Dev Agent sessions) ─────────────────────────────────────
-
-function EventCard({ event }: { event: AgentEvent }) {
-  const [open, setOpen] = useState(false);
-  if (event.type === "thought") return (
-    <div className="flex gap-2 items-start">
-      <div className="mt-0.5 w-4 h-4 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-        <Lightbulb className="w-2.5 h-2.5 text-amber-400" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Thought</span>
-        <p className="mt-0.5 text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{event.content}</p>
-      </div>
-    </div>
-  );
-  if (event.type === "tool_call") return (
-    <div className="flex gap-2 items-start">
-      <div className="mt-0.5 w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
-        <Terminal className="w-2.5 h-2.5 text-emerald-400" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">Tool</span>
-          <code className="text-[10px] bg-emerald-500/10 text-emerald-300 px-1 py-0.5 rounded font-mono">{event.tool}()</code>
-        </div>
-        {event.args && Object.keys(event.args).length > 0 && (
-          <button onClick={() => setOpen(o => !o)} className="mt-1 flex items-center gap-1 text-[10px] text-slate-600 hover:text-slate-400">
-            {open ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />} args
-          </button>
-        )}
-        {open && event.args && (
-          <pre className="mt-1 text-[10px] text-slate-400 bg-slate-900 rounded p-2 overflow-x-auto font-mono border border-slate-800 max-h-32 overflow-y-auto">
-            {JSON.stringify(event.args, null, 2)}
-          </pre>
-        )}
-      </div>
-    </div>
-  );
-  if (event.type === "tool_result") return (
-    <div className="flex gap-2 items-start">
-      <div className={cn("mt-0.5 w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0", event.ok ? "bg-sky-500/20" : "bg-red-500/20")}>
-        {event.ok ? <CheckCircle2 className="w-2.5 h-2.5 text-sky-400" /> : <XCircle className="w-2.5 h-2.5 text-red-400" />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1">
-          <span className={cn("text-[10px] font-semibold uppercase tracking-wider", event.ok ? "text-sky-400" : "text-red-400")}>
-            {event.ok ? "Result" : "Error"}
-          </span>
-          <code className="text-[10px] bg-slate-800 text-slate-500 px-1 py-0.5 rounded font-mono">{event.tool}</code>
-        </div>
-        <button onClick={() => setOpen(o => !o)} className="mt-0.5 text-[10px] text-slate-600 hover:text-slate-400 flex items-center gap-1">
-          {open ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
-          {event.ok ? "view data" : "view error"}
-        </button>
-        {open && (
-          <pre className={cn("mt-1 text-[10px] rounded p-2 overflow-x-auto font-mono border max-h-32 overflow-y-auto", event.ok ? "text-slate-300 bg-sky-950/30 border-sky-900/40" : "text-red-300 bg-red-950/30 border-red-900/40")}>
-            {typeof event.data === "string" ? event.data : JSON.stringify(event.data, null, 2)}
-          </pre>
-        )}
-      </div>
-    </div>
-  );
-  if (event.type === "memory") return (
-    <div className="flex gap-2 items-start">
-      <div className="mt-0.5 w-4 h-4 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0">
-        <Brain className="w-2.5 h-2.5 text-violet-400" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <span className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider">Memory</span>
-        <p className="mt-0.5 text-xs text-slate-400 leading-relaxed whitespace-pre-wrap line-clamp-3">{event.content}</p>
-      </div>
-    </div>
-  );
-  if (event.type === "done") return (
-    <div className="rounded-xl border border-sky-900/50 bg-sky-950/20 p-3">
-      <div className="flex items-center gap-2 mb-1">
-        <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />
-        <span className="text-xs font-semibold text-sky-400">Task Complete</span>
-        {event.steps && <span className="text-[10px] text-slate-500 ml-auto">{event.steps} steps</span>}
-      </div>
-      {event.summary && <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{event.summary}</p>}
-    </div>
-  );
-  if (event.type === "error") return (
-    <div className="flex gap-2 items-start">
-      <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
-      <p className="text-xs text-red-300">{event.message}</p>
-    </div>
-  );
-  return null;
-}
-
-// ─── Floating neural particles (background) ───────────────────────────────────
-
-function NeuralParticles() {
-  const particles = useMemo(() =>
-    Array.from({ length: 18 }, (_, i) => ({
-      id: i,
-      x: Math.random() * 100,
-      y: Math.random() * 100,
-      size: Math.random() * 3 + 1,
-      dur: Math.random() * 8 + 6,
-      delay: Math.random() * 4,
-    })), []);
-
-  return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      {particles.map(p => (
-        <motion.div
-          key={p.id}
-          className="absolute rounded-full bg-emerald-400/20"
-          style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.size, height: p.size }}
-          animate={{
-            y: [0, -30, 0],
-            opacity: [0, 0.6, 0],
-            scale: [0.5, 1, 0.5],
-          }}
-          transition={{ duration: p.dur, delay: p.delay, repeat: Infinity, ease: "easeInOut" }}
-        />
+      <polygon points={right} fill="#09111d" />
+      <polygon points={left}  fill="#0d1929" />
+      <polygon points={top}   fill={isWorking ? deskHex : "#1a2738"} stroke="#253447" strokeWidth={0.8} />
+      {/* Monitor dot on desk */}
+      <circle cx={cx + 14} cy={cy - 6} r={3}
+        fill={isWorking ? colorHex : "#1e293b"} opacity={isWorking ? 0.85 : 0.3} />
+      {/* Keyboard dots */}
+      {[0, 5, 10, -5, -10].map(dx => (
+        <rect key={dx} x={cx + dx - 1} y={cy + 4} width={2.5} height={1.5}
+          fill="#1e293b" rx={0.5} />
       ))}
-      {/* Grid lines */}
-      <svg className="absolute inset-0 w-full h-full opacity-5" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#10b981" strokeWidth="0.5"/>
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#grid)" />
-      </svg>
-    </div>
+    </g>
   );
 }
 
-// ─── Header status bar ────────────────────────────────────────────────────────
+// ─── SVG: Agent character ─────────────────────────────────────────────────────
 
-function SystemStatus({ agents, workers }: { agents: AgentStatus[]; workers: WorkerInfo[] }) {
-  const working = agents.filter(a => a.status === "working").length;
-  const errors  = agents.filter(a => a.status === "error").length;
-  const total   = AGENT_DEFS.length;
+const CHAR_R = 13;
+
+function AgentCharacter({ cx, cy, def, isWorking, isSelected, task, lastTask }: {
+  cx: number; cy: number;
+  def: typeof AGENT_DEFS[number];
+  isWorking: boolean; isSelected: boolean;
+  task?: string | null;
+  lastTask?: string;
+}) {
+  const charY = cy - 38;
+  const truncated = task && task.length > 25 ? task.slice(0, 25) + "…" : task;
+  const lastTrunc = lastTask && lastTask.length > 22 ? lastTask.slice(0, 22) + "…" : lastTask;
 
   return (
-    <div className="flex items-center gap-3 flex-wrap">
-      <div className="flex items-center gap-1.5">
-        <motion.div
-          className="w-2 h-2 rounded-full bg-emerald-400"
-          animate={{ opacity: [1, 0.3, 1], scale: [1, 0.8, 1] }}
-          transition={{ duration: 2, repeat: Infinity }}
+    <motion.g
+      animate={isWorking ? { y: [-1.5, 1.5, -1.5] } : { y: 0 }}
+      transition={{ repeat: Infinity, duration: 1.3, ease: "easeInOut" }}
+    >
+      {/* Selection ring */}
+      {isSelected && (
+        <motion.circle cx={cx} cy={charY} r={CHAR_R + 7}
+          fill="none" stroke={def.colorHex} strokeWidth={1.5}
+          strokeDasharray="3 2"
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: 6, ease: "linear" }}
+          style={{ transformOrigin: `${cx}px ${charY}px` }}
         />
-        <span className="text-[11px] text-emerald-400 font-semibold font-mono">SYSTEM ONLINE</span>
-      </div>
-      <div className="h-3 w-px bg-slate-700" />
-      <span className="text-[11px] text-slate-500 font-mono">
-        <span className="text-emerald-400">{working}</span>/{total} active
-      </span>
-      {errors > 0 && (
-        <>
-          <div className="h-3 w-px bg-slate-700" />
-          <span className="text-[11px] text-red-400 font-mono">{errors} error{errors > 1 ? "s" : ""}</span>
-        </>
       )}
-      <div className="h-3 w-px bg-slate-700" />
-      <span className="text-[11px] text-slate-600 font-mono">24/7 autonomous</span>
+
+      {/* Glow pulse when working */}
+      {isWorking && (
+        <motion.circle cx={cx} cy={charY} r={CHAR_R + 5}
+          fill={def.colorHex} opacity={0}
+          animate={{ opacity: [0, 0.15, 0], r: [CHAR_R + 3, CHAR_R + 9, CHAR_R + 3] }}
+          transition={{ repeat: Infinity, duration: 1.8 }} />
+      )}
+
+      {/* Body */}
+      <circle cx={cx} cy={charY} r={CHAR_R}
+        fill={`${def.colorHex}1a`}
+        stroke={def.colorHex}
+        strokeWidth={isWorking ? 2 : 1}
+        opacity={isWorking ? 1 : 0.55}
+      />
+
+      {/* Emoji */}
+      <text x={cx} y={charY + 4.5} textAnchor="middle" fontSize={12} dominantBaseline="middle">
+        {def.emoji}
+      </text>
+
+      {/* Online dot */}
+      <motion.circle cx={cx + 10} cy={charY - 10} r={3}
+        fill={isWorking ? "#10b981" : "#374151"}
+        animate={isWorking ? { opacity: [1, 0.4, 1] } : {}}
+        transition={{ repeat: Infinity, duration: 1.5 }}
+      />
+
+      {/* Name tag */}
+      <rect x={cx - 22} y={charY - 30} width={44} height={14} rx={3}
+        fill="#0f172a" stroke={`${def.colorHex}44`} strokeWidth={0.5} />
+      <text x={cx} y={charY - 19} textAnchor="middle" fontSize={7.5} fill="#94a3b8"
+        fontFamily="monospace">
+        {def.name}
+      </text>
+
+      {/* Speech bubble — active task (bright) */}
+      {isWorking && truncated && (
+        <g>
+          <rect x={cx - 58} y={charY - 70} width={116} height={24} rx={6}
+            fill="#0f172a" stroke={`${def.colorHex}99`} strokeWidth={1} opacity={0.97} />
+          <text x={cx} y={charY - 54} textAnchor="middle" fontSize={7.5} fill={def.colorHex}
+            fontFamily="monospace" fontWeight="bold">
+            {truncated}
+          </text>
+          <polygon points={`${cx - 4},${cy - 46} ${cx + 4},${cy - 46} ${cx},${cy - 40}`}
+            fill="#0f172a" />
+        </g>
+      )}
+
+      {/* Speech bubble — last task (dim, shown when idle) */}
+      {!isWorking && lastTrunc && (
+        <g opacity={0.35}>
+          <rect x={cx - 54} y={charY - 68} width={108} height={22} rx={5}
+            fill="#0a1120" stroke={`${def.colorHex}44`} strokeWidth={0.6} />
+          <text x={cx} y={charY - 54} textAnchor="middle" fontSize={7} fill="#64748b"
+            fontFamily="monospace">
+            {lastTrunc}
+          </text>
+        </g>
+      )}
+    </motion.g>
+  );
+}
+
+// ─── SVG: Mail particle ───────────────────────────────────────────────────────
+
+function MailParticle({ from, to, particleKey }: {
+  from: [number, number]; to: [number, number]; particleKey: string;
+}) {
+  const [fx, fy] = from;
+  const [tx, ty] = to;
+  const mx = (fx + tx) / 2 + (fy < ty ? -30 : 30);
+  const my = Math.min(fy, ty) - 40;
+
+  return (
+    <motion.g key={particleKey}>
+      <motion.circle r={4} fill="#f59e0b"
+        initial={{ cx: fx, cy: fy - 38, opacity: 0.9, scale: 1 }}
+        animate={{ cx: [fx, mx, tx], cy: [fy - 38, my, ty - 38], opacity: [0.9, 1, 0], scale: [1, 1.3, 0.6] }}
+        transition={{ duration: 2.4, ease: "easeInOut", times: [0, 0.5, 1] }}
+      />
+      <motion.text fontSize={10} textAnchor="middle"
+        initial={{ x: fx, y: fy - 38, opacity: 0.9 }}
+        animate={{ x: [fx, mx, tx], y: [fy - 38, my, ty - 38], opacity: [0.9, 1, 0] }}
+        transition={{ duration: 2.4, ease: "easeInOut", times: [0, 0.5, 1] }}
+      >
+        ✉
+      </motion.text>
+    </motion.g>
+  );
+}
+
+// ─── Main SVG: Isometric Office Scene ────────────────────────────────────────
+
+function OfficeScene({
+  statuses, mail, selectedAgent, onSelect,
+}: {
+  statuses: AgentStatus[];
+  mail: MailItem[];
+  selectedAgent: AgentId | null;
+  onSelect: (id: AgentId) => void;
+}) {
+  const statusMap = Object.fromEntries(statuses.map(s => [s.agentId, s]));
+
+  // Default task descriptions shown before first real task arrives
+  const AGENT_FALLBACK_TASKS: Record<string, string> = {
+    orchestrator: "coordinating agents & delivering mail",
+    trainer:      "scanning training queue",
+    librarian:    "auditing knowledge base",
+    guardian:     "processing support tickets",
+    analyst:      "aggregating system metrics",
+    botmaster:    "monitoring WhatsApp bots",
+    curator:      "curating conversation quality",
+    engineer:     "checking infrastructure health",
+  };
+
+  // Track last known task per agent (shown dimly when idle)
+  const [lastTaskMap, setLastTaskMap] = useState<Record<string, string>>(AGENT_FALLBACK_TASKS);
+  useEffect(() => {
+    setLastTaskMap(prev => {
+      const next = { ...prev };
+      statuses.forEach(s => { if (s.currentTask) next[s.agentId] = s.currentTask; });
+      return next;
+    });
+  }, [statuses]);
+
+  // Show particles for mails sent in the last 8 seconds
+  const recentMail = mail
+    .filter(m => Date.now() - new Date(m.createdAt).getTime() < 8_000)
+    .slice(0, 4);
+
+  // Sort agents so front ones (larger cy) are drawn on top
+  const sortedDefs = [...AGENT_DEFS].sort((a, b) => {
+    const [, ay] = DESK_POS[a.id];
+    const [, by] = DESK_POS[b.id];
+    return ay - by;
+  });
+
+  return (
+    <svg viewBox="0 0 700 420" className="w-full h-full" style={{ fontFamily: "monospace" }}>
+      <defs>
+        <radialGradient id="bgGrad" cx="50%" cy="35%" r="65%">
+          <stop offset="0%" stopColor="#0a1628" />
+          <stop offset="100%" stopColor="#040810" />
+        </radialGradient>
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+
+      {/* Background */}
+      <rect width={700} height={420} fill="url(#bgGrad)" />
+
+      {/* Floor */}
+      <OfficeFloor />
+
+      {/* Faint connection lines (orchestrator → all) */}
+      <g opacity={0.08}>
+        {AGENT_DEFS.slice(1).map(def => {
+          const [ox, oy] = DESK_POS.orchestrator;
+          const [ax, ay] = DESK_POS[def.id];
+          return (
+            <line key={def.id} x1={ox} y1={oy - 25} x2={ax} y2={ay - 25}
+              stroke="#10b981" strokeWidth={0.8} strokeDasharray="4 5" />
+          );
+        })}
+      </g>
+
+      {/* Mail particles */}
+      {recentMail.map(m => {
+        const from = DESK_POS[m.fromAgent];
+        const to   = DESK_POS[m.toAgent];
+        if (!from || !to) return null;
+        return (
+          <MailParticle key={`${m.id}`}
+            particleKey={`${m.id}`} from={from} to={to} />
+        );
+      })}
+
+      {/* Agent stations — back to front order */}
+      {sortedDefs.map(def => {
+        const [cx, cy] = DESK_POS[def.id];
+        const status    = statusMap[def.id];
+        const isWorking = status?.status === "working";
+        const isSelected = selectedAgent === def.id;
+
+        return (
+          <g key={def.id} onClick={() => onSelect(def.id as AgentId)} style={{ cursor: "pointer" }}>
+            <IsoDesk cx={cx} cy={cy}
+              colorHex={def.colorHex} deskHex={def.deskHex}
+              isWorking={isWorking} />
+
+            {isSelected && (
+              <motion.ellipse cx={cx} cy={cy + DESK_HH + DESK_D * 0.4}
+                rx={DESK_HW + 14} ry={DESK_D + 2}
+                fill="none" stroke={def.colorHex} strokeWidth={1.5}
+                animate={{ opacity: [0.4, 1, 0.4] }}
+                transition={{ repeat: Infinity, duration: 1 }} />
+            )}
+
+            <AgentCharacter cx={cx} cy={cy} def={def}
+              isWorking={isWorking} isSelected={isSelected}
+              task={status?.currentTask}
+              lastTask={lastTaskMap[def.id]} />
+          </g>
+        );
+      })}
+
+      {/* Legend */}
+      <g opacity={0.5}>
+        <motion.circle cx={12} cy={12} r={3.5} fill="#10b981"
+          animate={{ opacity: [1, 0.3, 1] }} transition={{ repeat: Infinity, duration: 1.5 }} />
+        <text x={20} y={16} fontSize={8} fill="#10b981">LIVE</text>
+        <circle cx={60} cy={12} r={3.5} fill="#374151" />
+        <text x={68} y={16} fontSize={8} fill="#6b7280">IDLE</text>
+      </g>
+    </svg>
+  );
+}
+
+// ─── Agent detail panel ───────────────────────────────────────────────────────
+
+function AgentDetailPanel({
+  agentId, statuses, mail, workers, onNudge, onClose,
+}: {
+  agentId: AgentId | null;
+  statuses: AgentStatus[];
+  mail: MailItem[];
+  workers: WorkerInfo[];
+  onNudge: (id: string) => void;
+  onClose: () => void;
+}) {
+  if (!agentId) return null;
+  const def = AGENT_DEFS.find(d => d.id === agentId);
+  if (!def) return null;
+
+  const status = statuses.find(s => s.agentId === agentId);
+  const worker = workers.find(w => w.id === agentId);
+  const agentMail = mail.filter(m => m.fromAgent === agentId || m.toAgent === agentId).slice(0, 8);
+  const isWorking = status?.status === "working";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 24 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 24 }}
+      className="bg-slate-900/95 border border-slate-700/60 rounded-xl p-4 h-full overflow-auto"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <div className="text-2xl">{def.emoji}</div>
+          <div>
+            <div className="font-bold text-white text-sm">{def.name}</div>
+            <div className="text-xs text-slate-400">{def.role}</div>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-slate-500 hover:text-white text-xs px-2 py-1 rounded border border-slate-700 hover:border-slate-500 transition-colors">
+          ✕
+        </button>
+      </div>
+
+      {/* Status */}
+      <div className="mb-4 p-3 bg-slate-800/60 rounded-lg border border-slate-700/40">
+        <div className="flex items-center gap-2 mb-2">
+          <motion.div
+            className="w-2 h-2 rounded-full"
+            style={{ backgroundColor: isWorking ? def.colorHex : "#374151" }}
+            animate={isWorking ? { opacity: [1, 0.3, 1] } : {}}
+            transition={{ repeat: Infinity, duration: 1.5 }}
+          />
+          <span className="text-xs font-mono" style={{ color: isWorking ? def.colorHex : "#6b7280" }}>
+            {isWorking ? "WORKING" : (status?.status ?? "OFFLINE").toUpperCase()}
+          </span>
+          <span className="text-xs text-slate-500 ml-auto">
+            {status?.tickCount ?? 0} ticks
+          </span>
+        </div>
+        {status?.currentTask && (
+          <div className="text-xs text-slate-300 font-mono mt-1 line-clamp-2">
+            {status.currentTask}
+          </div>
+        )}
+        {worker && (
+          <div className="text-xs text-slate-500 mt-2">
+            Every {worker.intervalMs / 1000}s
+            {worker.lastRun > 0 && ` · Last: ${Math.round((Date.now() - worker.lastRun) / 1000)}s ago`}
+          </div>
+        )}
+      </div>
+
+      {/* Vision */}
+      <div className="mb-4 p-3 bg-slate-800/40 rounded-lg border border-slate-700/30">
+        <div className="text-xs text-slate-500 mb-1">VISION</div>
+        <div className="text-xs text-slate-300 italic leading-relaxed">{worker?.vision}</div>
+      </div>
+
+      {/* Nudge button */}
+      <button
+        onClick={() => onNudge(agentId)}
+        className="w-full mb-4 py-2 rounded-lg border text-xs font-mono transition-all"
+        style={{
+          backgroundColor: `${def.colorHex}15`,
+          borderColor: `${def.colorHex}44`,
+          color: def.colorHex,
+        }}
+        onMouseEnter={e => (e.currentTarget.style.backgroundColor = `${def.colorHex}25`)}
+        onMouseLeave={e => (e.currentTarget.style.backgroundColor = `${def.colorHex}15`)}
+      >
+        <Zap className="inline w-3 h-3 mr-1" />
+        NUDGE AGENT
+      </button>
+
+      {/* Recent mail */}
+      <div className="text-xs text-slate-500 mb-2 font-mono">RECENT MAIL</div>
+      <div className="space-y-2">
+        {agentMail.length === 0 ? (
+          <div className="text-xs text-slate-600 text-center py-3">No recent mail</div>
+        ) : (
+          agentMail.map(m => (
+            <div key={m.id} className="p-2 bg-slate-800/50 rounded-lg border border-slate-700/30">
+              <div className="flex items-center gap-1 mb-1">
+                <span className="text-xs text-slate-500">{m.fromAgent}</span>
+                <ChevronRight className="w-3 h-3 text-slate-600" />
+                <span className="text-xs text-slate-400">{m.toAgent}</span>
+                <span className={cn("ml-auto text-xs px-1 rounded", {
+                  "text-red-400 bg-red-900/30": m.priority === "critical",
+                  "text-amber-400 bg-amber-900/30": m.priority === "high",
+                  "text-blue-400 bg-blue-900/30": m.priority === "normal",
+                  "text-slate-400 bg-slate-800": m.priority === "low",
+                })}>
+                  {m.priority}
+                </span>
+              </div>
+              <div className="text-xs text-slate-300 font-mono truncate">{m.subject}</div>
+            </div>
+          ))
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Activity Feed ────────────────────────────────────────────────────────────
+
+function ActivityFeed({ mail, statuses }: { mail: MailItem[]; statuses: AgentStatus[] }) {
+  const defMap = Object.fromEntries(AGENT_DEFS.map(d => [d.id, d]));
+
+  return (
+    <div className="space-y-2">
+      {mail.length === 0 && (
+        <div className="text-center py-12 text-slate-500 text-sm font-mono">
+          No inter-agent mail yet — agents are initializing…
+        </div>
+      )}
+      {mail.map(m => {
+        const fromDef = defMap[m.fromAgent];
+        const toDef   = defMap[m.toAgent];
+        const age = Date.now() - new Date(m.createdAt).getTime();
+        const ageStr = age < 60_000
+          ? `${Math.round(age / 1000)}s ago`
+          : age < 3600_000
+          ? `${Math.round(age / 60_000)}m ago`
+          : `${Math.round(age / 3600_000)}h ago`;
+
+        return (
+          <motion.div
+            key={m.id}
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-3 bg-slate-900/60 rounded-xl border border-slate-700/40 hover:border-slate-600/60 transition-colors"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              {fromDef && (
+                <span className="text-base">{fromDef.emoji}</span>
+              )}
+              <span className="text-xs text-slate-400 font-mono">{m.fromAgent}</span>
+              <ChevronRight className="w-3 h-3 text-slate-600" />
+              {toDef && (
+                <span className="text-base">{toDef.emoji}</span>
+              )}
+              <span className="text-xs text-slate-400 font-mono">{m.toAgent}</span>
+              <span className={cn("ml-auto text-xs px-1.5 py-0.5 rounded font-mono", {
+                "text-red-400 bg-red-900/30 border border-red-800/50": m.priority === "critical",
+                "text-amber-400 bg-amber-900/30 border border-amber-800/50": m.priority === "high",
+                "text-blue-400 bg-blue-900/30 border border-blue-800/50": m.priority === "normal",
+                "text-slate-400 bg-slate-800/50": m.priority === "low",
+              })}>
+                {m.priority}
+              </span>
+              <span className="text-xs text-slate-600">{ageStr}</span>
+            </div>
+            <div className="text-sm text-white font-mono">{m.subject}</div>
+            <div className="text-xs text-slate-400 mt-1 line-clamp-2">{m.body}</div>
+          </motion.div>
+        );
+      })}
     </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Dev Agent Tab (Qwen ReAct Sessions) ─────────────────────────────────────
 
-type Tab = "command" | "activity" | "devagent";
+interface DevSession {
+  id: string; title: string; status: string; createdAt: string;
+  steps: Array<{ thought: string; action: string; observation: string; error?: boolean }>;
+  result?: string; error?: string;
+}
 
-export default function AgentPage() {
-  const [tab, setTab] = useState<Tab>("command");
-  const [selectedAgent, setSelectedAgent] = useState<AgentId | null>(null);
+function DevAgentTab() {
+  const [sessions, setSessions] = useState<DevSession[]>([]);
+  const [selected, setSelected] = useState<DevSession | null>(null);
+  const [goal, setGoal] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [polling, setPolling] = useState<ReturnType<typeof setInterval> | null>(null);
 
-  // Worker data
-  const [agents, setAgents] = useState<AgentStatus[]>([]);
-  const [workers, setWorkers] = useState<WorkerInfo[]>([]);
-  const [mail, setMail] = useState<AgentMail[]>([]);
-  const [metrics, setMetrics] = useState<AgentMetric[]>([]);
-  const [prevMailIds, setPrevMailIds] = useState<Set<number>>(new Set());
-  const [newMailIds, setNewMailIds] = useState<Set<number>>(new Set());
-  const [particles, setParticles] = useState<MailParticle[]>([]);
-  const particleIdRef = useRef(0);
-
-  // Dev Agent state
-  const [devTask, setDevTask] = useState("");
-  const [sessions, setSessions] = useState<Array<{ id: string; task: string; status: string; totalSteps: number; createdAt: string }>>([]);
-  const [activeSession, setActiveSession] = useState<AgentSession | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(() => {
-    try { return localStorage.getItem("agent_active_session_id"); } catch { return null; }
-  });
-  const [isStarting, setIsStarting] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const dispatchRef = useRef<HTMLTextAreaElement>(null);
-
-  // Nudge (dispatch) state
-  const [nudgeAgent, setNudgeAgent] = useState<AgentId | null>(null);
-  const [nudgeTask, setNudgeTask] = useState("");
-  const [nudging, setNudging] = useState(false);
-
-  // ── Data fetching ──────────────────────────────────────────────────────────
-
-  const fetchWorkerStatus = useCallback(async () => {
+  const loadSessions = useCallback(async () => {
     try {
-      const res = await fetch("/api/workers/status");
-      if (!res.ok) return;
-      const data = await res.json() as { workers: WorkerInfo[]; agents: AgentStatus[] };
-      setWorkers(data.workers ?? []);
-      setAgents(data.agents ?? []);
-    } catch { /* ignore */ }
+      const r = await fetch("/api/agent/sessions");
+      if (r.ok) { const d = await r.json(); setSessions(d.sessions ?? []); }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadSessions();
+    const t = setInterval(loadSessions, 3000);
+    return () => clearInterval(t);
+  }, [loadSessions]);
+
+  const pollSession = useCallback((id: string) => {
+    if (polling) clearInterval(polling);
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/agent/sessions/${id}`);
+        if (r.ok) {
+          const d = await r.json();
+          setSelected(d.session);
+          if (d.session.status === "done" || d.session.status === "error") {
+            clearInterval(t);
+            setPolling(null);
+            loadSessions();
+          }
+        }
+      } catch {}
+    }, 1000);
+    setPolling(t);
+  }, [polling, loadSessions]);
+
+  useEffect(() => () => { if (polling) clearInterval(polling); }, [polling]);
+
+  const createSession = async () => {
+    if (!goal.trim()) return;
+    setCreating(true);
+    try {
+      const r = await fetch("/api/agent/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal: goal.trim(), maxSteps: 12 }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setGoal("");
+        setSelected(d.session);
+        pollSession(d.session.id);
+        loadSessions();
+      }
+    } catch {}
+    setCreating(false);
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-full">
+      {/* Sessions list */}
+      <div className="space-y-3">
+        <div className="flex gap-2">
+          <input
+            value={goal}
+            onChange={e => setGoal(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && !creating && createSession()}
+            placeholder="What should the Dev Agent do?"
+            className="flex-1 bg-slate-800/60 border border-slate-700/60 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50"
+          />
+          <button
+            onClick={createSession}
+            disabled={creating || !goal.trim()}
+            className="px-3 py-2 bg-emerald-600/20 border border-emerald-600/40 rounded-lg text-emerald-400 text-sm hover:bg-emerald-600/30 disabled:opacity-50 transition-colors"
+          >
+            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </button>
+        </div>
+
+        <div className="space-y-2 overflow-auto max-h-[60vh]">
+          {sessions.length === 0 && (
+            <div className="text-center py-8 text-slate-500 text-sm">
+              No dev sessions yet
+            </div>
+          )}
+          {sessions.map(s => (
+            <div key={s.id}
+              onClick={() => { setSelected(s); if (s.status === "running") pollSession(s.id); }}
+              className={cn("p-3 rounded-xl border cursor-pointer transition-all", {
+                "border-emerald-500/50 bg-emerald-500/5": selected?.id === s.id,
+                "border-slate-700/40 bg-slate-900/40 hover:border-slate-600": selected?.id !== s.id,
+              })}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                {s.status === "running"  && <Loader2 className="w-3 h-3 text-emerald-400 animate-spin" />}
+                {s.status === "done"     && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                {s.status === "error"    && <XCircle className="w-3 h-3 text-red-400" />}
+                <span className="text-xs text-slate-300 font-mono truncate">{s.title}</span>
+              </div>
+              <div className="text-xs text-slate-500">{s.steps?.length ?? 0} steps</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Session detail */}
+      <div className="lg:col-span-2 overflow-auto">
+        {!selected && (
+          <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+            Select a session or create a new one
+          </div>
+        )}
+        {selected && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🤖</span>
+              <div>
+                <div className="text-sm font-bold text-white font-mono">{selected.title}</div>
+                <div className="text-xs text-slate-500">
+                  {selected.status} · {selected.steps?.length ?? 0} steps
+                </div>
+              </div>
+            </div>
+            {selected.steps?.map((step, i) => (
+              <div key={i} className={cn("p-3 rounded-xl border text-xs space-y-1.5",
+                step.error ? "border-red-800/40 bg-red-900/10" : "border-slate-700/40 bg-slate-900/40"
+              )}>
+                <div className="text-emerald-400 font-mono">
+                  💭 <span className="text-slate-300">{step.thought}</span>
+                </div>
+                <div className="text-blue-400 font-mono">
+                  🔧 <span className="text-slate-300">{step.action}</span>
+                </div>
+                {step.observation && (
+                  <div className="text-amber-400 font-mono">
+                    👁 <span className="text-slate-400">{step.observation}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+            {selected.result && (
+              <div className="p-3 rounded-xl border border-emerald-700/40 bg-emerald-900/10 text-xs text-emerald-300">
+                ✅ {selected.result}
+              </div>
+            )}
+            {selected.error && (
+              <div className="p-3 rounded-xl border border-red-700/40 bg-red-900/10 text-xs text-red-300">
+                ❌ {selected.error}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ─────────────────────────────────────────────────────────────────
+
+export default function AgentCommandCenter() {
+  const [tab, setTab] = useState<"office" | "activity" | "dev">("office");
+  const [selectedAgent, setSelectedAgent] = useState<AgentId | null>(null);
+  const [statuses, setStatuses] = useState<AgentStatus[]>([]);
+  const [mail, setMail] = useState<MailItem[]>([]);
+  const [workers, setWorkers] = useState<WorkerInfo[]>([]);
+  const [sseConnected, setSseConnected] = useState(false);
+  const [nudging, setNudging] = useState<string | null>(null);
+  const [mailUnread, setMailUnread] = useState(0);
+  const esRef = useRef<EventSource | null>(null);
+  const lastMailIdRef = useRef<number>(0);
+
+  // ─── Data fetchers ──────────────────────────────────────────────────────────
+
+  const fetchStatuses = useCallback(async () => {
+    try {
+      const r = await fetch("/api/workers/status");
+      if (r.ok) { const d = await r.json(); setStatuses(d.agents ?? []); }
+    } catch {}
   }, []);
 
   const fetchMail = useCallback(async () => {
     try {
-      const res = await fetch("/api/workers/mail/all?limit=80");
-      if (!res.ok) return;
-      const data = await res.json() as { mail: AgentMail[] };
-      const incoming = data.mail ?? [];
-
-      // Detect new mail for highlights + particles
-      const incomingIds = new Set(incoming.map(m => m.id));
-      const newIds = new Set<number>();
-      incoming.forEach(m => {
-        if (!prevMailIds.has(m.id)) newIds.add(m.id);
-      });
-
-      if (newIds.size > 0) {
-        setNewMailIds(newIds);
-        // Spawn particles for first 3 new mails
-        const newMails = incoming.filter(m => newIds.has(m.id)).slice(0, 3);
-        const newParticles: MailParticle[] = newMails
-          .filter(m => AGENT_DEFS.some(a => a.id === m.fromAgent) && AGENT_DEFS.some(a => a.id === m.toAgent))
-          .map(m => ({
-            id: ++particleIdRef.current,
-            from: m.fromAgent as AgentId,
-            to: m.toAgent as AgentId,
-            subject: m.subject,
-            createdAt: Date.now(),
-          }));
-        if (newParticles.length > 0) {
-          setParticles(prev => [...prev, ...newParticles]);
-          setTimeout(() => setParticles(prev => prev.filter(p => !newParticles.some(np => np.id === p.id))), 3000);
+      const r = await fetch("/api/workers/mail/all?limit=80");
+      if (r.ok) {
+        const d = await r.json();
+        const items: MailItem[] = d.mail ?? [];
+        setMail(items);
+        if (items.length > 0 && items[0]) {
+          const latest = items[0].id;
+          if (latest > lastMailIdRef.current) {
+            setMailUnread(prev => prev + (latest - lastMailIdRef.current));
+            lastMailIdRef.current = latest;
+          }
         }
-        setTimeout(() => setNewMailIds(new Set()), 3000);
       }
-
-      setPrevMailIds(incomingIds);
-      setMail(incoming);
-    } catch { /* ignore */ }
-  }, [prevMailIds]);
-
-  const fetchMetrics = useCallback(async () => {
-    try {
-      const res = await fetch("/api/workers/metrics?limit=50");
-      if (!res.ok) return;
-      const data = await res.json() as { metrics: AgentMetric[] };
-      setMetrics(data.metrics ?? []);
-    } catch { /* ignore */ }
+    } catch {}
   }, []);
 
-  // Dev agent
-  const fetchSessions = useCallback(async () => {
+  const fetchWorkers = useCallback(async () => {
     try {
-      const res = await fetch("/api/agent/sessions");
-      if (res.ok) setSessions(await res.json());
-    } catch { /* ignore */ }
-  }, []);
-
-  const fetchActiveSession = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/agent/sessions/${id}`);
-      if (res.ok) {
-        const data: AgentSession = await res.json();
-        setActiveSession(data);
-        return data;
-      } else if (res.status === 404) {
-        setActiveId(null);
-        setActiveSession(null);
-        localStorage.removeItem("agent_active_session_id");
+      const r = await fetch("/api/workers/status");
+      if (r.ok) {
+        const d = await r.json();
+        setWorkers(d.workers ?? []);
       }
-    } catch { /* ignore */ }
-    return null;
+    } catch {}
   }, []);
 
-  // ── Auto-refresh ──────────────────────────────────────────────────────────
+  // ─── SSE connection ─────────────────────────────────────────────────────────
 
   useEffect(() => {
-    fetchWorkerStatus();
+    fetchStatuses();
     fetchMail();
-    fetchMetrics();
-    fetchSessions();
-    if (activeId) fetchActiveSession(activeId);
+    fetchWorkers();
 
-    const workerInterval = setInterval(() => { fetchWorkerStatus(); fetchMail(); }, 3000);
-    const metricsInterval = setInterval(fetchMetrics, 10000);
-    const sessionsInterval = setInterval(fetchSessions, 8000);
+    const es = new EventSource("/api/workers/events");
+    esRef.current = es;
+
+    es.onopen = () => setSseConnected(true);
+    es.onerror = () => setSseConnected(false);
+
+    es.addEventListener("worker_tick", () => {
+      // Refresh data on every agent tick
+      fetchStatuses();
+      fetchMail();
+    });
+
+    // Polling fallback (catches anything SSE misses)
+    const pollTimer = setInterval(() => {
+      fetchStatuses();
+      fetchMail();
+    }, 5000);
 
     return () => {
-      clearInterval(workerInterval);
-      clearInterval(metricsInterval);
-      clearInterval(sessionsInterval);
+      es.close();
+      clearInterval(pollTimer);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchStatuses, fetchMail, fetchWorkers]);
 
-  // Poll active dev session
+  // Clear unread badge when switching to activity tab
   useEffect(() => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    if (!activeId) return;
-    const poll = async () => {
-      const data = await fetchActiveSession(activeId);
-      await fetchSessions();
-      if (data && data.status !== "running") clearInterval(pollRef.current!);
-    };
-    poll();
-    pollRef.current = setInterval(poll, 2000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [activeId, fetchActiveSession, fetchSessions]);
+    if (tab === "activity") setMailUnread(0);
+  }, [tab]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [activeSession?.events.length]);
+  // ─── Actions ────────────────────────────────────────────────────────────────
 
-  // ── Nudge an agent ────────────────────────────────────────────────────────
-
-  const nudge = useCallback(async (agentId: AgentId, task?: string) => {
-    setNudging(true);
+  const nudgeAgent = async (id: string) => {
+    setNudging(id);
     try {
-      await fetch(`/api/workers/${agentId}/nudge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: task || undefined }),
-      });
-      setTimeout(() => { fetchWorkerStatus(); fetchMail(); }, 1000);
-    } catch { /* ignore */ }
-    setNudging(false);
-    setNudgeAgent(null);
-    setNudgeTask("");
-  }, [fetchWorkerStatus, fetchMail]);
+      await fetch(`/api/workers/${id}/nudge`, { method: "POST" });
+      setTimeout(fetchStatuses, 800);
+    } catch {}
+    setTimeout(() => setNudging(null), 2000);
+  };
 
-  // ── Dev Agent run ─────────────────────────────────────────────────────────
+  // ─── Computed stats ──────────────────────────────────────────────────────────
 
-  const runDevAgent = useCallback(async () => {
-    if (!devTask.trim() || isStarting) return;
-    setIsStarting(true);
-    try {
-      const res = await fetch("/api/agent/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: devTask.trim() }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json() as { id: string };
-      setActiveId(data.id);
-      localStorage.setItem("agent_active_session_id", data.id);
-      setActiveSession(null);
-      setDevTask("");
-      fetchSessions();
-    } catch (e) { console.error(e); }
-    setIsStarting(false);
-  }, [devTask, isStarting, fetchSessions]);
+  // Count agents that are actively working OR have ticked at least once (recently active)
+  const workingCount = statuses.filter(s => s.status === "working" || (s.tickCount ?? 0) > 0).length;
+  const totalCount   = AGENT_DEFS.length;
 
-  const stopDevAgent = useCallback(async () => {
-    if (!activeId) return;
-    await fetch(`/api/agent/sessions/${activeId}/stop`, { method: "POST" });
-    await fetchActiveSession(activeId);
-    fetchSessions();
-  }, [activeId, fetchActiveSession, fetchSessions]);
-
-  const deleteSession = useCallback(async (id: string) => {
-    await fetch(`/api/agent/sessions/${id}`, { method: "DELETE" });
-    if (id === activeId) { setActiveId(null); setActiveSession(null); localStorage.removeItem("agent_active_session_id"); }
-    fetchSessions();
-  }, [activeId, fetchSessions]);
-
-  // ── Computed ──────────────────────────────────────────────────────────────
-
-  const agentMap = useMemo(() => {
-    const m: Record<string, AgentStatus> = {};
-    agents.forEach(a => { m[a.agentId] = a; });
-    return m;
-  }, [agents]);
-
-  const selectedStatus = selectedAgent ? agentMap[selectedAgent] : null;
-  const selectedDef = selectedAgent ? AGENT_DEFS.find(a => a.id === selectedAgent) : null;
-  const selectedMail = useMemo(() =>
-    mail.filter(m => m.fromAgent === selectedAgent || m.toAgent === selectedAgent).slice(0, 20),
-    [mail, selectedAgent]
-  );
-
-  const bossInbox = useMemo(() => mail.filter(m => m.toAgent === "boss").slice(0, 25), [mail]);
-  const allActivity = useMemo(() => [...mail].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 60), [mail]);
-
-  const isDevRunning = activeSession?.status === "running";
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full flex-col bg-slate-950 overflow-hidden">
+    <div className="min-h-screen bg-slate-950 text-white flex flex-col">
+      {/* ── Header ── */}
+      <div className="flex-none border-b border-slate-800/60 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="text-xl">🏢</div>
+            <div>
+              <div className="font-bold text-white tracking-wide" style={{ fontFamily: "Syne, sans-serif" }}>
+                Agent Command Center
+              </div>
+              <div className="text-xs text-slate-400 font-mono">DLavie OS · 8 Autonomous Agents</div>
+            </div>
+          </div>
 
-      {/* ── Background ──────────────────────────────────────────────────── */}
-      <div className="absolute inset-0 pointer-events-none">
-        <NeuralParticles />
-        <div className="absolute inset-0 bg-gradient-to-b from-emerald-950/10 via-transparent to-slate-950/80" />
-      </div>
-
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="relative flex-shrink-0 border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-md px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            {/* Animated logo */}
-            <div className="relative w-9 h-9 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            {/* SSE status */}
+            <div className="flex items-center gap-1.5 text-xs font-mono">
               <motion.div
-                className="absolute inset-0 rounded-xl bg-emerald-500/20 border border-emerald-500/40"
-                animate={{ scale: [1, 1.1, 1], opacity: [0.6, 1, 0.6] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: sseConnected ? "#10b981" : "#f59e0b" }}
+                animate={{ opacity: [1, 0.4, 1] }}
+                transition={{ repeat: Infinity, duration: 1.5 }}
               />
-              <div className="absolute inset-0 rounded-xl flex items-center justify-center">
-                <Bot className="w-5 h-5 text-emerald-400" />
-              </div>
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-sm font-bold text-slate-100 font-[Syne]">Agent Command Center</h1>
-              <div className="hidden sm:block mt-0.5">
-                <SystemStatus agents={agents} workers={workers} />
-              </div>
-            </div>
-          </div>
-
-          {/* Live indicator */}
-          <div className="flex items-center gap-2">
-            <motion.div
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20"
-              animate={{ borderColor: ["rgba(16,185,129,0.2)", "rgba(16,185,129,0.5)", "rgba(16,185,129,0.2)"] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
-              <Radio className="w-3 h-3 text-emerald-400" />
-              <span className="text-[10px] text-emerald-400 font-mono font-semibold hidden sm:inline">LIVE</span>
-            </motion.div>
-          </div>
-        </div>
-
-        {/* Mobile status */}
-        <div className="sm:hidden mt-2">
-          <SystemStatus agents={agents} workers={workers} />
-        </div>
-      </div>
-
-      {/* ── Tab bar ──────────────────────────────────────────────────────── */}
-      <div className="relative flex-shrink-0 flex border-b border-slate-800/80 bg-slate-900/40 backdrop-blur-sm px-2 overflow-x-auto scrollbar-none">
-        {[
-          { id: "command" as Tab,  label: "Office",   icon: LayoutGrid, badge: null },
-          { id: "activity" as Tab, label: "Activity", icon: Activity,   badge: mail.length > 0 ? String(bossInbox.length) : null },
-          { id: "devagent" as Tab, label: "Dev Agent", icon: TerminalSquare, badge: isDevRunning ? "●" : null },
-        ].map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "relative flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-all whitespace-nowrap flex-shrink-0",
-              tab === t.id
-                ? "border-emerald-500 text-emerald-400"
-                : "border-transparent text-slate-500 hover:text-slate-300"
-            )}
-          >
-            <t.icon className="w-3.5 h-3.5" />
-            {t.label}
-            {t.badge && (
-              <span className={cn(
-                "px-1 py-0.5 rounded text-[9px] font-mono",
-                t.badge === "●"
-                  ? "text-emerald-400 animate-pulse"
-                  : "bg-slate-700 text-slate-400"
-              )}>
-                {t.badge}
+              <span className={sseConnected ? "text-emerald-400" : "text-amber-400"}>
+                {sseConnected ? "SSE LIVE" : "POLLING"}
               </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Tab: Command Center (Office) ─────────────────────────────────── */}
-      {tab === "command" && (
-        <div className="relative flex-1 overflow-y-auto">
-          <div className="p-3 sm:p-4 space-y-4">
-
-            {/* 3D Office Scene */}
-            <div className="relative">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 text-emerald-400" /> Live Office
-                </h2>
-                <button
-                  onClick={() => { fetchWorkerStatus(); fetchMail(); }}
-                  className="p-1 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400 transition-colors"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                </button>
-              </div>
-
-              {/* 3D perspective container */}
-              <div
-                className="relative rounded-2xl overflow-hidden border border-slate-800/60 bg-slate-900/40"
-                style={{ perspective: "900px" }}
-              >
-                <motion.div
-                  initial={{ rotateX: 8, opacity: 0 }}
-                  animate={{ rotateX: 0, opacity: 1 }}
-                  transition={{ duration: 0.6, ease: "easeOut" }}
-                  style={{ transformStyle: "preserve-3d" }}
-                >
-                  {/* Orchestrator at top (row 0) */}
-                  <div className="px-3 pt-4 pb-2">
-                    <div className="flex justify-center">
-                      <div className="w-full max-w-[200px] sm:max-w-[240px] relative">
-                        {/* Particle flash above orchestrator */}
-                        <AnimatePresence>
-                          {particles.map(p => p.from === "orchestrator" && (
-                            <MailFlash key={p.id} subject={p.subject} />
-                          ))}
-                        </AnimatePresence>
-                        <AgentDesk
-                          def={AGENT_DEFS[0]}
-                          status={agentMap["orchestrator"]}
-                          isSelected={selectedAgent === "orchestrator"}
-                          onClick={() => setSelectedAgent(a => a === "orchestrator" ? null : "orchestrator")}
-                        />
-                      </div>
-                    </div>
-                    {/* Connector line down */}
-                    <div className="flex justify-center mt-2">
-                      <motion.div
-                        className="w-px h-4 bg-gradient-to-b from-emerald-500/40 to-transparent"
-                        animate={{ opacity: [0.3, 1, 0.3] }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Row 1: trainer, librarian, guardian */}
-                  <div className="px-3 pb-2">
-                    <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                      {AGENT_DEFS.filter(a => a.row === 1).map(def => (
-                        <div key={def.id} className="relative">
-                          <AnimatePresence>
-                            {particles.map(p => (p.from === def.id || p.to === def.id) && (
-                              <MailFlash key={p.id} subject={p.subject} />
-                            ))}
-                          </AnimatePresence>
-                          <AgentDesk
-                            def={def}
-                            status={agentMap[def.id]}
-                            isSelected={selectedAgent === def.id}
-                            onClick={() => setSelectedAgent(a => a === def.id ? null : def.id as AgentId)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                    {/* Connector line down */}
-                    <div className="flex justify-center mt-2">
-                      <motion.div
-                        className="w-px h-4 bg-gradient-to-b from-slate-700 to-transparent"
-                        animate={{ opacity: [0.2, 0.6, 0.2] }}
-                        transition={{ duration: 2.5, repeat: Infinity }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Row 2: analyst, botmaster, curator, engineer */}
-                  <div className="px-3 pb-4">
-                    <div className="grid grid-cols-4 gap-2 sm:gap-3">
-                      {AGENT_DEFS.filter(a => a.row === 2).map(def => (
-                        <div key={def.id} className="relative">
-                          <AnimatePresence>
-                            {particles.map(p => (p.from === def.id || p.to === def.id) && (
-                              <MailFlash key={p.id} subject={p.subject} />
-                            ))}
-                          </AnimatePresence>
-                          <AgentDesk
-                            def={def}
-                            status={agentMap[def.id]}
-                            isSelected={selectedAgent === def.id}
-                            onClick={() => setSelectedAgent(a => a === def.id ? null : def.id as AgentId)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </motion.div>
-
-                {/* Ambient glow overlay */}
-                <div className="absolute inset-0 pointer-events-none rounded-2xl bg-gradient-to-t from-slate-950/60 via-transparent to-emerald-950/10" />
-              </div>
             </div>
 
-            {/* Selected agent panel */}
-            <AnimatePresence>
-              {selectedAgent && selectedDef && (
-                <motion.div
-                  key={selectedAgent}
-                  initial={{ opacity: 0, height: 0, y: -10 }}
-                  animate={{ opacity: 1, height: "auto", y: 0 }}
-                  exit={{ opacity: 0, height: 0, y: -10 }}
-                  transition={{ type: "spring", stiffness: 300, damping: 28 }}
-                  className="overflow-hidden"
-                >
-                  {(() => {
-                    const c = COLOR_MAP[selectedDef.color];
+            {/* Working count */}
+            <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-3 py-1 text-xs font-mono">
+              <motion.div className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+                animate={{ opacity: [1, 0.3, 1] }}
+                transition={{ repeat: Infinity, duration: 1 }} />
+              <span className="text-emerald-400">{workingCount}/{totalCount} ONLINE</span>
+            </div>
+
+            <button
+              onClick={() => { fetchStatuses(); fetchMail(); }}
+              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Tabs ── */}
+      <div className="flex-none border-b border-slate-800/60 px-4">
+        <div className="max-w-7xl mx-auto flex gap-1">
+          {[
+            { key: "office",   label: "🏢 Office",   icon: null },
+            { key: "activity", label: "📨 Activity", badge: mailUnread },
+            { key: "dev",      label: "🤖 Dev Agent", icon: null },
+          ].map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as typeof tab)}
+              className={cn(
+                "relative px-4 py-2.5 text-sm font-mono border-b-2 transition-colors",
+                tab === t.key
+                  ? "border-emerald-500 text-white"
+                  : "border-transparent text-slate-400 hover:text-slate-300",
+              )}
+            >
+              {t.label}
+              {(t.badge ?? 0) > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-emerald-500 text-black text-xs rounded-full flex items-center justify-center font-bold">
+                  {(t.badge ?? 0) > 9 ? "9+" : t.badge}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Content ── */}
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-7xl mx-auto p-4 h-full">
+
+          {/* ── OFFICE TAB ── */}
+          {tab === "office" && (
+            <div className="flex gap-4 h-full" style={{ minHeight: "calc(100vh - 140px)" }}>
+              {/* Main SVG office */}
+              <div className={cn(
+                "flex-1 rounded-2xl border border-slate-800/60 bg-slate-950/80 overflow-hidden transition-all",
+                selectedAgent ? "flex-[2]" : "flex-1",
+              )}>
+                <OfficeScene
+                  statuses={statuses}
+                  mail={mail}
+                  selectedAgent={selectedAgent}
+                  onSelect={id => setSelectedAgent(id === selectedAgent ? null : id)}
+                />
+              </div>
+
+              {/* Agent detail panel */}
+              <AnimatePresence>
+                {selectedAgent && (
+                  <div className="w-72 flex-none">
+                    <AgentDetailPanel
+                      agentId={selectedAgent}
+                      statuses={statuses}
+                      mail={mail}
+                      workers={workers}
+                      onNudge={nudgeAgent}
+                      onClose={() => setSelectedAgent(null)}
+                    />
+                  </div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* ── ACTIVITY TAB ── */}
+          {tab === "activity" && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Mail feed */}
+              <div className="lg:col-span-2">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-mono text-slate-300 flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-emerald-400" />
+                    Inter-agent Mail
+                    <span className="text-slate-500 text-xs">({mail.length} total)</span>
+                  </div>
+                </div>
+                <div className="space-y-2 max-h-[calc(100vh-200px)] overflow-auto pr-1">
+                  <ActivityFeed mail={mail} statuses={statuses} />
+                </div>
+              </div>
+
+              {/* Agent roster status */}
+              <div>
+                <div className="text-sm font-mono text-slate-300 flex items-center gap-2 mb-3">
+                  <Activity className="w-4 h-4 text-emerald-400" />
+                  Agent Roster
+                </div>
+                <div className="space-y-2">
+                  {AGENT_DEFS.map(def => {
+                    const status = statuses.find(s => s.agentId === def.id);
+                    const worker = workers.find(w => w.id === def.id);
+                    const isWorking = status?.status === "working";
+
                     return (
-                      <div className={cn("rounded-2xl border p-4 space-y-3", c.bg, c.border)}>
-                        {/* Header */}
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <div className="text-2xl">{selectedDef.emoji}</div>
-                            <div>
-                              <h3 className={cn("text-sm font-bold font-[Syne]", c.text)}>{selectedDef.name}</h3>
-                              <p className="text-xs text-slate-500">{selectedDef.role}</p>
+                      <div key={def.id}
+                        className="p-3 rounded-xl border border-slate-800/60 bg-slate-900/40 hover:border-slate-700 cursor-pointer transition-colors"
+                        onClick={() => { setSelectedAgent(def.id as AgentId); setTab("office"); }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span>{def.emoji}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs text-white font-mono">{def.name}</div>
+                            <div className="text-xs text-slate-500 truncate">
+                              {status?.currentTask ?? def.role}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            {/* Nudge button */}
+                          <div className="flex items-center gap-1.5">
+                            <motion.div
+                              className="w-2 h-2 rounded-full"
+                              style={{ backgroundColor: isWorking ? def.colorHex : "#374151" }}
+                              animate={isWorking ? { opacity: [1, 0.3, 1] } : {}}
+                              transition={{ repeat: Infinity, duration: 1.5 }}
+                            />
                             <button
-                              onClick={() => setNudgeAgent(nudgeAgent === selectedAgent ? null : selectedAgent)}
-                              className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all", c.bg, c.border, c.text, "hover:opacity-80")}
+                              onClick={e => { e.stopPropagation(); nudgeAgent(def.id); }}
+                              className="p-1 text-slate-600 hover:text-slate-300 transition-colors"
+                              title="Nudge agent"
                             >
-                              <Send className="w-3 h-3" />
-                              <span className="hidden sm:inline">Dispatch</span>
-                            </button>
-                            <button
-                              onClick={() => setSelectedAgent(null)}
-                              className="p-1.5 rounded-lg bg-slate-800 text-slate-500 hover:text-slate-300 border border-slate-700 transition-colors"
-                            >
-                              <XCircle className="w-3.5 h-3.5" />
+                              {nudging === def.id
+                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                : <Zap className="w-3 h-3" />
+                              }
                             </button>
                           </div>
                         </div>
-
-                        {/* Dispatch input */}
-                        <AnimatePresence>
-                          {nudgeAgent === selectedAgent && (
-                            <motion.div
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: "auto" }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="flex gap-2 pt-1">
-                                <input
-                                  ref={dispatchRef as React.RefObject<HTMLInputElement>}
-                                  value={nudgeTask}
-                                  onChange={e => setNudgeTask(e.target.value)}
-                                  onKeyDown={e => { if (e.key === "Enter") nudge(selectedAgent, nudgeTask || undefined); }}
-                                  placeholder={`Give a task to ${selectedDef.name}… (or leave blank to trigger now)`}
-                                  className="flex-1 bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/50"
-                                  autoFocus
-                                />
-                                <button
-                                  onClick={() => nudge(selectedAgent, nudgeTask || undefined)}
-                                  disabled={nudging}
-                                  className={cn("px-3 py-2 rounded-xl border text-xs font-medium transition-all flex-shrink-0", c.bg, c.border, c.text, "hover:opacity-80 disabled:opacity-50")}
-                                >
-                                  {nudging ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-
-                        {/* Current task */}
-                        {selectedStatus?.currentTask && (
-                          <div className="flex items-center gap-2 bg-slate-900/60 rounded-xl px-3 py-2">
-                            <Loader2 className={cn("w-3 h-3 animate-spin flex-shrink-0", c.text)} />
-                            <p className="text-xs text-slate-300 font-mono">{selectedStatus.currentTask}</p>
-                          </div>
-                        )}
-
-                        {/* Agent mail */}
-                        {selectedMail.length > 0 && (
-                          <div>
-                            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1">
-                              <Mail className="w-2.5 h-2.5" /> Recent messages
-                            </p>
-                            <div className="space-y-0 max-h-40 overflow-y-auto">
-                              {selectedMail.map(m => (
-                                <ActivityItem key={m.id} mail={m} isNew={newMailIds.has(m.id)} />
-                              ))}
-                            </div>
+                        {worker && (
+                          <div className="text-xs text-slate-600 mt-1 font-mono">
+                            {status?.tickCount ?? 0} ticks · every {worker.intervalMs / 1000}s
                           </div>
                         )}
                       </div>
-                    );
-                  })()}
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Metrics strip */}
-            {metrics.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest flex items-center gap-1">
-                  <BarChart2 className="w-3 h-3" /> Recent metrics
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {metrics.slice(0, 6).map(m => {
-                    const def = AGENT_DEFS.find(a => a.id === m.agentId);
-                    const c = def ? COLOR_MAP[def.color] : null;
-                    return (
-                      <motion.div
-                        key={m.id}
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className={cn("rounded-xl border p-2.5", c?.bg ?? "bg-slate-900/60", c?.border ?? "border-slate-800")}
-                      >
-                        <p className={cn("text-[10px] font-semibold truncate", c?.text ?? "text-slate-400")}>{def?.emoji} {def?.name}</p>
-                        <p className="text-[10px] text-slate-500 truncate font-mono mt-0.5">{m.metricType.replace(/_/g, " ")}</p>
-                        <p className="text-sm font-bold text-slate-200 mt-1 truncate">{m.label ?? m.value}</p>
-                      </motion.div>
                     );
                   })}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* ── DEV AGENT TAB ── */}
+          {tab === "dev" && <DevAgentTab />}
         </div>
-      )}
-
-      {/* ── Tab: Activity ─────────────────────────────────────────────────── */}
-      {tab === "activity" && (
-        <div className="relative flex-1 overflow-hidden flex flex-col min-h-0">
-          <div className="flex-shrink-0 px-4 py-2 flex items-center justify-between border-b border-slate-800/60">
-            <p className="text-xs text-slate-500 font-mono">{allActivity.length} messages</p>
-            <div className="flex items-center gap-2">
-              <button onClick={() => { fetchMail(); fetchWorkerStatus(); }} className="p-1 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400">
-                <RefreshCw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-1 overflow-hidden min-h-0 divide-x divide-slate-800/60">
-            {/* All activity */}
-            <div className="flex-1 overflow-y-auto p-4">
-              <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest mb-3 flex items-center gap-1">
-                <Activity className="w-2.5 h-2.5" /> Inter-Agent Communication
-              </p>
-              {allActivity.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <Activity className="w-8 h-8 text-slate-700 mb-3" />
-                  <p className="text-xs text-slate-600">No activity yet — agents are starting up</p>
-                </div>
-              ) : (
-                <div className="space-y-0">
-                  <AnimatePresence mode="popLayout">
-                    {allActivity.map(m => (
-                      <ActivityItem key={m.id} mail={m} isNew={newMailIds.has(m.id)} />
-                    ))}
-                  </AnimatePresence>
-                </div>
-              )}
-            </div>
-
-            {/* Boss inbox (desktop sidebar) */}
-            <div className="hidden sm:flex w-64 flex-col">
-              <div className="px-3 py-2 border-b border-slate-800/60 flex-shrink-0">
-                <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest flex items-center gap-1">
-                  <Inbox className="w-2.5 h-2.5" /> Boss Inbox
-                </p>
-              </div>
-              <div className="flex-1 overflow-y-auto p-3 space-y-0">
-                {bossInbox.length === 0 ? (
-                  <p className="text-[10px] text-slate-700 text-center py-8">No messages</p>
-                ) : (
-                  <AnimatePresence mode="popLayout">
-                    {bossInbox.map(m => (
-                      <motion.div
-                        key={m.id}
-                        initial={{ opacity: 0, x: 10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0 }}
-                        className={cn(
-                          "py-2 border-b border-slate-800/40 last:border-0",
-                          m.priority === "critical" && "bg-red-950/20 -mx-3 px-3",
-                          m.priority === "high" && "bg-amber-950/10 -mx-3 px-3",
-                        )}
-                      >
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className="text-[10px] text-emerald-400 font-semibold">
-                            {AGENT_DEFS.find(a => a.id === m.fromAgent)?.emoji} {AGENT_DEFS.find(a => a.id === m.fromAgent)?.name ?? m.fromAgent}
-                          </span>
-                          {m.priority === "critical" && <span className="px-1 py-0.5 rounded text-[8px] bg-red-500/20 text-red-400 border border-red-500/20">CRIT</span>}
-                          {m.priority === "high" && <span className="px-1 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-400 border border-amber-500/20">HIGH</span>}
-                        </div>
-                        <p className="text-[10px] text-slate-300 leading-snug font-medium line-clamp-1">{m.subject}</p>
-                        <p className="text-[10px] text-slate-600 leading-snug line-clamp-2 mt-0.5">{m.body}</p>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Tab: Dev Agent ────────────────────────────────────────────────── */}
-      {tab === "devagent" && (
-        <div className="relative flex-1 flex flex-col overflow-hidden min-h-0">
-
-          {/* Info bar */}
-          <div className="flex-shrink-0 px-4 py-2.5 border-b border-slate-800/60 bg-slate-900/40 flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <Brain className="w-3 h-3 text-violet-400" />
-              <span className="text-[10px] text-violet-400 font-mono font-semibold">Qwen2.5-Coder-32B</span>
-            </div>
-            <span className="text-[10px] text-slate-600">·</span>
-            <span className="text-[10px] text-slate-500 font-mono">34 tools · ReAct loop · persistent memory</span>
-            {isDevRunning && (
-              <motion.span
-                animate={{ opacity: [1, 0.4, 1] }}
-                transition={{ duration: 1.2, repeat: Infinity }}
-                className="ml-auto text-[10px] text-emerald-400 font-mono flex items-center gap-1"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                running in background
-              </motion.span>
-            )}
-          </div>
-
-          {/* Session list + events */}
-          <div className="flex flex-1 overflow-hidden min-h-0">
-
-            {/* Session sidebar */}
-            <div className="hidden md:flex w-52 flex-col border-r border-slate-800/60 bg-slate-900/20 flex-shrink-0">
-              <div className="px-3 py-2 border-b border-slate-800/60 flex items-center justify-between">
-                <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Sessions</p>
-                <button onClick={fetchSessions} className="p-0.5 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400">
-                  <RefreshCw className="w-3 h-3" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                {sessions.length === 0 ? (
-                  <p className="text-[10px] text-slate-700 px-2 py-6 text-center">No sessions yet</p>
-                ) : (
-                  sessions.map(s => (
-                    <div
-                      key={s.id}
-                      onClick={() => { setActiveId(s.id); fetchActiveSession(s.id); }}
-                      className={cn(
-                        "group relative flex flex-col gap-1 px-2.5 py-2 rounded-xl cursor-pointer border transition-all",
-                        activeId === s.id
-                          ? "bg-emerald-500/5 border-emerald-500/20"
-                          : "bg-slate-900/40 border-slate-800/60 hover:bg-slate-800/40 hover:border-slate-700"
-                      )}
-                    >
-                      <p className="text-[10px] text-slate-300 line-clamp-2 leading-snug pr-4">{s.task}</p>
-                      <div className="flex items-center gap-1">
-                        <span className={cn(
-                          "px-1.5 py-0.5 rounded-full text-[9px] font-medium border",
-                          s.status === "running" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                          s.status === "done" ? "bg-sky-500/10 text-sky-400 border-sky-500/20" :
-                          "bg-red-500/10 text-red-400 border-red-500/20"
-                        )}>
-                          {s.status}
-                        </span>
-                        <span className="text-[9px] text-slate-700 ml-auto">{s.totalSteps}s</span>
-                      </div>
-                      <button
-                        onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
-                        className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-red-400 text-slate-600"
-                      >
-                        <Trash2 className="w-2.5 h-2.5" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Events area */}
-            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2.5">
-                {!activeSession && !isStarting && (
-                  <div className="flex flex-col items-center justify-center h-full text-center py-12 px-4">
-                    <motion.div
-                      animate={{ scale: [1, 1.05, 1] }}
-                      transition={{ duration: 3, repeat: Infinity }}
-                      className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500/10 to-emerald-500/10 border border-violet-500/20 flex items-center justify-center mb-4"
-                    >
-                      <TerminalSquare className="w-6 h-6 text-violet-400" />
-                    </motion.div>
-                    <h2 className="text-sm font-bold text-slate-300 font-[Syne]">Dev Agent</h2>
-                    <p className="mt-2 text-xs text-slate-500 max-w-xs leading-relaxed">
-                      Full ReAct agent with 34 tools — can write code, execute scripts, search papers, manage training, and learn from memory.
-                    </p>
-                    <div className="mt-4 flex flex-wrap gap-1.5 justify-center">
-                      {["Run Python code", "Search HuggingFace", "Start training job", "Build RAG pipeline"].map(h => (
-                        <button
-                          key={h}
-                          onClick={() => setDevTask(h)}
-                          className="px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-all"
-                        >
-                          {h}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {isStarting && (
-                  <div className="flex items-center gap-2 text-xs text-slate-500 py-4">
-                    <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                    Starting dev agent session…
-                  </div>
-                )}
-
-                {activeSession && (
-                  <>
-                    <div className="flex items-center gap-2 flex-wrap mb-2">
-                      <span className={cn(
-                        "flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border",
-                        activeSession.status === "running" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                        activeSession.status === "done" ? "bg-sky-500/10 text-sky-400 border-sky-500/20" :
-                        "bg-red-500/10 text-red-400 border-red-500/20"
-                      )}>
-                        {activeSession.status === "running" && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                        {activeSession.status}
-                      </span>
-                      <span className="text-xs text-slate-500 flex-1 truncate">{activeSession.task}</span>
-                    </div>
-                    <AnimatePresence mode="popLayout">
-                      {activeSession.events.filter(e => e.type !== "done").map((ev, i) => (
-                        <motion.div
-                          key={i}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.25 }}
-                        >
-                          <EventCard event={ev} />
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                    {activeSession.events.filter(e => e.type === "done").map((ev, i) => (
-                      <EventCard key={`done-${i}`} event={ev} />
-                    ))}
-                    {activeSession.status === "running" && (
-                      <motion.div
-                        animate={{ opacity: [1, 0.4, 1] }}
-                        transition={{ duration: 1.2, repeat: Infinity }}
-                        className="flex items-center gap-2 text-xs text-emerald-400/70 py-2"
-                      >
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Agent thinking…
-                      </motion.div>
-                    )}
-                  </>
-                )}
-                <div ref={bottomRef} />
-              </div>
-
-              {/* Input */}
-              <div className="flex-shrink-0 border-t border-slate-800/60 bg-slate-900/50 p-3">
-                <textarea
-                  value={devTask}
-                  onChange={e => setDevTask(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runDevAgent(); }}
-                  disabled={isDevRunning || isStarting}
-                  placeholder="Describe a task for the Dev Agent… (Ctrl+Enter to run)"
-                  rows={2}
-                  className="w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20 disabled:opacity-50 transition-all leading-relaxed"
-                />
-                <div className="flex gap-2 mt-2">
-                  {isDevRunning ? (
-                    <button onClick={stopDevAgent} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors text-xs font-medium">
-                      <Square className="w-3.5 h-3.5" /> Stop
-                    </button>
-                  ) : (
-                    <button onClick={runDevAgent} disabled={!devTask.trim() || isStarting} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30 text-violet-400 hover:bg-violet-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs font-medium">
-                      {isStarting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Starting…</> : <><Play className="w-3.5 h-3.5" /> Run Task</>}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => { setActiveId(null); setActiveSession(null); localStorage.removeItem("agent_active_session_id"); }}
-                    className="px-3 py-2 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors text-xs"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
+      </div>
     </div>
   );
 }

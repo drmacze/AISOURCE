@@ -1,8 +1,9 @@
 {
-  "token": "8621826018:AAFx-Axg7SCPowWAGH7Q6Vgc_Mmp_YReCZ0",
+  "token": "8649291515:AAGQ3ynEu6ARgwJZ9CLV5RLt2-unBU4fJpk",
   "botName": "DLavie Bot",
-  "ownerName": "Owner",
-  "style": "santai",
+  "ownerName": "Drmacze",
+  "ownerId": 8030697858,
+  "style": "formal",
   "customPrompt": "",
   "activeModel": "auto",
   "autoReply": true,
