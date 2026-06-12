@@ -28,6 +28,7 @@ import spotifyRouter from "./spotify";
 import whatsappRouter from "./whatsapp";
 import waBotRouter from "./wa-bot";
 import brandKitRouter from "./brand-kit";
+import tgBotRouter from "./tg-bot";
 
 const router: IRouter = Router();
 
@@ -106,5 +107,8 @@ router.use(waBotRouter);
 
 // Brand Kit — AI-generated visual assets (FLUX)
 router.use(brandKitRouter);
+
+// Telegram Bot — AI auto-reply + .report ticket system
+router.use(tgBotRouter);
 
 export default router;

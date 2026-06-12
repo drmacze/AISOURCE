@@ -25,10 +25,27 @@ import { Boom } from "@hapi/boom";
 import { join } from "path";
 import {
   mkdirSync, existsSync, readFileSync, writeFileSync,
-  rmSync, unlinkSync,
+  rmSync,
 } from "fs";
 import { generateWithFallback } from "./lib/provider-chain.js";
+import { db } from "@workspace/db";
+import { botTicketsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import pino from "pino";
+
+// ─── SSE broker ───────────────────────────────────────────────────────────────
+
+type SSEClient = { send: (event: string, data: unknown) => void };
+export const waSSEClients = new Set<SSEClient>();
+
+function broadcast(event: string, data: unknown) {
+  for (const c of waSSEClients) { try { c.send(event, data); } catch { waSSEClients.delete(c); } }
+}
+
+// ─── Report state machine ─────────────────────────────────────────────────────
+
+type ReportStep = "idle" | "ask_title" | "ask_desc" | "ask_steps";
+interface ReportSession { step: ReportStep; title?: string; desc?: string }
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -219,6 +236,12 @@ function buildFooter(cfg: WaBotConfig): string {
   return `\n\n_${cfg.botName}_ · _Powered by *DLavie OS*_`;
 }
 
+function formatUptime(sec: number): string {
+  if (sec < 60)   return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+}
+
 function shouldIgnoreJid(jid: string | null | undefined): boolean {
   if (!jid) return true;
   if (jid.endsWith("@lid"))     return true;
@@ -253,6 +276,7 @@ class WaBotManager {
   private startTime:        number | null   = null;
   private reconnecting:     boolean         = false;
   private wasEverConnected: boolean         = false;
+  private reportSessions    = new Map<string, ReportSession>();
 
   // ── Public getters ────────────────────────────────────────────────────────
 
@@ -376,6 +400,7 @@ class WaBotManager {
                 console.log(`[WaBot] Pairing code issued: ${code}`);
                 this.status.pairingCode = code;
                 this.status.pairingStep = "waiting_scan";
+                broadcast("wa_status", this.getStatus());
                 resolve(code);
               } catch (e) {
                 this.status = { connected: false, pairingStep: "error", error: String(e), messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
@@ -416,6 +441,7 @@ class WaBotManager {
             hasThumb:     existsSync(THUMB_PATH),
           };
           console.log(`[WaBot] ✅ Connected — ${cleaned} (${this.config.deviceType})`);
+          broadcast("wa_status", this.getStatus());
 
           // Auto-apply profile pic if we have one, else generate first
           setTimeout(async () => {
@@ -480,12 +506,45 @@ class WaBotManager {
           let jid: string;
           try { jid = jidNormalizedUser(rawJid); } catch { jid = rawJid; }
 
-          if (!this.config.autoReply) continue;
-
           const text = extractText(msg as Parameters<typeof extractText>[0]);
           if (!text.trim()) continue;
 
           const senderName = msg.pushName || jid.split("@")[0];
+
+          // ── .report command ──────────────────────────────────────────────
+          if (text.toLowerCase() === ".report") {
+            this.reportSessions.set(jid, { step: "ask_title" });
+            await sock.sendMessage(jid, {
+              text: "🎫 *Sistem Laporan DLavie OS*\n\nSilakan isi laporan Anda.\n\n*Langkah 1/3:* Apa judul masalah atau fitur yang ingin dilaporkan?",
+            }, { quoted: msg });
+            continue;
+          }
+
+          if (text.toLowerCase() === "/cancel") {
+            if (this.reportSessions.has(jid)) {
+              this.reportSessions.delete(jid);
+              await sock.sendMessage(jid, { text: "❌ Laporan dibatalkan." }, { quoted: msg });
+            }
+            continue;
+          }
+
+          // ── .stats command ───────────────────────────────────────────────
+          if (text.toLowerCase() === ".stats") {
+            const s = this.getStatus();
+            await sock.sendMessage(jid, {
+              text: `📊 *DLavie Bot Stats*\n\n• Platform: WhatsApp\n• Status: ${s.connected ? "🟢 Online" : "🔴 Offline"}\n• Pesan dibalas: ${s.messageCount}\n• Uptime: ${s.uptime !== undefined ? formatUptime(s.uptime) : "—"}\n\n_Powered by DLavie OS_`,
+            }, { quoted: msg });
+            continue;
+          }
+
+          // ── Report state machine ─────────────────────────────────────────
+          const session = this.reportSessions.get(jid);
+          if (session) {
+            await this.handleReportFlow(sock, session, jid, senderName, text, msg);
+            continue;
+          }
+
+          if (!this.config.autoReply) continue;
 
           try { await sock.sendPresenceUpdate("composing", jid); } catch { /* ignore */ }
 
@@ -493,19 +552,20 @@ class WaBotManager {
             text, undefined, buildSystemPrompt(this.config)
           );
 
-          // ✅ Footer watermark — DLavie OS branding on every message
           const finalReply = reply.trim() + buildFooter(this.config);
-
           await sock.sendMessage(jid, { text: finalReply }, { quoted: msg });
           try { await sock.sendPresenceUpdate("paused", jid); } catch { /* ignore */ }
 
           this.status.messageCount = (this.status.messageCount || 0) + 1;
-          this.logs.push({
+          const logEntry: WaBotLog = {
             ts: Date.now(), from: jid, name: senderName, isGroup,
             message: text, reply: finalReply,
             model: `${provider}/${modelUsed}`,
-          });
+          };
+          this.logs.push(logEntry);
           if (this.logs.length > 500) this.logs = this.logs.slice(-500);
+          broadcast("wa_message", logEntry);
+          broadcast("wa_status", this.getStatus());
 
         } catch (e) {
           console.error("[WaBot] Message error:", e);
@@ -514,6 +574,76 @@ class WaBotManager {
     });
 
     return pairingCode;
+  }
+
+  // ── Report flow ────────────────────────────────────────────────────────────
+
+  private async handleReportFlow(
+    sock: WASocket, session: ReportSession, jid: string,
+    name: string, text: string, quotedMsg: unknown
+  ) {
+    const quoted = quotedMsg as Parameters<typeof sock.sendMessage>[2] & { quoted: unknown };
+
+    if (session.step === "ask_title") {
+      session.title = text;
+      session.step  = "ask_desc";
+      this.reportSessions.set(jid, session);
+      await sock.sendMessage(jid, {
+        text: `✅ Judul: *${text}*\n\n*Langkah 2/3:* Jelaskan masalah atau fitur yang diinginkan secara detail.`,
+      }, { quoted: quoted.quoted });
+      return;
+    }
+
+    if (session.step === "ask_desc") {
+      session.desc = text;
+      session.step = "ask_steps";
+      this.reportSessions.set(jid, session);
+      await sock.sendMessage(jid, {
+        text: `✅ Deskripsi dicatat.\n\n*Langkah 3/3 (opsional):* Langkah-langkah untuk mereproduksi masalah? Ketik *skip* jika tidak ada.`,
+      }, { quoted: quoted.quoted });
+      return;
+    }
+
+    if (session.step === "ask_steps") {
+      const steps = text.toLowerCase() === "skip" ? undefined : text;
+      this.reportSessions.delete(jid);
+
+      const [ticket] = await db.insert(botTicketsTable).values({
+        platform:    "whatsapp",
+        fromJid:     jid,
+        fromName:    name,
+        title:       session.title!,
+        description: session.desc!,
+        steps,
+        status:      "open",
+        priority:    "medium",
+      }).returning();
+
+      console.log(`[WaBot] 🎫 Ticket #${ticket.id} created from ${name} (${jid})`);
+      broadcast("new_ticket", ticket);
+
+      await sock.sendMessage(jid, {
+        text: `🎫 *Tiket #${ticket.id} berhasil dibuat!*\n\n📌 *Judul:* ${session.title}\n📝 *Status:* Menunggu ditinjau\n\nAgent DLavie OS akan segera meninjau laporan Anda dan mengirim notifikasi ke sini saat sudah ditangani. Terima kasih! 🙏`,
+      }, { quoted: quoted.quoted });
+    }
+  }
+
+  // ── Notify ticket resolved ─────────────────────────────────────────────────
+
+  async notifyTicketResolved(ticketId: number, agentNotes?: string): Promise<void> {
+    if (!this.sock || !this.status.connected) throw new Error("Bot belum terhubung");
+
+    const [ticket] = await db.select().from(botTicketsTable).where(eq(botTicketsTable.id, ticketId));
+    if (!ticket) throw new Error(`Tiket #${ticketId} tidak ditemukan`);
+    if (ticket.platform !== "whatsapp") throw new Error("Notifikasi ini hanya untuk WhatsApp");
+
+    await this.sock.sendMessage(ticket.fromJid, {
+      text: `✅ *Tiket #${ticket.id} selesai ditangani!*\n\n📌 *${ticket.title}*\n${agentNotes ? `\n📋 *Catatan Agent:*\n${agentNotes}\n` : ""}\nTerima kasih telah melaporkan. _Powered by DLavie OS_`,
+    });
+
+    await db.update(botTicketsTable)
+      .set({ status: "resolved", agentNotes: agentNotes ?? null, resolvedAt: new Date(), updatedAt: new Date() })
+      .where(eq(botTicketsTable.id, ticketId));
   }
 
   // ── Disconnect ────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
-import { waBotManager } from "../wa-bot-manager.js";
+import { waBotManager, waSSEClients } from "../wa-bot-manager.js";
 
 const router: IRouter = Router();
 
@@ -43,15 +43,40 @@ router.get("/wa-bot/logs", (_req: Request, res: Response) => {
   res.json({ logs: waBotManager.getLogs() });
 });
 
-// ── Thumbnail endpoints ───────────────────────────────────────────────────────
+// ── SSE — real-time push for WA bot events ────────────────────────────────────
 
-/** GET current thumbnail as base64 data-URI */
-router.get("/wa-bot/thumbnail", (_req: Request, res: Response) => {
-  const data = waBotManager.getThumbnailBase64();
-  res.json({ data });   // null if not yet generated
+router.get("/wa-bot/events", (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const client = {
+    send(event: string, data: unknown) {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    },
+  };
+
+  client.send("connected", { ts: Date.now() });
+  client.send("wa_status", waBotManager.getStatus());
+  waSSEClients.add(client);
+
+  const heartbeat = setInterval(() => { res.write(": heartbeat\n\n"); }, 20_000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    waSSEClients.delete(client);
+  });
 });
 
-/** POST — generate a new AI thumbnail (newSeed=true to randomise design) */
+// ── Thumbnail endpoints ───────────────────────────────────────────────────────
+
+router.get("/wa-bot/thumbnail", (_req: Request, res: Response) => {
+  const data = waBotManager.getThumbnailBase64();
+  res.json({ data });
+});
+
 router.post("/wa-bot/generate-thumbnail", async (req: Request, res: Response) => {
   const { newSeed } = req.body as { newSeed?: boolean };
   try {
@@ -62,10 +87,21 @@ router.post("/wa-bot/generate-thumbnail", async (req: Request, res: Response) =>
   }
 });
 
-/** POST — apply the stored thumbnail as the bot's WhatsApp profile picture */
 router.post("/wa-bot/apply-profile-pic", async (_req: Request, res: Response) => {
   try {
     await waBotManager.applyProfilePic();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ── WA ticket resolve + notify ────────────────────────────────────────────────
+
+router.post("/wa-bot/notify-ticket", async (req: Request, res: Response) => {
+  try {
+    const { ticketId, agentNotes } = req.body as { ticketId: number; agentNotes?: string };
+    await waBotManager.notifyTicketResolved(ticketId, agentNotes);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e) });

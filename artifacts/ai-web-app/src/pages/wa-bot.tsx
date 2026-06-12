@@ -289,6 +289,40 @@ function ThumbnailPanel({ connected }: { connected: boolean }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+const PAIRING_TTL_SEC = 60; // pairing codes expire ~60s
+
+function PairingCountdown({ startedAt }: { startedAt: number }) {
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, PAIRING_TTL_SEC - Math.floor((Date.now() - startedAt) / 1000))
+  );
+  useEffect(() => {
+    const t = setInterval(() => {
+      setRemaining(Math.max(0, PAIRING_TTL_SEC - Math.floor((Date.now() - startedAt) / 1000)));
+    }, 500);
+    return () => clearInterval(t);
+  }, [startedAt]);
+  const pct = (remaining / PAIRING_TTL_SEC) * 100;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="flex items-center gap-1 text-slate-400"><Clock className="w-3 h-3" /> Kode berlaku</span>
+        <span className={cn("font-mono font-bold", remaining < 15 ? "text-red-400" : "text-green-400")}>
+          {remaining}s
+        </span>
+      </div>
+      <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+        <div
+          className={cn("h-full rounded-full transition-all duration-500", remaining < 15 ? "bg-red-500" : "bg-green-500")}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {remaining === 0 && (
+        <p className="text-xs text-red-400 text-center">⚠ Kode kedaluwarsa — klik Connect lagi untuk mendapat kode baru</p>
+      )}
+    </div>
+  );
+}
+
 export default function WaBotPage() {
   const [status, setStatus]         = useState<BotStatus | null>(null);
   const [config, setConfig]         = useState<BotConfig>(DEFAULT_CONFIG);
@@ -300,13 +334,29 @@ export default function WaBotPage() {
   const [error, setError]           = useState<string | null>(null);
   const [configDirty, setConfigDirty] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pairingStartedAt, setPairingStartedAt] = useState<number | null>(null);
+  const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    loadStatus();
     loadConfig();
-    pollRef.current = setInterval(loadStatus, 3000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    // SSE — replaces 3s polling
+    const es = new EventSource("/api/wa-bot/events");
+    esRef.current = es;
+    es.addEventListener("wa_status", (e) => {
+      const s = JSON.parse(e.data) as BotStatus;
+      setStatus(s);
+      if (s.pairingStep === "waiting_scan" && s.pairingCode) {
+        setPairingStartedAt((prev) => prev ?? Date.now());
+      } else if (s.pairingStep !== "waiting_scan") {
+        setPairingStartedAt(null);
+      }
+    });
+    es.addEventListener("wa_message", (e) => {
+      setLogs((prev) => [JSON.parse(e.data) as BotLog, ...prev].slice(0, 100));
+    });
+    // Initial status fetch (in case SSE event hasn't fired yet)
+    loadStatus();
+    return () => es.close();
   }, []);
 
   useEffect(() => {
@@ -551,6 +601,12 @@ export default function WaBotPage() {
                       <div className="inline-block bg-slate-900 border-2 border-green-500/40 rounded-xl px-8 py-4">
                         <span className="text-4xl font-mono font-bold text-green-400 tracking-[0.25em]">{pairingCode}</span>
                       </div>
+                      {/* Countdown timer */}
+                      {pairingStartedAt && (
+                        <div className="mx-auto max-w-xs">
+                          <PairingCountdown startedAt={pairingStartedAt} />
+                        </div>
+                      )}
                       <div className="space-y-1.5 text-xs text-slate-400 text-left bg-slate-900/50 rounded-lg p-3">
                         <p className="font-semibold text-slate-300">Cara verifikasi di WhatsApp:</p>
                         <p>1. Buka WhatsApp di HP nomor <span className="text-green-400 font-mono">{phoneInput}</span></p>

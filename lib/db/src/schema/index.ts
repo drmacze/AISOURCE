@@ -6,3 +6,4 @@ export * from "./system-config";
 export * from "./prompts";
 export * from "./agent";
 export * from "./whatsapp";
+export * from "./bot-tickets";
