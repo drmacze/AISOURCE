@@ -31,8 +31,10 @@ interface BotConfig {
   customPrompt: string;
   activeModel: string;
   autoReply: boolean;
+  replyInGroup: boolean;
   welcomeMessage: string;
   phoneNumber: string;
+  deviceType: "personal" | "business" | "mac" | "windows";
 }
 
 interface BotLog {
@@ -66,9 +68,18 @@ const DEFAULT_CONFIG: BotConfig = {
   customPrompt: "",
   activeModel: "auto",
   autoReply: true,
+  replyInGroup: false,
   welcomeMessage: "Halo! Saya DLavie Bot, asisten AI Anda.",
   phoneNumber: "",
+  deviceType: "personal",
 };
+
+const DEVICE_OPTIONS: { value: BotConfig["deviceType"]; label: string; desc: string; icon: string }[] = [
+  { value: "personal",  label: "WhatsApp Personal", desc: "Nomor WA biasa (paling umum)", icon: "📱" },
+  { value: "business",  label: "WhatsApp Business",  desc: "Akun WA Business / UMKM",     icon: "💼" },
+  { value: "mac",       label: "macOS Desktop",      desc: "Fingerprint perangkat macOS",  icon: "🍎" },
+  { value: "windows",   label: "Windows Desktop",    desc: "Fingerprint perangkat Windows", icon: "🖥️" },
+];
 
 export default function WaBotPage() {
   const [status, setStatus] = useState<BotStatus | null>(null);
@@ -451,6 +462,33 @@ export default function WaBotPage() {
                   )}
                 </div>
 
+                {/* Device type */}
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-400 flex items-center gap-1">
+                    <span>📲</span> Jenis Perangkat / Akun WhatsApp
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {DEVICE_OPTIONS.map((d) => (
+                      <button key={d.value} onClick={() => updateConfig("deviceType", d.value)}
+                        className={cn(
+                          "flex items-start gap-2 p-3 rounded-lg border text-left transition-colors",
+                          config.deviceType === d.value
+                            ? "bg-green-500/10 border-green-500/50 text-green-300"
+                            : "bg-slate-800/40 border-slate-700 text-slate-400 hover:border-slate-600"
+                        )}>
+                        <span className="text-lg leading-none">{d.icon}</span>
+                        <div>
+                          <p className="text-xs font-semibold leading-tight">{d.label}</p>
+                          <p className="text-[10px] mt-0.5 opacity-70">{d.desc}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    ⚠️ Gunakan nomor WA <strong className="text-slate-400">khusus bot</strong> — bukan nomor utama Anda. Pilih jenis sesuai akun yang digunakan.
+                  </p>
+                </div>
+
                 <div className="space-y-1.5">
                   <label className="text-xs text-slate-400">Pesan Sambutan</label>
                   <textarea value={config.welcomeMessage} onChange={(e) => updateConfig("welcomeMessage", e.target.value)}
@@ -458,19 +496,35 @@ export default function WaBotPage() {
                     className="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-green-500 transition-colors resize-none" />
                 </div>
 
-                <div className="flex items-center justify-between py-2 border-t border-slate-800">
-                  <div>
-                    <p className="text-sm text-white">Auto Reply</p>
-                    <p className="text-xs text-slate-400">Balas semua pesan masuk secara otomatis</p>
+                <div className="border-t border-slate-800 pt-3 space-y-0">
+                  {/* Auto Reply toggle */}
+                  <div className="flex items-center justify-between py-2.5">
+                    <div>
+                      <p className="text-sm text-white">Auto Reply</p>
+                      <p className="text-xs text-slate-400">Balas semua pesan masuk secara otomatis</p>
+                    </div>
+                    <button onClick={() => updateConfig("autoReply", !config.autoReply)}
+                      className={cn("relative w-11 h-6 rounded-full transition-colors",
+                        config.autoReply ? "bg-green-500" : "bg-slate-700"
+                      )}>
+                      <span className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all"
+                        style={{ left: config.autoReply ? "calc(100% - 22px)" : "2px" }} />
+                    </button>
                   </div>
-                  <button onClick={() => updateConfig("autoReply", !config.autoReply)}
-                    className={cn("relative w-11 h-6 rounded-full transition-colors",
-                      config.autoReply ? "bg-green-500" : "bg-slate-700"
-                    )}>
-                    <span className={cn("absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all",
-                      config.autoReply ? "left-5.5 translate-x-0.5" : "left-0.5"
-                    )} style={{ left: config.autoReply ? "calc(100% - 22px)" : "2px" }} />
-                  </button>
+                  {/* Reply in Group toggle */}
+                  <div className="flex items-center justify-between py-2.5 border-t border-slate-800/60">
+                    <div>
+                      <p className="text-sm text-white">Balas di Grup</p>
+                      <p className="text-xs text-slate-400">Aktifkan agar bot merespons pesan di grup WA</p>
+                    </div>
+                    <button onClick={() => updateConfig("replyInGroup", !config.replyInGroup)}
+                      className={cn("relative w-11 h-6 rounded-full transition-colors",
+                        config.replyInGroup ? "bg-green-500" : "bg-slate-700"
+                      )}>
+                      <span className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all"
+                        style={{ left: config.replyInGroup ? "calc(100% - 22px)" : "2px" }} />
+                    </button>
+                  </div>
                 </div>
 
                 {configDirty && (
