@@ -33,7 +33,7 @@ const musthafa = {
   role: "Full Stack Developer",
   location: "Indonesia 🇮🇩",
 
-  currentProject: "NEXUS_OS — AI Command Center",
+  currentProject: "DLavie OS — AI Command Center",
   stack: ["React", "Next.js", "Node.js", "Python", "TypeScript"],
 
   passions: ["AI/ML", "Open Source", "Clean Code", "UI/UX"],
@@ -118,7 +118,7 @@ const musthafa = {
 <tr>
 <td width="50%">
 
-### 🧠 NEXUS_OS — AI Command Center
+### 🧠 DLavie OS — AI Command Center
 
 > A fully **local, open-source** AI workspace with chat, RAG, and fine-tuning pipeline management — **no external API keys required**.
 

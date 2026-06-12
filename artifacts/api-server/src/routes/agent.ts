@@ -1,5 +1,5 @@
 /**
- * NEXUS_OS — Autonomous AI Developer Agent
+ * DLavie OS — Autonomous AI Developer Agent
  *
  * Brain: Qwen/Qwen2.5-Coder-32B-Instruct running on HuggingFace GPU servers
  *        → ZERO local RAM consumed. 32B parameters, full coding intelligence.
@@ -100,7 +100,7 @@ function executePython(
   timeoutMs = 15000
 ): Promise<{ stdout: string; stderr: string; ok: boolean }> {
   return new Promise((resolve) => {
-    const tmpFile = join("/tmp", `nexus_py_${Date.now()}.py`);
+    const tmpFile = join("/tmp", `dlavie_py_${Date.now()}.py`);
     try { writeFileSync(tmpFile, code); }
     catch (e) { resolve({ stdout: "", stderr: String(e), ok: false }); return; }
     exec(`python3 "${tmpFile}" 2>&1`, { timeout: timeoutMs, cwd: WORKSPACE }, (err, stdout, stderr) => {
@@ -509,7 +509,7 @@ Return ONLY JSON array: [{"input":"specific question","output":"comprehensive ac
         const inserted = [];
         for (const s of valid) {
           const [row] = await db.insert(trainingSamplesTable).values({
-            datasetId, input: s.input, expectedOutput: s.output, source: "nexus-agent-32b",
+            datasetId, input: s.input, expectedOutput: s.output, source: "dlavie-agent-32b",
           }).returning();
           inserted.push(row);
         }
@@ -895,7 +895,7 @@ const TOOL_MAP = new Map(TOOLS.map((t) => [t.name, t]));
 
 // ─── Chat System Prompt (multilingual, conversational) ───────────────────────
 function buildChatSystemPrompt(memories: string): string {
-  return `You are NEXUS Agent — intelligent AI assistant inside DLavie OS / NEXUS_OS AI Command Center.
+  return `You are DLavie Agent — intelligent AI assistant inside DLavie OS / DLavie OS AI Command Center.
 Powered by Groq (Llama-3.3-70B), HuggingFace (Qwen2.5-Coder-32B), or local Ollama. Real AI, no simulations.
 
 ⚠️ ATURAN BAHASA / LANGUAGE RULE (WAJIB / MANDATORY):
@@ -950,7 +950,7 @@ ${memories ? `━━ MEMORI RELEVAN DARI SESI LALU ━━\n${memories}\n` : ""}
 // ─── System prompt ────────────────────────────────────────────────────────────
 function buildSystemPrompt(memories: string): string {
   const toolList = TOOLS.map((t) => `- **${t.name}**(${t.params}): ${t.description}`).join("\n");
-  return `You are NEXUS Agent — an autonomous AI developer running inside NEXUS_OS AI Command Center.
+  return `You are DLavie Agent — an autonomous AI developer running inside DLavie OS AI Command Center.
 Powered by: Qwen2.5-Coder-32B-Instruct on HuggingFace GPUs — world-class coding & AI intelligence.
 Mission: Build, improve, and advance AI models through real actions — no simulations.
 
@@ -1076,7 +1076,7 @@ async function executeSession(session: AgentSession): Promise<void> {
       // Auto-store a memory summarizing what was accomplished before closing
       try {
         const autoSummaryR = await agentLLMCall([
-          { role: "system", content: "You are NEXUS Agent. Write ONE concise sentence (max 200 chars) capturing the key insight or result from this session. Start with what was accomplished." },
+          { role: "system", content: "You are DLavie Agent. Write ONE concise sentence (max 200 chars) capturing the key insight or result from this session. Start with what was accomplished." },
           { role: "user", content: `Task: ${session.task}\nEvents: ${session.events.slice(-6).map((e) => `${e.type}:${e.tool || ""}${e.content ? ":"+e.content.slice(0,80) : ""}`).join(" | ")}\n\nWrite ONE key insight sentence:` },
         ], { maxTokens: 200, temperature: 0.1 });
         if (autoSummaryR.text.trim().length > 20) {
@@ -1119,7 +1119,7 @@ async function generateAutonomousTask(): Promise<string | null> {
     const state = { datasets: sampleCounts, modelCount: models.length, recentJobs: jobs.map((j) => ({ status: j.status, progress: j.progress })) };
 
     const r = await agentLLMCall([
-      { role: "system", content: "You are NEXUS Agent's planning module. Choose the single most valuable improvement task based on system state. Be direct and specific." },
+      { role: "system", content: "You are DLavie Agent's planning module. Choose the single most valuable improvement task based on system state. Be direct and specific." },
       { role: "user", content: `System state:\n${JSON.stringify(state, null, 2)}\n\nPast insights:\n${recentMemories || "(none)"}\n\nWhat ONE task would most improve the AI development system? Prioritize: datasets with <15 samples need more data, untrained models need training, low-quality datasets need improvement, new ML research can generate training insights.\n\nRespond with ONLY the task description (2-3 sentences, specific).` },
     ], { maxTokens: 300, temperature: 0.4 });
 

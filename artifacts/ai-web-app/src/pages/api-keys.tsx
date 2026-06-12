@@ -44,7 +44,7 @@ import { cn } from "@/lib/utils";
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
 async function apiFetch(path: string, opts?: RequestInit) {
-  const masterKey = localStorage.getItem("nexus_master_key") || "";
+  const masterKey = localStorage.getItem("dlavie_master_key") || "";
   const headers: HeadersInit = {
     "Content-Type": "application/json",
     ...(masterKey ? { "X-API-Key": masterKey } : {}),
@@ -121,7 +121,7 @@ export default function ApiKeysPage() {
   const qc = useQueryClient();
 
   const [masterKey, setMasterKey] = useState(
-    () => localStorage.getItem("nexus_master_key") || ""
+    () => localStorage.getItem("dlavie_master_key") || ""
   );
   const [showMaster, setShowMaster] = useState(false);
   const [autoAuthStatus, setAutoAuthStatus] = useState<"loading" | "found" | "not-found">("loading");
@@ -132,9 +132,9 @@ export default function ApiKeysPage() {
       .then((r) => r.json())
       .then((data: { found: boolean; key: string | null; name?: string }) => {
         if (data.found && data.key) {
-          const stored = localStorage.getItem("nexus_master_key");
+          const stored = localStorage.getItem("dlavie_master_key");
           if (stored !== data.key) {
-            localStorage.setItem("nexus_master_key", data.key);
+            localStorage.setItem("dlavie_master_key", data.key);
             setMasterKey(data.key);
             qc.invalidateQueries({ queryKey: ["api-keys"] });
           }
@@ -222,7 +222,7 @@ export default function ApiKeysPage() {
         .then((r) => r.json())
         .then((data: { found: boolean; key: string | null; name?: string }) => {
           if (data.found && data.key) {
-            localStorage.setItem("nexus_master_key", data.key);
+            localStorage.setItem("dlavie_master_key", data.key);
             setMasterKey(data.key);
             setPrimaryKeyName(data.name ?? null);
             setAutoAuthStatus("found");
@@ -236,7 +236,7 @@ export default function ApiKeysPage() {
   });
 
   const saveMasterKey = () => {
-    localStorage.setItem("nexus_master_key", masterKey);
+    localStorage.setItem("dlavie_master_key", masterKey);
     qc.invalidateQueries({ queryKey: ["api-keys"] });
     toast({ title: "Master key saved", description: "Dashboard will now use this key." });
   };
@@ -253,7 +253,7 @@ export default function ApiKeysPage() {
             <Key className="w-6 h-6 text-violet-400" /> API Keys
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            Generate <code className="bg-white/5 px-1 rounded text-violet-300">nxs_...</code> keys for WhatsApp bots,
+            Generate <code className="bg-white/5 px-1 rounded text-violet-300">dlv_...</code> keys for WhatsApp bots,
             websites, and any external integration. All keys are stored in the database.
           </p>
         </div>
@@ -315,7 +315,7 @@ export default function ApiKeysPage() {
                 type={showMaster ? "text" : "password"}
                 value={masterKey}
                 onChange={(e) => setMasterKey(e.target.value)}
-                placeholder="Paste admin nxs_... key di sini"
+                placeholder="Paste admin dlv_... key di sini"
                 className="bg-slate-800 border-white/10 text-white font-mono text-sm pr-10"
               />
               <button
@@ -359,7 +359,7 @@ export default function ApiKeysPage() {
             <ShieldAlert className="w-8 h-8 text-amber-400 mx-auto" />
             <p className="text-slate-300 font-medium">Auth required</p>
             <p className="text-slate-500 text-sm">
-              Enter your admin API key above (NEXUS_API_KEY or an admin nxs_ key) and click Save.
+              Enter your admin API key above (DLAVIE_API_KEY or an admin dlv_ key) and click Save.
             </p>
           </div>
         ) : keys.length === 0 && !keysQuery.isLoading ? (
@@ -457,17 +457,17 @@ export default function ApiKeysPage() {
         <div className="space-y-2">
           {[
             ["Ask (simple)", `curl -X POST https://YOUR_DOMAIN/api/v1/ask \\
-  -H "X-API-Key: nxs_..." \\
+  -H "X-API-Key: dlv_..." \\
   -H "Content-Type: application/json" \\
   -d '{"question":"What is AI?","model":"tinyllama"}'`],
             ["Chat (with history)", `const res = await fetch('/api/v1/chat', {
   method: 'POST',
-  headers: { 'X-API-Key': 'nxs_...' },
+  headers: { 'X-API-Key': 'dlv_...' },
   body: JSON.stringify({ message: 'Hello', model: 'tinyllama' })
 });`],
             ["WhatsApp Bot", `const { reply } = await fetch('/api/v1/ask', {
   method: 'POST',
-  headers: { 'X-API-Key': 'nxs_...' },
+  headers: { 'X-API-Key': 'dlv_...' },
   body: JSON.stringify({ question: incomingMsg, useRAG: true })
 }).then(r => r.json());
 await sendWhatsAppMessage(reply);`],

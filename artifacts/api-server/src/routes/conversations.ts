@@ -52,7 +52,7 @@ async function generateToText(
   const provider = detectProvider(model);
   const ctx = ragContext ? `Context:\n${ragContext}\n\nQuestion: ${message}` : message;
   const msgs = [
-    { role: "system" as const, content: "You are NEXUS_OS, a helpful AI assistant." },
+    { role: "system" as const, content: "You are DLavie OS, a helpful AI assistant." },
     { role: "user" as const, content: ctx },
   ];
 
@@ -76,7 +76,7 @@ async function generateToText(
       console.warn("[conversations] Ollama unavailable, trying provider chain");
       try {
         const { generateWithFallback } = await import("../lib/provider-chain");
-        const result = await generateWithFallback(message, ragContext, "You are NEXUS_OS, a helpful AI assistant.");
+        const result = await generateWithFallback(message, ragContext, "You are DLavie OS, a helpful AI assistant.");
         return result.text;
       } catch (chainErr) {
         console.warn("[conversations] Provider chain also failed:", String(chainErr).slice(0, 100));

@@ -226,11 +226,11 @@ export default function Chat() {
 
   // ── Prompt Library injection: pick up prompt from /prompts page ─────────────
   React.useEffect(() => {
-    const injectedPrompt = sessionStorage.getItem("nexus_prompt_inject");
-    const injectedName   = sessionStorage.getItem("nexus_prompt_name");
+    const injectedPrompt = sessionStorage.getItem("dlavie_prompt_inject");
+    const injectedName   = sessionStorage.getItem("dlavie_prompt_name");
     if (injectedPrompt) {
-      sessionStorage.removeItem("nexus_prompt_inject");
-      sessionStorage.removeItem("nexus_prompt_name");
+      sessionStorage.removeItem("dlavie_prompt_inject");
+      sessionStorage.removeItem("dlavie_prompt_name");
       setInput(injectedPrompt);
       // Auto-create a new conversation titled after the prompt
       if (!activeId) {
@@ -1057,7 +1057,7 @@ export default function Chat() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={voiceActive ? "🎙 Listening..." : isStreaming ? "AI is responding..." : "Query NEXUS_OS..."}
+                  placeholder={voiceActive ? "🎙 Listening..." : isStreaming ? "AI is responding..." : "Query DLavie OS..."}
                   className="pr-24 h-12 bg-card border-card-border focus-visible:ring-primary font-mono text-sm"
                   disabled={isStreaming}
                 />

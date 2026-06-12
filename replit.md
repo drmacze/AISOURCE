@@ -1,4 +1,4 @@
-# NEXUS_OS — AI Command Center
+# DLavie OS — AI Command Center
 
 A fully local, open-source AI workspace with chat, RAG (Retrieval-Augmented Generation), and training pipeline management — no external API keys required.
 

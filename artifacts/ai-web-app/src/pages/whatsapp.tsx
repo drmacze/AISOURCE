@@ -90,7 +90,7 @@ export default function WhatsAppPage() {
   const [showToken, setShowToken] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [testTo, setTestTo] = useState("");
-  const [testMsg, setTestMsg] = useState("Halo! Ini pesan tes dari NEXUS Bot 🤖");
+  const [testMsg, setTestMsg] = useState("Halo! Ini pesan tes dari DLavie Bot 🤖");
 
   const [form, setForm] = useState({
     phoneNumberId: "",
@@ -102,7 +102,7 @@ export default function WhatsAppPage() {
     aiApiKey: "",
     systemPrompt: "Kamu adalah asisten AI yang membantu. Jawab dengan singkat dan jelas.",
     enabled: false,
-    botName: "NEXUS Bot",
+    botName: "DLavie Bot",
   });
 
   const { data: statusData, isLoading: statusLoading } = useQuery<WhatsappStatus>({
@@ -129,7 +129,7 @@ export default function WhatsAppPage() {
         aiApiKey: cfg.aiApiKey || "",
         systemPrompt: cfg.systemPrompt || "Kamu adalah asisten AI yang membantu. Jawab dengan singkat dan jelas.",
         enabled: cfg.enabled || false,
-        botName: cfg.botName || "NEXUS Bot",
+        botName: cfg.botName || "DLavie Bot",
       });
     }
   }, [configData]);
@@ -172,7 +172,7 @@ export default function WhatsAppPage() {
 
   // Auto-generate verify token
   const generateVerifyToken = () => {
-    const token = "nxs_" + Math.random().toString(36).slice(2, 18);
+    const token = "dlv_" + Math.random().toString(36).slice(2, 18);
     setForm((f) => ({ ...f, verifyToken: token }));
   };
 
@@ -377,7 +377,7 @@ export default function WhatsAppPage() {
                     <Input
                       value={form.botName}
                       onChange={(e) => setForm((f) => ({ ...f, botName: e.target.value }))}
-                      placeholder="NEXUS Bot"
+                      placeholder="DLavie Bot"
                       className="bg-slate-950 border-slate-700 text-white"
                     />
                   </div>

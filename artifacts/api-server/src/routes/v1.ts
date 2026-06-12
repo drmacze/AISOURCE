@@ -6,11 +6,11 @@
  *
  * Authentication
  * ─────────────────────────────────────────────────────────────────────────────
- *   X-API-Key: nxs_...
- *   X-DLavie-Key: nxs_...
- *   Authorization: Bearer nxs_...
+ *   X-API-Key: dlv_...
+ *   X-DLavie-Key: dlv_...
+ *   Authorization: Bearer dlv_...
  *
- * Rate Limit: 120 req/min per key (configurable via NEXUS_RATE_LIMIT env)
+ * Rate Limit: 120 req/min per key (configurable via DLAVIE_RATE_LIMIT env)
  */
 
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
@@ -51,14 +51,14 @@ const router: IRouter = Router();
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = parseInt(process.env.NEXUS_RATE_LIMIT || "120", 10);
+const RATE_MAX = parseInt(process.env.DLAVIE_RATE_LIMIT || "120", 10);
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 
 function getRateLimitKey(req: Request): string {
   const keyHeader =
     (req.headers["x-api-key"] as string) ||
     (req.headers["x-dlavie-key"] as string) ||
-    (req.headers["x-nexus-key"] as string) ||
+    (req.headers["x-dlavie-key"] as string) ||
     (req.headers["authorization"] as string)?.replace(/^Bearer\s+/i, "") ||
     "anon";
   const ip =
@@ -106,7 +106,7 @@ setInterval(() => {
 }, 5 * 60_000).unref();
 
 // ─── API Key Auth (DB-backed) ─────────────────────────────────────────────────
-// requireAuth is imported from ../lib/auth — validates against DB or NEXUS_API_KEY master key
+// requireAuth is imported from ../lib/auth — validates against DB or DLAVIE_API_KEY master key
 const requireApiKey = requireAuth("write");
 
 // ─── Multi-model router ───────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ async function generateUnified(
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>
 ): Promise<{ text: string; provider: ModelProvider; modelUsed: string }> {
   const provider = detectProvider(model);
-  const sysMsg = systemPrompt || "You are NEXUS_OS, a helpful AI assistant. Respond in the same language the user uses.";
+  const sysMsg = systemPrompt || "You are DLavie OS, a helpful AI assistant. Respond in the same language the user uses.";
 
   // Build message history for chat providers
   function buildMessages<T extends { role: "system" | "user" | "assistant"; content: string }>(
@@ -220,7 +220,7 @@ async function streamUnified(
   systemPrompt?: string
 ): Promise<{ provider: ModelProvider; modelUsed: string }> {
   const provider = detectProvider(model);
-  const sysMsg = systemPrompt || "You are NEXUS_OS, a helpful AI assistant. Respond in the same language the user uses.";
+  const sysMsg = systemPrompt || "You are DLavie OS, a helpful AI assistant. Respond in the same language the user uses.";
   const userContent = ragContext
     ? `Context from knowledge base:\n${ragContext}\n\nUser: ${message}`
     : message;
@@ -666,7 +666,7 @@ router.get("/docs", (_req, res) => {
     openapi: "/api/v1/openapi.json",
     authentication: {
       type: "API Key",
-      headers: ["X-API-Key: nxs_...", "X-DLavie-Key: nxs_...", "Authorization: Bearer nxs_..."],
+      headers: ["X-API-Key: dlv_...", "X-DLavie-Key: dlv_...", "Authorization: Bearer dlv_..."],
     },
     rateLimit: { requests: RATE_MAX, windowSeconds: 60, headers: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"] },
     supportedProviders: ["ollama (local)", "kimi/kimi-k2-instruct (MoonshotAI 1T MoE)", "hf/* (HuggingFace Inference)"],

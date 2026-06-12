@@ -26,7 +26,7 @@ app.use(
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 // Wide-open CORS for multi-platform use (web, mobile, desktop, Postman, curl).
-// Security is enforced via NEXUS_API_KEY on protected /api/v1/* endpoints.
+// Security is enforced via DLAVIE_API_KEY on protected /api/v1/* endpoints.
 app.use(
   cors({
     origin(origin, callback) {
@@ -54,7 +54,7 @@ app.use(
       "Content-Type",
       "Authorization",
       "X-API-Key",
-      "X-Nexus-Key",
+      "X-DLavie-Key",
       "X-DLavie-Key",
       "X-Requested-With",
       "Accept",

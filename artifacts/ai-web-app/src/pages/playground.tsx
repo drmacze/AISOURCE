@@ -1,5 +1,5 @@
 /**
- * NEXUS_OS — Model Playground
+ * DLavie OS — Model Playground
  * Compare two AI models side-by-side with real streaming responses.
  * No simulation — all calls go through the real provider chain.
  */
@@ -166,7 +166,7 @@ export default function PlaygroundPage() {
   const [modelL, setModelL]   = useState(DEFAULT_LEFT);
   const [modelR, setModelR]   = useState(DEFAULT_RIGHT);
   const [prompt, setPrompt]   = useState("");
-  const [system, setSystem]   = useState("Kamu adalah NEXUS_OS, asisten AI yang sangat membantu. Jawab dalam bahasa Indonesia kecuali jika diminta bahasa lain.");
+  const [system, setSystem]   = useState("Kamu adalah DLavie OS, asisten AI yang sangat membantu. Jawab dalam bahasa Indonesia kecuali jika diminta bahasa lain.");
   const [panelL, setPanelL]   = useState<PanelState>(EMPTY);
   const [panelR, setPanelR]   = useState<PanelState>(EMPTY);
   const [running, setRunning] = useState(false);

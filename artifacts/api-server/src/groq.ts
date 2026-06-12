@@ -169,7 +169,7 @@ export async function streamGroqResponse(
     {
       role: "system",
       content:
-        "You are NEXUS_OS, a powerful AI assistant. Be accurate, concise, and helpful. Respond in the same language the user uses.",
+        "You are DLavie OS, a powerful AI assistant. Be accurate, concise, and helpful. Respond in the same language the user uses.",
     },
     { role: "user", content },
   ];

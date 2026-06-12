@@ -135,7 +135,7 @@ router.post("/hf/dataset/push", async (req: Request, res: Response) => {
       instruction: s.input,
       output: s.expectedOutput,
       quality: s.quality ?? 0.8,
-      source: s.source ?? "nexus",
+      source: s.source ?? "dlavie",
     }));
     const jsonlContent = jsonlLines.join("\n");
     const contentBytes = Buffer.from(jsonlContent, "utf-8");
@@ -143,7 +143,7 @@ router.post("/hf/dataset/push", async (req: Request, res: Response) => {
     // 4. Determine repo name
     const safeName = repoName
       ? repoName.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()
-      : `nexus-${dataset[0].name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}-${Date.now()}`;
+      : `dlavie-${dataset[0].name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}-${Date.now()}`;
     const repoId = `${username}/${safeName}`;
 
     // 5. Create HF dataset repo
@@ -170,7 +170,7 @@ router.post("/hf/dataset/push", async (req: Request, res: Response) => {
       method: "POST",
       headers: hfHeaders(),
       body: JSON.stringify({
-        summary: `Upload ${samples.length} training samples from NEXUS_OS`,
+        summary: `Upload ${samples.length} training samples from DLavie OS`,
         files: [
           {
             path: "train.jsonl",
@@ -251,7 +251,7 @@ async function pushViaLFS(
         method: "POST",
         headers: hfHeaders(),
         body: JSON.stringify({
-          summary: `Upload ${sampleCount} training samples from NEXUS_OS (LFS)`,
+          summary: `Upload ${sampleCount} training samples from DLavie OS (LFS)`,
           lfs_files: [{ path: "train.jsonl", sha256: fileInfo.sha256, size: contentBytes.length }],
         }),
       });
@@ -331,7 +331,7 @@ router.post("/hf/autotrain/create", async (req: Request, res: Response) => {
       });
     }
 
-    const safeName = (projectName ?? `nexus-finetune-${Date.now()}`)
+    const safeName = (projectName ?? `dlavie-finetune-${Date.now()}`)
       .replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
 
     // Try HF AutoTrain API (official backend)

@@ -220,7 +220,7 @@ router.get("/cli/help", (_req, res) => {
       "Tab to autocomplete model names",
       "Use 'pull <model>:<tag>' for specific versions (e.g. qwen2.5:1.5b)",
       "Find models at ollama.com/library",
-      "Custom trained models appear as nexus-<modelname>",
+      "Custom trained models appear as dlavie-<modelname>",
     ],
   });
 });

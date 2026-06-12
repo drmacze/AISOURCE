@@ -124,7 +124,7 @@ export async function generateWithFallback(
     ? `${systemPrompt ? systemPrompt + "\n\n" : ""}Context from knowledge base:\n${ragContext}\n\nUser: ${message}`
     : message;
 
-  const systemMsg = systemPrompt || "You are NEXUS_OS, a helpful AI assistant. Respond in the same language the user uses.";
+  const systemMsg = systemPrompt || "You are DLavie OS, a helpful AI assistant. Respond in the same language the user uses.";
 
   for (const slot of chain) {
     attempts++;

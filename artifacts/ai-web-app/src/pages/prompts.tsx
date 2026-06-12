@@ -310,8 +310,8 @@ export default function PromptsPage() {
   const handleUseInChat = (p: Prompt) => {
     api(`/prompts/${p.id}/use`, { method: "POST" }).catch(() => {});
     // Navigate to chat with the prompt pre-seeded as a system message
-    sessionStorage.setItem("nexus_prompt_inject", p.content);
-    sessionStorage.setItem("nexus_prompt_name", p.name);
+    sessionStorage.setItem("dlavie_prompt_inject", p.content);
+    sessionStorage.setItem("dlavie_prompt_name", p.name);
     navigate("/chat");
   };
 

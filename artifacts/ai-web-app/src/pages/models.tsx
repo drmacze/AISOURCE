@@ -17,7 +17,7 @@ const API_KEY = typeof window !== "undefined" ? (localStorage.getItem("dlavie_ap
 // ─── API Base — reads from localStorage for runtime override (Vercel deploy) ──
 export function getApiBase(): string {
   const stored =
-    typeof window !== "undefined" ? (localStorage.getItem("nexus_api_url") ?? "") : "";
+    typeof window !== "undefined" ? (localStorage.getItem("dlavie_api_url") ?? "") : "";
   return (stored || (import.meta.env.VITE_API_URL as string) || "").replace(/\/$/, "");
 }
 
@@ -26,8 +26,8 @@ function useApiBase() {
 
   const setApiBase = useCallback((url: string) => {
     const clean = url.trim().replace(/\/$/, "");
-    if (clean) localStorage.setItem("nexus_api_url", clean);
-    else localStorage.removeItem("nexus_api_url");
+    if (clean) localStorage.setItem("dlavie_api_url", clean);
+    else localStorage.removeItem("dlavie_api_url");
     _set(clean);
   }, []);
 

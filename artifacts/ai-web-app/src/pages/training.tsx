@@ -611,7 +611,7 @@ function CliTerminal({
   onModelsChanged: () => void;
 }) {
   const [lines, setLines] = useState<CliLine[]>([
-    { id: 0, type: "system", text: "NEXUS_OS Ollama CLI — type 'help' for commands", ts: Date.now() },
+    { id: 0, type: "system", text: "DLavie OS Ollama CLI — type 'help' for commands", ts: Date.now() },
     { id: 1, type: "system", text: "Commands: pull <model>, list, rm <model>, show <model>, ps, version", ts: Date.now() },
   ]);
   const [input, setInput] = useState("");
@@ -649,7 +649,7 @@ function CliTerminal({
 
   const runCommand = async (cmd: string) => {
     if (!cmd.trim()) return;
-    addLine("user", `nexus@ollama:~$ ${cmd}`);
+    addLine("user", `dlavie@ollama:~$ ${cmd}`);
     setSuggestions([]);
 
     if (history[0] !== cmd) setHistory((h) => [cmd, ...h.slice(0, 49)]);
@@ -789,7 +789,7 @@ function CliTerminal({
         <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
         <span className="w-3 h-3 rounded-full bg-green-500/80" />
         <span className="ml-3 text-white/40 text-[10px] uppercase tracking-widest">
-          nexus_os — ollama terminal
+          dlavie_os — ollama terminal
         </span>
         <button
           onClick={() => setLines([{ id: lineId.current++, type: "system", text: "Terminal cleared.", ts: Date.now() }])}
@@ -841,7 +841,7 @@ function CliTerminal({
 
       {/* Input row */}
       <div className="flex items-center gap-2 px-3 py-2 border-t border-white/10 bg-white/3 shrink-0">
-        <span className="text-primary shrink-0">nexus@ollama:~$</span>
+        <span className="text-primary shrink-0">dlavie@ollama:~$</span>
         <input
           ref={inputRef}
           value={input}

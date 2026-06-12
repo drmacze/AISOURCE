@@ -21,7 +21,7 @@ const router: IRouter = Router();
 function extractKey(req: Request): string | null {
   return (
     (req.headers["x-api-key"] as string) ||
-    (req.headers["x-nexus-key"] as string) ||
+    (req.headers["x-dlavie-key"] as string) ||
     (req.headers["x-dlavie-key"] as string) ||
     (req.headers["authorization"] as string)?.replace(/^Bearer\s+/i, "") ||
     null
@@ -30,7 +30,7 @@ function extractKey(req: Request): string | null {
 
 async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   const key = extractKey(req);
-  const masterKey = process.env.NEXUS_API_KEY || "";
+  const masterKey = process.env.DLAVIE_API_KEY || "";
 
   if (masterKey && key === masterKey) return next();
 
@@ -64,7 +64,7 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction): Pr
 }
 
 function generateKey(): string {
-  return "nxs_" + randomBytes(24).toString("hex");
+  return "dlv_" + randomBytes(24).toString("hex");
 }
 
 function maskKey(key: string): string {

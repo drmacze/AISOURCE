@@ -57,8 +57,8 @@ function openRouterHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${getOpenRouterKey()}`,
-    "HTTP-Referer": "https://nexus-os.replit.app",
-    "X-Title": "NEXUS_OS",
+    "HTTP-Referer": "https://dlavie-os.replit.app",
+    "X-Title": "DLavie OS",
   };
 }
 
@@ -185,7 +185,7 @@ export async function streamOpenRouterResponse(
     {
       role: "system",
       content:
-        "You are NEXUS_OS, a powerful AI assistant. Be accurate, concise, and helpful. Respond in the same language the user uses.",
+        "You are DLavie OS, a powerful AI assistant. Be accurate, concise, and helpful. Respond in the same language the user uses.",
     },
     { role: "user", content },
   ];

@@ -1,5 +1,5 @@
 /**
- * NEXUS_OS — AI Developer Agent Page
+ * DLavie OS — AI Developer Agent Page
  *
  * Brain: Qwen/Qwen2.5-Coder-32B-Instruct on HuggingFace GPU servers
  *        → ZERO local RAM consumed
@@ -733,7 +733,7 @@ export default function AgentPage() {
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 flex items-center justify-center mb-3">
                   <Bot className="w-6 h-6 text-emerald-400" />
                 </div>
-                <h2 className="text-base font-semibold text-slate-300 font-[Syne]">NEXUS Agent</h2>
+                <h2 className="text-base font-semibold text-slate-300 font-[Syne]">DLavie Agent</h2>
                 <p className="mt-1.5 text-xs text-slate-500 max-w-xs leading-relaxed">
                   Powered by <code className="text-emerald-400 font-mono">Qwen2.5-Coder-32B</code> on HuggingFace GPU servers.
                   34 real tools. Persistent memory. Zero local RAM.

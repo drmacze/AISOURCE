@@ -149,21 +149,21 @@ async function seed() {
   // ─── Conversation ────────────────────────────────────────────────────────
   const [conv1] = await db
     .insert(conversationsTable)
-    .values({ title: "Welcome to NEXUS_OS", model: "tinyllama" })
+    .values({ title: "Welcome to DLavie OS", model: "tinyllama" })
     .returning();
 
   await db.insert(messagesTable).values({
     conversationId: conv1.id,
     role: "system",
     content:
-      "You are NEXUS_OS, a powerful local AI assistant running on Ollama. Help users with questions, code, analysis, and more.",
+      "You are DLavie OS, a powerful local AI assistant running on Ollama. Help users with questions, code, analysis, and more.",
   });
 
   await db.insert(messagesTable).values({
     conversationId: conv1.id,
     role: "assistant",
     content:
-      "Hello! I'm NEXUS_OS, your local AI assistant. I run entirely on your machine using Ollama — no cloud, complete privacy. How can I help you?",
+      "Hello! I'm DLavie OS, your local AI assistant. I run entirely on your machine using Ollama — no cloud, complete privacy. How can I help you?",
   });
 
   console.log("Database seeded successfully!");

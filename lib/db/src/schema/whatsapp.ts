@@ -13,7 +13,7 @@ export const whatsappConfigTable = pgTable("whatsapp_config", {
   aiApiKey: text("ai_api_key").default(""),
   systemPrompt: text("system_prompt").default("Kamu adalah asisten AI yang membantu. Jawab dengan singkat dan jelas."),
   enabled: boolean("enabled").notNull().default(false),
-  botName: text("bot_name").default("NEXUS Bot"),
+  botName: text("bot_name").default("DLavie Bot"),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
 });

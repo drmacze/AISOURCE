@@ -25,14 +25,14 @@ interface ConfigFile {
   hfToken?: string;
   moonshotApiKey?: string;
   githubToken?: string;
-  nexusApiKey?: string;
+  dlavieApiKey?: string;
 }
 
 const LEGACY_MAP: Record<string, string> = {
   hfToken: "HF_TOKEN",
   moonshotApiKey: "MOONSHOT_API_KEY",
   githubToken: "GITHUB_TOKEN",
-  nexusApiKey: "NEXUS_API_KEY",
+  dlavieApiKey: "DLAVIE_API_KEY",
 };
 
 function readConfig(): ConfigFile {
@@ -66,7 +66,7 @@ function writeSecrets(secrets: Record<string, string>) {
   delete cfg.hfToken;
   delete cfg.moonshotApiKey;
   delete cfg.githubToken;
-  delete cfg.nexusApiKey;
+  delete cfg.dlavieApiKey;
   writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf8");
 }
 
@@ -158,8 +158,8 @@ router.post("/settings/secrets/test", async (req: Request, res: Response) => {
         const r = await fetch("https://openrouter.ai/api/v1/models", {
           headers: {
             Authorization: `Bearer ${key}`,
-            "HTTP-Referer": "https://nexusos.replit.app",
-            "X-Title": "NEXUS_OS",
+            "HTTP-Referer": "https://dlavie-os.replit.app",
+            "X-Title": "DLavie OS",
           },
           signal: AbortSignal.timeout(8000),
         });
@@ -192,7 +192,7 @@ router.post("/settings/secrets/test", async (req: Request, res: Response) => {
         const r = await fetch("https://api.github.com/user", {
           headers: {
             Authorization: `Bearer ${key}`,
-            "User-Agent": "NEXUS_OS/1.0",
+            "User-Agent": "DLavie OS/1.0",
             Accept: "application/vnd.github+json",
           },
           signal: AbortSignal.timeout(8000),

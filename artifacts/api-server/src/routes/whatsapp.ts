@@ -281,7 +281,7 @@ router.post("/whatsapp/config", async (req: Request, res: Response) => {
       aiApiKey: aiApiKey?.includes("••••") ? (existing?.aiApiKey ?? "") : (aiApiKey?.trim() || ""),
       systemPrompt: systemPrompt?.trim() || "Kamu adalah asisten AI yang membantu. Jawab dengan singkat dan jelas.",
       enabled: enabled ?? false,
-      botName: botName?.trim() || "NEXUS Bot",
+      botName: botName?.trim() || "DLavie Bot",
       updatedAt: new Date(),
     };
 

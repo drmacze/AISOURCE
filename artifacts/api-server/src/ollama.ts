@@ -264,7 +264,7 @@ export async function generateOllamaResponse(
   const resolvedModel = await resolveModel(model);
   try {
     const sysPrompt = systemPrompt ||
-      "You are NEXUS_OS, a powerful local AI assistant. Be helpful, accurate, and concise.";
+      "You are DLavie OS, a powerful local AI assistant. Be helpful, accurate, and concise.";
     const fullPrompt = ragContext
       ? `${sysPrompt}\n\nRelevant knowledge base context:\n\n${ragContext}\n\n---\nUser: ${prompt}\nAssistant:`
       : `${sysPrompt}\n\nUser: ${prompt}\nAssistant:`;
@@ -343,7 +343,7 @@ export async function streamOllamaResponse(
     }
   }
 
-  const sysPromptStream = "You are NEXUS_OS, a powerful local AI assistant. Be helpful, accurate, and concise.";
+  const sysPromptStream = "You are DLavie OS, a powerful local AI assistant. Be helpful, accurate, and concise.";
   const fullPrompt = ragContext
     ? `${sysPromptStream}\n\nRelevant knowledge base context:\n\n${ragContext}\n\n---\nUser: ${prompt}\nAssistant:`
     : `${sysPromptStream}\n\nUser: ${prompt}\nAssistant:`;

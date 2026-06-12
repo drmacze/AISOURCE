@@ -62,11 +62,11 @@ router.get("/auth/session", async (_req: Request, res: Response) => {
     } catch { /* fall through */ }
   }
 
-  // Fallback: if NEXUS_API_KEY is set in env (e.g. saved via Settings), use it automatically
+  // Fallback: if DLAVIE_API_KEY is set in env (e.g. saved via Settings), use it automatically
   // so the user doesn't need to paste it manually every time
-  const nexusKey = process.env.NEXUS_API_KEY;
-  if (nexusKey) {
-    res.json({ found: true, key: nexusKey, name: "NEXUS Admin Key", permissions: "admin" });
+  const dlavieKey = process.env.DLAVIE_API_KEY;
+  if (dlavieKey) {
+    res.json({ found: true, key: dlavieKey, name: "DLavie Admin Key", permissions: "admin" });
     return;
   }
 

@@ -62,14 +62,14 @@ All protected endpoints require an API key in the `X-API-Key` header.
 
 **Default dev key** (hardcoded for local use):
 ```
-nxs_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560
+dlv_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560
 ```
 
 > **Production**: Set `API_KEY` environment variable to override this key.
 
 ### Header format
 ```http
-X-API-Key: nxs_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560
+X-API-Key: dlv_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560
 Content-Type: application/json
 ```
 
@@ -99,7 +99,7 @@ Content-Type: application/json
 
 ### Setting the API URL at runtime
 
-In the frontend, go to **Models → Connected Server → Configure** and enter your API server URL. This is saved in `localStorage` as `nexus_api_url`.
+In the frontend, go to **Models → Connected Server → Configure** and enter your API server URL. This is saved in `localStorage` as `dlavie_api_url`.
 
 For Vercel deployments, set the env variable:
 ```bash
@@ -115,7 +115,7 @@ VITE_API_URL=https://your-api-server.com
 ```bash
 curl http://localhost:8080/api/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: nxs_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560" \
+  -H "X-API-Key: dlv_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560" \
   -d '{
     "model": "tinyllama",
     "messages": [
@@ -196,7 +196,7 @@ Returns 17 curated models with their install status, size, and tags.
 ```bash
 curl -X POST http://localhost:8080/api/models/pull \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: nxs_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560" \
+  -H "X-API-Key: dlv_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560" \
   -d '{ "model": "qwen2.5:1.5b" }' \
   --no-buffer
 ```
@@ -215,7 +215,7 @@ Event types: `info` | `stdout` | `progress` | `success` | `error` | `done`
 ```bash
 curl -X POST http://localhost:8080/api/models/delete \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: nxs_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560" \
+  -H "X-API-Key: dlv_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560" \
   -d '{ "model": "tinyllama:latest" }'
 ```
 
@@ -498,7 +498,7 @@ CORS_ORIGIN=https://your-frontend.vercel.app
 
 ```typescript
 const API_BASE = "http://localhost:8080";
-const API_KEY  = "nxs_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560";
+const API_KEY  = "dlv_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560";
 
 // Chat completion
 const response = await fetch(`${API_BASE}/api/v1/chat/completions`, {
@@ -542,7 +542,7 @@ import requests
 import json
 
 API_BASE = "http://localhost:8080"
-API_KEY  = "nxs_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560"
+API_KEY  = "dlv_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560"
 HEADERS  = {"Content-Type": "application/json", "X-API-Key": API_KEY}
 
 # Chat completion
@@ -606,7 +606,7 @@ curl -X POST http://localhost:8080/api/documents/import-url \
 # Pull tinyllama and watch progress
 curl -sN -X POST http://localhost:8080/api/models/pull \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: nxs_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560" \
+  -H "X-API-Key: dlv_d91177d30cd5dc48bc05e34b6c81e9bd68e07070ffce893be47e6447520fd560" \
   -d '{"model":"tinyllama"}' | grep "^data:" | while read line; do
   echo "${line:5}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'[{d[\"type\"]}] {d.get(\"text\",\"\")}')"
 done

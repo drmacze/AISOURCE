@@ -2,7 +2,7 @@
  * DLavie OS — Shared Auth Middleware
  *
  * Validates API keys against the database.
- * Falls back to the NEXUS_API_KEY env var as a master admin key.
+ * Falls back to the DLAVIE_API_KEY env var as a master admin key.
  *
  * Attaches req.apiKey to the request on success.
  */
@@ -27,12 +27,12 @@ declare global {
   }
 }
 
-const MASTER_KEY = process.env.NEXUS_API_KEY || "";
+const MASTER_KEY = process.env.DLAVIE_API_KEY || "";
 
 export function extractRawKey(req: Request): string | null {
   return (
     (req.headers["x-api-key"] as string) ||
-    (req.headers["x-nexus-key"] as string) ||
+    (req.headers["x-dlavie-key"] as string) ||
     (req.headers["x-dlavie-key"] as string) ||
     (req.headers["authorization"] as string)?.replace(/^Bearer\s+/i, "") ||
     null
@@ -51,7 +51,7 @@ export async function resolveApiKey(
     return { id: "master", name: "Master Key", permissions: "admin", defaultModel: null, systemPrompt: null, webhookUrl: null };
   }
 
-  if (!rawKey.startsWith("nxs_")) return null;
+  if (!rawKey.startsWith("dlv_")) return null;
 
   try {
     const [found] = await db
@@ -137,7 +137,7 @@ export function requireAuth(
       res.status(401).json({
         error: "Unauthorized",
         message: "API key required.",
-        hint: "Pass your key as: X-API-Key: nxs_... or Authorization: Bearer nxs_...",
+        hint: "Pass your key as: X-API-Key: dlv_... or Authorization: Bearer dlv_...",
       });
       return;
     }

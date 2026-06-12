@@ -498,7 +498,7 @@ export default function ApiDocs() {
         <div className="flex gap-2">
           <input
             type="password"
-            placeholder="nxs_your_api_key_here..."
+            placeholder="dlv_your_api_key_here..."
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             className="flex-1 bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-slate-300 focus:outline-none focus:border-amber-500/40 placeholder:text-slate-600"
@@ -515,7 +515,7 @@ export default function ApiDocs() {
           </button>
         </div>
         <p className="text-xs text-slate-500 mt-2">
-          Set <code className="text-amber-400/80">NEXUS_API_KEY</code> in Replit Secrets. The key is used for live testing below.
+          Set <code className="text-amber-400/80">DLAVIE_API_KEY</code> in Replit Secrets. The key is used for live testing below.
         </p>
       </motion.div>
 
