@@ -39,6 +39,15 @@ router.post("/wa-bot/disconnect", async (_req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
+router.post("/wa-bot/clear-session", async (_req: Request, res: Response) => {
+  try {
+    await waBotManager.clearSessionAndReset();
+    res.json({ ok: true, message: "Session berhasil dihapus — siap pairing ulang" });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 router.get("/wa-bot/logs", (_req: Request, res: Response) => {
   res.json({ logs: waBotManager.getLogs() });
 });

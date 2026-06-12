@@ -7,7 +7,7 @@ import {
   MessageCircle, Plug, PlugZap, Settings, Bot, User, Phone,
   Loader2, CheckCircle2, XCircle, RefreshCw, LogOut, Zap,
   MessageSquare, Clock, ChevronRight, Sliders, AlertCircle,
-  ImageIcon, Sparkles, Shield, Info,
+  ImageIcon, Sparkles, Shield, Info, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -345,8 +345,10 @@ export default function WaBotPage() {
   const [error, setError]           = useState<string | null>(null);
   const [configDirty, setConfigDirty] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const [pairingStartedAt, setPairingStartedAt] = useState<number | null>(null);
-  const [codeExpired, setCodeExpired]           = useState(false);
+  const [pairingStartedAt, setPairingStartedAt]     = useState<number | null>(null);
+  const [codeExpired, setCodeExpired]               = useState(false);
+  const [clearingSession, setClearingSession]       = useState(false);
+  const [showClearConfirm, setShowClearConfirm]     = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -424,6 +426,21 @@ export default function WaBotPage() {
     await loadStatus();
   }
 
+  async function handleClearSession() {
+    setShowClearConfirm(false);
+    setClearingSession(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/wa-bot/clear-session", { method: "POST" });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (!res.ok || data.error) { setError(data.error || "Gagal menghapus session"); return; }
+      setPhoneInput("");
+      setPairingStartedAt(null);
+      setCodeExpired(false);
+    } catch (e) { setError(String(e)); }
+    finally { setClearingSession(false); }
+  }
+
   // Show confirmation modal on first "save" click
   function requestSave() {
     setShowSaveModal(true);
@@ -453,6 +470,54 @@ export default function WaBotPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-950">
+      {/* Clear Session confirmation modal */}
+      <AnimatePresence>
+        {showClearConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-slate-900 border border-red-500/30 rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-500/15 border border-red-500/25 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-5 h-5 text-red-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white">Hapus Session WhatsApp?</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Tindakan ini tidak dapat dibatalkan</p>
+                </div>
+              </div>
+              <div className="bg-red-500/8 border border-red-500/20 rounded-xl p-4 space-y-2 text-xs text-slate-300">
+                <p className="font-medium text-red-300">Yang akan dihapus:</p>
+                <ul className="space-y-1 list-disc list-inside text-slate-400">
+                  <li>Semua file session Baileys di disk</li>
+                  <li>Credentials &amp; encryption keys nomor ini</li>
+                  <li>Nomor yang tersimpan di konfigurasi</li>
+                </ul>
+                <p className="text-slate-400 mt-2">Setelah ini kamu harus pairing ulang dengan nomor WhatsApp.</p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 text-sm transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleClearSession}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Hapus Session
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Save confirmation modal */}
       <AnimatePresence>
         {showSaveModal && (
@@ -528,11 +593,22 @@ export default function WaBotPage() {
                         <p className="text-xs text-slate-400">+{status.phoneNumber}</p>
                       </div>
                     </div>
-                    <button onClick={handleDisconnect}
-                      className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-3 py-1.5 rounded-lg transition-colors">
-                      <LogOut className="w-3.5 h-3.5" />
-                      Disconnect
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowClearConfirm(true)}
+                        disabled={clearingSession}
+                        title="Hapus semua file session Baileys dari disk"
+                        className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {clearingSession ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        Clear Session
+                      </button>
+                      <button onClick={handleDisconnect}
+                        className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 px-3 py-1.5 rounded-lg transition-colors">
+                        <LogOut className="w-3.5 h-3.5" />
+                        Disconnect
+                      </button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3 mt-4">
                     <div className="bg-slate-800/50 rounded-lg p-3 text-center">
@@ -677,6 +753,31 @@ export default function WaBotPage() {
                   )}
                 </div>
               )}
+
+              {/* Clear Session — always visible, useful for corrupt/stuck sessions */}
+              <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                      <Trash2 className="w-3.5 h-3.5 text-orange-400" /> Clear Session
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Hapus semua file session Baileys dari disk. Gunakan jika session corrupt, ganti nomor, atau ingin pairing ulang dari nol.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowClearConfirm(true)}
+                    disabled={clearingSession}
+                    className="ml-4 flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {clearingSession
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <Trash2 className="w-3.5 h-3.5" />
+                    }
+                    {clearingSession ? "Menghapus…" : "Clear Session"}
+                  </button>
+                </div>
+              </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-4 space-y-2">
                 <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">

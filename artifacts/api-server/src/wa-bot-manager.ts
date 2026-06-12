@@ -336,6 +336,29 @@ class WaBotManager {
     try { mkdirSync(SESSION_DIR, { recursive: true }); }          catch { /* ignore */ }
   }
 
+  /**
+   * Public: force-clear the Baileys session for the current phone number,
+   * disconnect the socket, and reset state to idle.
+   * Use this when a session is corrupted or to unlink the device completely.
+   */
+  async clearSessionAndReset(): Promise<void> {
+    console.log("[WaBot] 🗑️  Clearing session for", this.config.phoneNumber || "unknown");
+    this.reconnecting     = true;
+    this.wasEverConnected = false;
+    if (this.sock) {
+      try { this.sock.end(new Error("clear_session")); } catch { /* ignore */ }
+      this.sock = null;
+    }
+    this.clearSession();
+    this.config.phoneNumber = "";
+    saveConfig(this.config);
+    this.status       = { connected: false, pairingStep: "idle", messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
+    this.startTime    = null;
+    this.reconnecting = false;
+    broadcast("wa_status", this.getStatus());
+    console.log("[WaBot] ✅ Session cleared — ready for fresh pairing");
+  }
+
   // ── Connect ───────────────────────────────────────────────────────────────
 
   async connect(phoneNumber: string): Promise<string> {
