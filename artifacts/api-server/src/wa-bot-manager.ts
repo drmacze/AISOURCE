@@ -280,6 +280,13 @@ class WaBotManager {
   /** Incremented on every connect() call so stale event handlers from previous sockets
    *  can detect they're out-of-date and skip mutations to this.status. */
   private connGen           = 0;
+  /**
+   * How many times we've auto-reconnected during the pairing handshake phase.
+   * WhatsApp normally closes the connection once after the user enters the pairing
+   * code (code 515 "restart required") to re-open as an authenticated device.
+   * We allow up to 5 silent reconnect attempts before surfacing an error.
+   */
+  private pairingReconnects = 0;
 
   // ── Public getters ────────────────────────────────────────────────────────
 
@@ -361,7 +368,13 @@ class WaBotManager {
 
   // ── Connect ───────────────────────────────────────────────────────────────
 
-  async connect(phoneNumber: string): Promise<string> {
+  /**
+   * @param phoneNumber  Target phone number (digits only, with country code).
+   * @param keepSession  When true, do NOT wipe the session before connecting.
+   *                     Used for auto-reconnects during the pairing handshake
+   *                     so that credentials saved mid-handshake are preserved.
+   */
+  async connect(phoneNumber: string, keepSession = false): Promise<string> {
     // Bump generation so stale event handlers from previous sockets are ignored
     const myGen = ++this.connGen;
 
@@ -377,11 +390,20 @@ class WaBotManager {
     this.config.phoneNumber = cleaned;
     saveConfig(this.config);
 
-    this.status = { connected: false, pairingStep: "waiting_code", messageCount: 0, phoneNumber: cleaned, hasThumb: existsSync(THUMB_PATH) };
+    if (!keepSession) {
+      // Fresh connect: reset pairing-reconnect counter and wipe any stale session
+      // so WhatsApp doesn't see a half-registered device.
+      this.pairingReconnects = 0;
+      this.clearSession();
+      this.status = { connected: false, pairingStep: "waiting_code", messageCount: 0, phoneNumber: cleaned, hasThumb: existsSync(THUMB_PATH) };
+    } else {
+      // Reconnecting during/after pairing handshake — keep status as-is (don't flash error)
+      this.status.connected   = false;
+      this.status.phoneNumber = cleaned;
+      this.status.pairingStep = "waiting_code";
+      this.status.error       = undefined;
+    }
     broadcast("wa_status", this.getStatus());
-
-    // Always wipe stale session so WhatsApp doesn't see a half-registered device
-    this.clearSession();
 
     const { version }          = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -447,25 +469,53 @@ class WaBotManager {
           const loggedOut = code === DisconnectReason.loggedOut;
 
           this.status.connected = false;
-          console.log(`[WaBot] Disconnected (code=${code}, wasConnected=${this.wasEverConnected})`);
+          console.log(`[WaBot] Disconnected (code=${code}, wasConnected=${this.wasEverConnected}, pairingReconnects=${this.pairingReconnects})`);
 
           if (loggedOut) {
+            // Explicitly logged out — stop and require manual reconnect
             this.status.pairingStep = "error";
             this.status.error       = "Logged out — silakan hubungkan ulang";
+            broadcast("wa_status", this.getStatus());
+
           } else if (this.wasEverConnected && !this.reconnecting) {
             // Was fully connected before — safe to auto-reconnect
             this.status.pairingStep = "idle";
             this.reconnecting = true;
+            broadcast("wa_status", this.getStatus());
             setTimeout(async () => {
               this.reconnecting = false;
               try { await this.connect(cleaned); } catch { /* ignore */ }
             }, 5000);
+
+          } else if (!this.wasEverConnected && !this.reconnecting) {
+            // Disconnected during or right after the pairing handshake.
+            // This is NORMAL behaviour: WhatsApp closes the old connection after
+            // accepting the pairing code (code 515 "restart required") and
+            // re-opens it as an authenticated session. We must reconnect WITHOUT
+            // wiping the session so that any credentials already saved by
+            // saveCreds (the account key exchange) are preserved.
+            if (this.pairingReconnects < 5) {
+              this.pairingReconnects++;
+              this.status.pairingStep = "waiting_code";
+              this.status.error       = undefined;
+              this.reconnecting       = true;
+              const delay = 2000 + this.pairingReconnects * 500; // 2.0 → 4.5 s
+              console.log(`[WaBot] Pairing handshake close (code=${code}) — auto-reconnect #${this.pairingReconnects} in ${delay}ms (keeping session)`);
+              broadcast("wa_status", this.getStatus());
+              setTimeout(async () => {
+                this.reconnecting = false;
+                try { await this.connect(cleaned, /* keepSession= */ true); } catch { /* ignore */ }
+              }, delay);
+            } else {
+              // Too many retries — something is genuinely wrong
+              this.status.pairingStep = "error";
+              this.status.error       = "Koneksi gagal setelah beberapa percobaan — tekan Connect lagi";
+              broadcast("wa_status", this.getStatus());
+            }
+
           } else {
-            // Disconnected during pairing phase — show error, let user retry
-            this.status.pairingStep = "error";
-            this.status.error       = "Koneksi terputus — tekan Hubungkan lagi";
+            broadcast("wa_status", this.getStatus());
           }
-          broadcast("wa_status", this.getStatus());
         }
       } catch (e) { console.error("[WaBot] connection.update error:", e); }
     });
@@ -557,19 +607,25 @@ class WaBotManager {
     });
 
     // ── Request pairing code AFTER all handlers are registered ───────────────
-    // Wait for the first connection.update (= noise handshake done, first WA message
-    // received) instead of a fixed timer — more reliable on slow/proxied networks.
 
     let pairingCode = "";
 
     if (!state.creds.registered) {
-      // Wait for the WA noise-handshake + any initial session-reset reconnect to complete.
-      // WA commonly closes the first raw TCP connection for a fresh session and Baileys
-      // internally reconnects; empirically this takes ~3 s from socket creation.
-      // Using a fixed delay is simpler and more reliable than event-driven heuristics here.
-      console.log("[WaBot] Waiting for WA handshake (3.5 s)…");
-      await new Promise((r) => setTimeout(r, 3500));
-      console.log("[WaBot] Ready — requesting pairing code…");
+      if (!keepSession) {
+        // Fresh session: wait for the WA noise-handshake + any initial session-reset
+        // reconnect to complete. WA commonly closes the first raw TCP connection for a
+        // fresh session and Baileys internally reconnects; empirically ~3 s from socket
+        // creation. Fixed delay is simpler and more reliable than event-driven heuristics.
+        console.log("[WaBot] Waiting for WA handshake (3.5 s)…");
+        await new Promise((r) => setTimeout(r, 3500));
+        console.log("[WaBot] Ready — requesting pairing code…");
+      } else {
+        // Pairing reconnect: credentials not yet registered but socket just re-opened.
+        // Shorter wait — noise handshake is faster on an already-warmed connection.
+        console.log("[WaBot] Pairing reconnect — waiting 1.5 s for handshake…");
+        await new Promise((r) => setTimeout(r, 1500));
+        console.log("[WaBot] Ready — requesting new pairing code…");
+      }
 
       let lastErr: unknown;
       for (let attempt = 1; attempt <= 3; attempt++) {
