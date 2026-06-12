@@ -25,6 +25,7 @@ import PlaygroundPage from "@/pages/playground";
 import TrainingLabPage from "@/pages/training-lab";
 import StoragePage from "@/pages/storage";
 import WhatsAppPage from "@/pages/whatsapp";
+import WaBotPage from "@/pages/wa-bot";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,6 +63,7 @@ function Router() {
         <Route path="/training-lab" component={TrainingLabPage} />
         <Route path="/api-docs" component={ApiDocs} />
         <Route path="/whatsapp" component={WhatsAppPage} />
+        <Route path="/wa-bot" component={WaBotPage} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

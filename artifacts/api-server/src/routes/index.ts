@@ -26,6 +26,7 @@ import trainingAdvancedRouter from "./training-advanced";
 import onedriveRouter from "./onedrive";
 import spotifyRouter from "./spotify";
 import whatsappRouter from "./whatsapp";
+import waBotRouter from "./wa-bot";
 
 const router: IRouter = Router();
 
@@ -100,5 +101,6 @@ router.use(spotifyRouter);
 
 // WhatsApp Cloud API webhook + bot management
 router.use(whatsappRouter);
+router.use(waBotRouter);
 
 export default router;

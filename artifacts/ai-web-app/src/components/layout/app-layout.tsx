@@ -89,7 +89,8 @@ const NAV_GROUPS = [
   {
     label: "Integrations",
     items: [
-      { href: "/whatsapp",   label: "WhatsApp Bot",   icon: MessageCircle,    color: "text-green-400" },
+      { href: "/wa-bot",     label: "WA Bot (Baileys)", icon: MessageCircle,  color: "text-green-400" },
+      { href: "/whatsapp",   label: "WA Webhook Bot", icon: MessageCircle,    color: "text-emerald-400" },
       { href: "/storage",    label: "OneDrive",       icon: HardDrive,        color: "text-blue-400" },
     ],
   },
