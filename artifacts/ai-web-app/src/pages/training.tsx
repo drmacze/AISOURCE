@@ -491,6 +491,7 @@ function formatBytes(bytes: number) {
 
 // ── One-click download button for model catalogue ─────────────────────────────
 function DownloadButton({ model, onDone }: { model: string; onDone?: () => void }) {
+  const BASE = getApiBase();
   const [status, setStatus] = useState<"idle" | "pulling" | "done" | "error">("idle");
   const [msg, setMsg] = useState("");
 
