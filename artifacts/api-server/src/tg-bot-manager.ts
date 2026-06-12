@@ -120,7 +120,8 @@ async function tgApi(token: string, method: string, body?: Record<string, unknow
   return json.result;
 }
 
-async function sendMessage(token: string, chatId: number | string, text: string, replyTo?: number) {
+/** Send a structured (Markdown) message — used for .report, .stats, ticket responses */
+async function sendMarkdown(token: string, chatId: number | string, text: string, replyTo?: number) {
   return tgApi(token, "sendMessage", {
     chat_id:                  chatId,
     text,
@@ -129,6 +130,29 @@ async function sendMessage(token: string, chatId: number | string, text: string,
     disable_web_page_preview: true,
   });
 }
+
+/**
+ * Send an AI-generated reply — NO parse_mode so we never get Telegram
+ * "can't parse entities" errors from malformed markdown in LLM output.
+ * Falls back automatically if the first attempt fails for any reason.
+ */
+async function sendAIReply(token: string, chatId: number | string, text: string, replyTo?: number) {
+  try {
+    return await tgApi(token, "sendMessage", {
+      chat_id:                  chatId,
+      text,
+      reply_to_message_id:      replyTo,
+      disable_web_page_preview: true,
+    });
+  } catch (e) {
+    // If even plain text fails (rate limit, chat not found, etc.) log and rethrow
+    console.error(`[TgBot] sendAIReply failed for chat ${chatId}:`, String(e));
+    throw e;
+  }
+}
+
+/** Backward-compat alias used by ticket / report notify callers */
+const sendMessage = sendMarkdown;
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
 
@@ -193,23 +217,48 @@ class TgBotManager {
     while (this.polling) {
       try {
         this.abortCtrl = new AbortController();
+        // Use POST getUpdates so allowed_updates is a proper JSON array body
         const res = await fetch(
-          `https://api.telegram.org/bot${this.config.token}/getUpdates?offset=${this.offset}&timeout=25&allowed_updates=["message"]`,
-          { signal: AbortSignal.any([this.abortCtrl.signal, AbortSignal.timeout(35_000)]) }
+          `https://api.telegram.org/bot${this.config.token}/getUpdates`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ offset: this.offset, timeout: 25, allowed_updates: ["message"] }),
+            signal: AbortSignal.any([this.abortCtrl.signal, AbortSignal.timeout(35_000)]),
+          }
         );
-        if (!res.ok) { await sleep(5000); continue; }
-        const data = await res.json() as { ok: boolean; result: TgUpdate[] };
-        if (!data.ok) { await sleep(5000); continue; }
+        if (!res.ok) {
+          if (res.status === 409) {
+            // Another bot instance is polling — wait longer for it to time out
+            console.warn("[TgBot] 409 Conflict — another poller active, waiting 35s for it to expire…");
+            await sleep(35_000);
+          } else {
+            console.warn(`[TgBot] getUpdates HTTP error: ${res.status}`);
+            await sleep(5000);
+          }
+          continue;
+        }
+        const data = await res.json() as { ok: boolean; result: TgUpdate[]; description?: string };
+        if (!data.ok) {
+          console.warn(`[TgBot] getUpdates not ok: ${data.description ?? "unknown"}`);
+          await sleep(5000); continue;
+        }
 
         for (const upd of data.result) {
           this.offset = upd.update_id + 1;
-          if (upd.message) await this.handleMessage(upd.message).catch(console.error);
+          if (upd.message) {
+            await this.handleMessage(upd.message).catch((e) => {
+              console.error(`[TgBot] handleMessage error for update ${upd.update_id}:`, String(e));
+            });
+          }
         }
       } catch (e) {
         if (!this.polling) break;
+        console.warn("[TgBot] pollLoop error:", String(e));
         await sleep(3000);
       }
     }
+    console.log("[TgBot] Polling loop ended");
   }
 
   // ── Message handler ────────────────────────────────────────────────────────
@@ -268,8 +317,11 @@ class TgBotManager {
       text, undefined, buildSystemPrompt(this.config)
     );
 
-    const finalReply = aiReply.trim() + buildFooter(this.config);
-    await sendMessage(this.config.token, chatId, finalReply, msg.message_id);
+    // Plain text footer (no Markdown) because AI output may contain special chars
+    // that break Telegram's legacy Markdown parser
+    const footer = `\n\n${this.config.botName} · Powered by DLavie OS`;
+    const finalReply = aiReply.trim() + footer;
+    await sendAIReply(this.config.token, chatId, finalReply, msg.message_id);
 
     this.status.messageCount = (this.status.messageCount || 0) + 1;
     const logEntry: TgBotLog = {
@@ -381,3 +433,18 @@ interface TgMessage {
 }
 
 export const tgBotManager = new TgBotManager();
+
+// ── Auto-reconnect on server start ────────────────────────────────────────────
+// If a token was saved from a previous session, reconnect automatically so
+// users don't have to manually click Connect after every server restart.
+(async () => {
+  const saved = tgBotManager.getConfig().token;
+  if (saved) {
+    try {
+      await tgBotManager.connect();
+      console.log("[TgBot] ✅ Auto-reconnected on server start");
+    } catch (e) {
+      console.warn("[TgBot] Auto-reconnect failed (will retry when user clicks Connect):", String(e));
+    }
+  }
+})();
