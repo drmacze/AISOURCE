@@ -1,41 +1,88 @@
 /**
- * DLavie OS — AI Developer Agent Page
+ * DLavie OS — Autonomous Agent Command Center
  *
- * Brain: Qwen/Qwen2.5-Coder-32B-Instruct on HuggingFace GPU servers
- *        → ZERO local RAM consumed
- * - Sessions run as background processes (survive page navigation)
- * - ReAct loop: up to 30 steps with 34 real tools
- * - Memory system: cross-session persistent learning (agent remembers past work)
- * - Autonomous mode: LLM-driven self-directed tasks every 10 min
+ * 8 specialist agents working 24/7 — NO run button needed.
+ * Real-time 3D office visualization + live activity feed.
+ * Agents think, act, coordinate, and learn autonomously.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Bot, Play, Square, Trash2, Loader2, CheckCircle2, XCircle,
+  Bot, Trash2, Loader2, CheckCircle2, XCircle,
   AlertTriangle, Lightbulb, ChevronDown, ChevronRight, Sparkles,
-  Database, Network, Cpu, Search, Package, Zap, RefreshCw,
-  Clock, ToggleLeft, ToggleRight, PlusCircle, History,
-  Brain, FileCode2, FlaskConical, BookOpen, ScrollText, Terminal,
-  MessageSquare, Send,
+  Zap, RefreshCw,
+  Brain, BookOpen, Terminal,
+  Send, Activity, Mail, LayoutGrid, TerminalSquare,
+  Shield, BarChart2, Wrench, Star, Radio, Inbox,
+  Play, Square, PlusCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// ─── Agent definitions ────────────────────────────────────────────────────────
+
+const AGENT_DEFS = [
+  { id: "orchestrator", name: "Orchestrator", emoji: "🎯", icon: Radio,   color: "emerald", role: "Master coordinator", col: 1, row: 0 },
+  { id: "trainer",      name: "Trainer",       emoji: "🧠", icon: Brain,   color: "violet",  role: "AI model training",  col: 0, row: 1 },
+  { id: "librarian",    name: "Librarian",     emoji: "📚", icon: BookOpen, color: "sky",    role: "Knowledge base",     col: 2, row: 1 },
+  { id: "guardian",     name: "Guardian",      emoji: "🛡️", icon: Shield,  color: "amber",   role: "Tickets & quality",  col: 3, row: 1 },
+  { id: "analyst",      name: "Analyst",       emoji: "📊", icon: BarChart2,color: "blue",   role: "Data intelligence",  col: 0, row: 2 },
+  { id: "botmaster",    name: "Botmaster",     emoji: "🤖", icon: Bot,     color: "teal",    role: "Bot operations",     col: 1, row: 2 },
+  { id: "curator",      name: "Curator",       emoji: "✨", icon: Star,    color: "pink",    role: "Prompt curation",    col: 2, row: 2 },
+  { id: "engineer",     name: "Engineer",      emoji: "⚙️", icon: Wrench,  color: "orange",  role: "Infrastructure",     col: 3, row: 2 },
+] as const;
+
+type AgentId = typeof AGENT_DEFS[number]["id"];
+
+const COLOR_MAP: Record<string, { bg: string; border: string; text: string; glow: string; ring: string }> = {
+  emerald: { bg: "bg-emerald-500/10", border: "border-emerald-500/40", text: "text-emerald-400", glow: "shadow-emerald-500/30", ring: "ring-emerald-500/40" },
+  violet:  { bg: "bg-violet-500/10",  border: "border-violet-500/40",  text: "text-violet-400",  glow: "shadow-violet-500/30",  ring: "ring-violet-500/40"  },
+  sky:     { bg: "bg-sky-500/10",     border: "border-sky-500/40",     text: "text-sky-400",     glow: "shadow-sky-500/30",     ring: "ring-sky-500/40"     },
+  amber:   { bg: "bg-amber-500/10",   border: "border-amber-500/40",   text: "text-amber-400",   glow: "shadow-amber-500/30",   ring: "ring-amber-500/40"   },
+  blue:    { bg: "bg-blue-500/10",    border: "border-blue-500/40",    text: "text-blue-400",    glow: "shadow-blue-500/30",    ring: "ring-blue-500/40"    },
+  teal:    { bg: "bg-teal-500/10",    border: "border-teal-500/40",    text: "text-teal-400",    glow: "shadow-teal-500/30",    ring: "ring-teal-500/40"    },
+  pink:    { bg: "bg-pink-500/10",    border: "border-pink-500/40",    text: "text-pink-400",    glow: "shadow-pink-500/30",    ring: "ring-pink-500/40"    },
+  orange:  { bg: "bg-orange-500/10",  border: "border-orange-500/40",  text: "text-orange-400",  glow: "shadow-orange-500/30",  ring: "ring-orange-500/40"  },
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface AgentEvent {
-  type: "thought" | "tool_call" | "tool_result" | "done" | "error" | "info" | "memory";
-  content?: string;
-  tool?: string;
-  args?: Record<string, unknown>;
-  data?: unknown;
-  ok?: boolean;
-  summary?: string;
-  steps?: number;
-  message?: string;
-  step?: number;
-  model?: string;
-  ts: number;
+interface AgentStatus {
+  agentId: string;
+  displayName: string;
+  status: "idle" | "working" | "sleeping" | "error";
+  currentTask?: string | null;
+  lastSeen: string;
+  tickCount: number;
+  metadata?: Record<string, unknown> | null;
+}
+
+interface WorkerInfo {
+  id: string;
+  name: string;
+  intervalMs: number;
+  lastTick: number;
+  errorCount: number;
+}
+
+interface AgentMail {
+  id: number;
+  fromAgent: string;
+  toAgent: string;
+  subject: string;
+  body: string;
+  priority: string;
+  read: boolean;
+  createdAt: string;
+}
+
+interface AgentMetric {
+  id: number;
+  agentId: string;
+  metricType: string;
+  value: string;
+  label?: string;
+  createdAt: string;
 }
 
 interface AgentSession {
@@ -52,404 +99,484 @@ interface AgentSession {
   updatedAt: string;
 }
 
-interface SessionSummary {
-  id: string;
-  task: string;
-  status: "running" | "done" | "error" | "stopped";
-  totalSteps: number;
-  summary: string;
-  model: string;
-  autonomous: boolean;
-  memoriesLoaded: number;
-  eventCount: number;
-  createdAt: string;
-  updatedAt: string;
+interface AgentEvent {
+  type: "thought" | "tool_call" | "tool_result" | "done" | "error" | "info" | "memory";
+  content?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  data?: unknown;
+  ok?: boolean;
+  summary?: string;
+  steps?: number;
+  message?: string;
+  step?: number;
+  model?: string;
+  ts: number;
 }
 
-// ─── API base ─────────────────────────────────────────────────────────────────
-function apiBase(): string {
-  return "";
-}
-const BASE = apiBase();
+// ─── Mail particle animation ──────────────────────────────────────────────────
 
-// ─── Tool icon ────────────────────────────────────────────────────────────────
-function ToolIcon({ tool }: { tool: string }) {
-  if (tool.includes("memory") || tool.includes("memories")) return <Brain className="w-3.5 h-3.5" />;
-  if (tool.includes("code") || tool.includes("file") || tool.includes("write")) return <FileCode2 className="w-3.5 h-3.5" />;
-  if (tool === "execute_python" || tool === "run_shell") return <Terminal className="w-3.5 h-3.5" />;
-  if (tool.includes("paper") || tool.includes("research")) return <BookOpen className="w-3.5 h-3.5" />;
-  if (tool.includes("plan") || tool.includes("think") || tool.includes("reason") || tool.includes("benchmark") || tool.includes("optimize")) return <FlaskConical className="w-3.5 h-3.5" />;
-  if (tool.includes("dataset") || tool.includes("sample") || tool.includes("augment") || tool.includes("fetch_hf")) return <Database className="w-3.5 h-3.5" />;
-  if (tool.includes("model") || tool.includes("training") || tool.includes("job")) return <Network className="w-3.5 h-3.5" />;
-  if (tool.includes("search") || tool.includes("hf_model")) return <Search className="w-3.5 h-3.5" />;
-  if (tool === "get_system_stats") return <Cpu className="w-3.5 h-3.5" />;
-  if (tool.includes("ollama") || tool.includes("local_model")) return <Package className="w-3.5 h-3.5" />;
-  if (tool === "finish") return <CheckCircle2 className="w-3.5 h-3.5" />;
-  if (tool.includes("card") || tool.includes("model_card")) return <ScrollText className="w-3.5 h-3.5" />;
-  return <Zap className="w-3.5 h-3.5" />;
+interface MailParticle {
+  id: number;
+  from: AgentId;
+  to: AgentId;
+  subject: string;
+  createdAt: number;
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status, steps }: { status: AgentSession["status"]; steps?: number }) {
-  const configs = {
-    running: { cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: <Loader2 className="w-3 h-3 animate-spin" />, label: "Running…" },
-    done:    { cls: "bg-sky-500/10 text-sky-400 border-sky-500/20",             icon: <CheckCircle2 className="w-3 h-3" />,          label: `Done${steps ? ` (${steps})` : ""}` },
-    error:   { cls: "bg-red-500/10 text-red-400 border-red-500/20",             icon: <XCircle className="w-3 h-3" />,               label: "Error" },
-    stopped: { cls: "bg-slate-700/50 text-slate-400 border-slate-700",          icon: <Square className="w-3 h-3" />,                label: "Stopped" },
-  };
-  const c = configs[status];
-  return (
-    <div className={cn("flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border", c.cls)}>
-      {c.icon}
-      <span>{c.label}</span>
-    </div>
-  );
-}
+// ─── Agent Desk Card ──────────────────────────────────────────────────────────
 
-// ─── Event card ───────────────────────────────────────────────────────────────
-function EventCard({ event }: { event: AgentEvent }) {
-  const [open, setOpen] = useState(true);
-
-  if (event.type === "thought") {
-    return (
-      <div className="flex gap-2.5 items-start">
-        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center">
-          <Lightbulb className="w-3 h-3 text-amber-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <span className="text-xs font-medium text-amber-400 uppercase tracking-wider">Thought</span>
-          <p className="mt-0.5 text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{event.content}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (event.type === "tool_call") {
-    return (
-      <div className="flex gap-2.5 items-start">
-        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
-          <ToolIcon tool={event.tool || ""} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-emerald-400 uppercase tracking-wider">Tool Call</span>
-            <code className="text-xs bg-emerald-500/10 text-emerald-300 px-1.5 py-0.5 rounded font-mono">{event.tool}()</code>
-          </div>
-          {event.args && Object.keys(event.args).length > 0 && (
-            <button
-              onClick={() => setOpen((o) => !o)}
-              className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-400 transition-colors"
-            >
-              {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-              Args
-            </button>
-          )}
-          <AnimatePresence>
-            {open && event.args && Object.keys(event.args).length > 0 && (
-              <motion.pre
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="mt-1.5 text-xs text-slate-400 bg-slate-900/60 rounded p-2.5 overflow-x-auto font-mono border border-slate-800"
-              >
-                {JSON.stringify(event.args, null, 2)}
-              </motion.pre>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-    );
-  }
-
-  if (event.type === "tool_result") {
-    return (
-      <div className="flex gap-2.5 items-start">
-        <div className={cn(
-          "mt-0.5 flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center",
-          event.ok ? "bg-sky-500/20" : "bg-red-500/20"
-        )}>
-          {event.ok ? <CheckCircle2 className="w-3 h-3 text-sky-400" /> : <XCircle className="w-3 h-3 text-red-400" />}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className={cn("text-xs font-medium uppercase tracking-wider", event.ok ? "text-sky-400" : "text-red-400")}>
-              {event.ok ? "Result" : "Error"}
-            </span>
-            <code className="text-xs bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">{event.tool}</code>
-          </div>
-          <button onClick={() => setOpen((o) => !o)} className="mt-1 flex items-center gap-1 text-xs text-slate-500 hover:text-slate-400 transition-colors">
-            {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-            {event.ok ? "View data" : "View error"}
-          </button>
-          <AnimatePresence>
-            {open && (
-              <motion.pre
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className={cn(
-                  "mt-1.5 text-xs rounded p-2.5 overflow-x-auto font-mono border max-h-48 overflow-y-auto",
-                  event.ok ? "text-slate-300 bg-sky-950/30 border-sky-900/40" : "text-red-300 bg-red-950/30 border-red-900/40"
-                )}
-              >
-                {typeof event.data === "string" ? event.data : JSON.stringify(event.data, null, 2)}
-              </motion.pre>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-    );
-  }
-
-  if (event.type === "memory") {
-    return (
-      <div className="flex gap-2.5 items-start">
-        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/20 flex items-center justify-center">
-          <Brain className="w-3 h-3 text-violet-400" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <span className="text-xs font-medium text-violet-400 uppercase tracking-wider">Memory Loaded</span>
-          <p className="mt-0.5 text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{event.content}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (event.type === "info") {
-    return (
-      <div className="flex gap-2.5 items-start">
-        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-slate-700/50 flex items-center justify-center">
-          <Sparkles className="w-3 h-3 text-slate-500" />
-        </div>
-        <div className="flex-1">
-          <p className="text-xs text-slate-500 italic">{event.content}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (event.type === "error") {
-    return (
-      <div className="flex gap-2.5 items-start">
-        <div className="mt-0.5 flex-shrink-0 w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center">
-          <AlertTriangle className="w-3 h-3 text-red-400" />
-        </div>
-        <div className="flex-1">
-          <span className="text-xs font-medium text-red-400 uppercase tracking-wider">Error</span>
-          <p className="mt-0.5 text-sm text-red-300">{event.message}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (event.type === "done") {
-    return (
-      <div className="rounded-lg border border-sky-900/50 bg-sky-950/20 p-3">
-        <div className="flex items-center gap-2 mb-1">
-          <CheckCircle2 className="w-4 h-4 text-sky-400" />
-          <span className="text-sm font-semibold text-sky-400">Task Complete</span>
-          {event.steps && <span className="text-xs text-slate-500 ml-auto">{event.steps} steps</span>}
-        </div>
-        {event.summary && <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{event.summary}</p>}
-      </div>
-    );
-  }
-
-  return null;
-}
-
-// ─── Session item in sidebar list ─────────────────────────────────────────────
-function SessionItem({
-  session, isActive, onClick, onDelete,
+function AgentDesk({
+  def, status, isSelected, onClick,
 }: {
-  session: SessionSummary;
-  isActive: boolean;
+  def: typeof AGENT_DEFS[number];
+  status?: AgentStatus;
+  isSelected: boolean;
   onClick: () => void;
-  onDelete: (id: string) => void;
 }) {
-  const timeAgo = (iso: string) => {
+  const c = COLOR_MAP[def.color];
+  const isWorking = status?.status === "working";
+  const isError = status?.status === "error";
+  const Icon = def.icon;
+
+  const timeAgo = (iso?: string) => {
+    if (!iso) return "never";
     const diff = Date.now() - new Date(iso).getTime();
-    const m = Math.floor(diff / 60000);
-    if (m < 1) return "just now";
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
     if (m < 60) return `${m}m ago`;
     return `${Math.floor(m / 60)}h ago`;
   };
 
   return (
-    <div
-      className={cn(
-        "group relative flex flex-col gap-1 px-3 py-2.5 rounded-lg cursor-pointer border transition-all",
-        isActive
-          ? "bg-emerald-500/5 border-emerald-500/20 text-white"
-          : "bg-slate-900/40 border-slate-800/60 hover:bg-slate-800/50 hover:border-slate-700"
-      )}
+    <motion.button
       onClick={onClick}
+      layout
+      initial={{ opacity: 0, scale: 0.85, y: 20 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      whileHover={{ scale: 1.04, y: -4 }}
+      whileTap={{ scale: 0.97 }}
+      transition={{ type: "spring", stiffness: 300, damping: 24 }}
+      className={cn(
+        "relative w-full text-left rounded-2xl border p-3 transition-all duration-300 group",
+        "backdrop-blur-sm",
+        isSelected
+          ? `${c.bg} ${c.border} ring-2 ${c.ring} shadow-lg ${c.glow}`
+          : "bg-slate-900/60 border-slate-800/70 hover:border-slate-700",
+        isWorking && !isSelected && `${c.border} ${c.bg}`,
+      )}
     >
-      <div className="flex items-start gap-2 justify-between">
-        <p className="text-xs text-slate-300 line-clamp-2 leading-snug flex-1">{session.task}</p>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(session.id); }}
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-red-400 text-slate-600 transition-all flex-shrink-0"
-        >
-          <Trash2 className="w-3 h-3" />
-        </button>
+      {/* Working pulse ring */}
+      {isWorking && (
+        <motion.div
+          className={cn("absolute inset-0 rounded-2xl border-2", c.border)}
+          animate={{ opacity: [0.6, 0, 0.6], scale: [1, 1.04, 1] }}
+          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+
+      {/* Top row: icon + status */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className={cn(
+          "w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0 transition-all",
+          isWorking ? `${c.bg} border ${c.border}` : "bg-slate-800/80 border border-slate-700/50",
+        )}>
+          {def.emoji}
+        </div>
+        <div className="flex-1 min-w-0 pt-0.5">
+          <p className="text-xs font-semibold text-slate-200 truncate">{def.name}</p>
+          <p className="text-[10px] text-slate-600 truncate">{def.role}</p>
+        </div>
+        <div className="flex-shrink-0">
+          {isError ? (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+              <XCircle className="w-2.5 h-2.5" />ERR
+            </span>
+          ) : isWorking ? (
+            <span className={cn("flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium border", c.bg, c.border, c.text)}>
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />WORK
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-slate-800 text-slate-500 border border-slate-700">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-600" />IDLE
+            </span>
+          )}
+        </div>
       </div>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <StatusBadge status={session.status} steps={session.totalSteps} />
-        {session.autonomous && (
-          <span className="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 text-[10px] border border-violet-500/20 font-mono">AUTO</span>
+
+      {/* Current task */}
+      <div className="min-h-[28px]">
+        {status?.currentTask ? (
+          <p className={cn("text-[10px] leading-snug truncate", isWorking ? c.text : "text-slate-500")}>
+            {status.currentTask}
+          </p>
+        ) : (
+          <p className="text-[10px] text-slate-700">Standby…</p>
         )}
-        <span className="text-[10px] text-slate-600 font-mono ml-auto flex items-center gap-1">
-          <Clock className="w-2.5 h-2.5" />
-          {timeAgo(session.createdAt)}
+      </div>
+
+      {/* Footer: tick + last seen */}
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/60">
+        <span className="text-[9px] text-slate-700 font-mono flex items-center gap-1">
+          <Zap className="w-2.5 h-2.5" />
+          {status?.tickCount ?? 0} ticks
+        </span>
+        <span className="text-[9px] text-slate-700 font-mono">
+          {timeAgo(status?.lastSeen)}
         </span>
       </div>
+
+      {/* Scan line animation when working */}
+      {isWorking && (
+        <motion.div
+          className={cn("absolute inset-x-0 h-[1px] opacity-40", `bg-gradient-to-r from-transparent via-current to-transparent`, c.text)}
+          animate={{ top: ["10%", "90%", "10%"] }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
+          style={{ position: "absolute" }}
+        />
+      )}
+    </motion.button>
+  );
+}
+
+// ─── Connection line between two agents ──────────────────────────────────────
+
+function MailFlash({ subject }: { subject: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.6, y: 10 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.6, y: -10 }}
+      className="absolute -top-2 left-1/2 -translate-x-1/2 z-20 px-2 py-1 rounded-full bg-slate-900 border border-emerald-500/30 text-emerald-400 text-[9px] whitespace-nowrap shadow-lg shadow-emerald-500/10 max-w-[120px] truncate"
+    >
+      📨 {subject}
+    </motion.div>
+  );
+}
+
+// ─── Activity log item ────────────────────────────────────────────────────────
+
+function ActivityItem({ mail, isNew }: { mail: AgentMail; isNew: boolean }) {
+  const fromDef = AGENT_DEFS.find(a => a.id === mail.fromAgent);
+  const toDef   = AGENT_DEFS.find(a => a.id === mail.toAgent);
+  const fromColor = fromDef ? COLOR_MAP[fromDef.color] : null;
+
+  const ago = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m`;
+    return `${Math.floor(m / 60)}h`;
+  };
+
+  return (
+    <motion.div
+      initial={isNew ? { opacity: 0, x: -16, backgroundColor: "rgba(16,185,129,0.08)" } : false}
+      animate={{ opacity: 1, x: 0, backgroundColor: "rgba(0,0,0,0)" }}
+      transition={{ duration: 0.4 }}
+      className="flex gap-2.5 items-start py-2 border-b border-slate-800/40 last:border-0"
+    >
+      <div className={cn(
+        "w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center text-xs mt-0.5",
+        fromColor ? `${fromColor.bg} border ${fromColor.border}` : "bg-slate-800 border border-slate-700"
+      )}>
+        {fromDef?.emoji ?? "?"}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={cn("text-[10px] font-semibold", fromColor?.text ?? "text-slate-400")}>
+            {fromDef?.name ?? mail.fromAgent}
+          </span>
+          <span className="text-[10px] text-slate-600">→</span>
+          <span className="text-[10px] text-slate-400">{toDef?.name ?? mail.toAgent}</span>
+          {mail.priority === "critical" && (
+            <span className="px-1 py-0.5 rounded text-[9px] bg-red-500/10 text-red-400 border border-red-500/20 font-mono">CRIT</span>
+          )}
+          {mail.priority === "high" && (
+            <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">HIGH</span>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-300 mt-0.5 leading-snug line-clamp-1">{mail.subject}</p>
+      </div>
+      <span className="flex-shrink-0 text-[9px] text-slate-700 font-mono mt-0.5">{ago(mail.createdAt)}</span>
+    </motion.div>
+  );
+}
+
+// ─── Event card (for Dev Agent sessions) ─────────────────────────────────────
+
+function EventCard({ event }: { event: AgentEvent }) {
+  const [open, setOpen] = useState(false);
+  if (event.type === "thought") return (
+    <div className="flex gap-2 items-start">
+      <div className="mt-0.5 w-4 h-4 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+        <Lightbulb className="w-2.5 h-2.5 text-amber-400" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider">Thought</span>
+        <p className="mt-0.5 text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{event.content}</p>
+      </div>
+    </div>
+  );
+  if (event.type === "tool_call") return (
+    <div className="flex gap-2 items-start">
+      <div className="mt-0.5 w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+        <Terminal className="w-2.5 h-2.5 text-emerald-400" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">Tool</span>
+          <code className="text-[10px] bg-emerald-500/10 text-emerald-300 px-1 py-0.5 rounded font-mono">{event.tool}()</code>
+        </div>
+        {event.args && Object.keys(event.args).length > 0 && (
+          <button onClick={() => setOpen(o => !o)} className="mt-1 flex items-center gap-1 text-[10px] text-slate-600 hover:text-slate-400">
+            {open ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />} args
+          </button>
+        )}
+        {open && event.args && (
+          <pre className="mt-1 text-[10px] text-slate-400 bg-slate-900 rounded p-2 overflow-x-auto font-mono border border-slate-800 max-h-32 overflow-y-auto">
+            {JSON.stringify(event.args, null, 2)}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+  if (event.type === "tool_result") return (
+    <div className="flex gap-2 items-start">
+      <div className={cn("mt-0.5 w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0", event.ok ? "bg-sky-500/20" : "bg-red-500/20")}>
+        {event.ok ? <CheckCircle2 className="w-2.5 h-2.5 text-sky-400" /> : <XCircle className="w-2.5 h-2.5 text-red-400" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1">
+          <span className={cn("text-[10px] font-semibold uppercase tracking-wider", event.ok ? "text-sky-400" : "text-red-400")}>
+            {event.ok ? "Result" : "Error"}
+          </span>
+          <code className="text-[10px] bg-slate-800 text-slate-500 px-1 py-0.5 rounded font-mono">{event.tool}</code>
+        </div>
+        <button onClick={() => setOpen(o => !o)} className="mt-0.5 text-[10px] text-slate-600 hover:text-slate-400 flex items-center gap-1">
+          {open ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+          {event.ok ? "view data" : "view error"}
+        </button>
+        {open && (
+          <pre className={cn("mt-1 text-[10px] rounded p-2 overflow-x-auto font-mono border max-h-32 overflow-y-auto", event.ok ? "text-slate-300 bg-sky-950/30 border-sky-900/40" : "text-red-300 bg-red-950/30 border-red-900/40")}>
+            {typeof event.data === "string" ? event.data : JSON.stringify(event.data, null, 2)}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+  if (event.type === "memory") return (
+    <div className="flex gap-2 items-start">
+      <div className="mt-0.5 w-4 h-4 rounded-full bg-violet-500/20 flex items-center justify-center flex-shrink-0">
+        <Brain className="w-2.5 h-2.5 text-violet-400" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider">Memory</span>
+        <p className="mt-0.5 text-xs text-slate-400 leading-relaxed whitespace-pre-wrap line-clamp-3">{event.content}</p>
+      </div>
+    </div>
+  );
+  if (event.type === "done") return (
+    <div className="rounded-xl border border-sky-900/50 bg-sky-950/20 p-3">
+      <div className="flex items-center gap-2 mb-1">
+        <CheckCircle2 className="w-3.5 h-3.5 text-sky-400" />
+        <span className="text-xs font-semibold text-sky-400">Task Complete</span>
+        {event.steps && <span className="text-[10px] text-slate-500 ml-auto">{event.steps} steps</span>}
+      </div>
+      {event.summary && <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{event.summary}</p>}
+    </div>
+  );
+  if (event.type === "error") return (
+    <div className="flex gap-2 items-start">
+      <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+      <p className="text-xs text-red-300">{event.message}</p>
+    </div>
+  );
+  return null;
+}
+
+// ─── Floating neural particles (background) ───────────────────────────────────
+
+function NeuralParticles() {
+  const particles = useMemo(() =>
+    Array.from({ length: 18 }, (_, i) => ({
+      id: i,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: Math.random() * 3 + 1,
+      dur: Math.random() * 8 + 6,
+      delay: Math.random() * 4,
+    })), []);
+
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {particles.map(p => (
+        <motion.div
+          key={p.id}
+          className="absolute rounded-full bg-emerald-400/20"
+          style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.size, height: p.size }}
+          animate={{
+            y: [0, -30, 0],
+            opacity: [0, 0.6, 0],
+            scale: [0.5, 1, 0.5],
+          }}
+          transition={{ duration: p.dur, delay: p.delay, repeat: Infinity, ease: "easeInOut" }}
+        />
+      ))}
+      {/* Grid lines */}
+      <svg className="absolute inset-0 w-full h-full opacity-5" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#10b981" strokeWidth="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
+      </svg>
     </div>
   );
 }
 
-// ─── Presets ──────────────────────────────────────────────────────────────────
-const PRESETS = [
-  { label: "Audit System",       task: "Get system stats, list all datasets, models, and training jobs. Recall relevant memories from past sessions. Summarize the current state of the AI system and store any key insights.",                                                     icon: Sparkles,    color: "text-emerald-400" },
-  { label: "Search + Build",     task: "Search HuggingFace for the top 3 text-generation models. Search arXiv for recent papers on instruction tuning. Then create a dataset named 'Instruction Tuning QA' and generate 5 training samples based on what you found.",              icon: BookOpen,    color: "text-purple-400" },
-  { label: "Code & Execute",     task: "Write a Python script that implements a simple neural network training loop using numpy only (no PyTorch). Execute it. Store the working code as a memory insight.",                                                                          icon: Terminal,    color: "text-amber-400" },
-  { label: "Plan Experiment",    task: "Plan a full ML experiment: what architecture to use for text classification, what hyperparameters to try, and why. Use the 'reason' tool to think through trade-offs. Store your plan as a memory.",                                        icon: FlaskConical, color: "text-orange-400" },
-  { label: "Train a Model",      task: "List all registered models and datasets. Pick the best matching pair and start a training job. Recall past training memories for context.",                                                                                                   icon: Network,     color: "text-sky-400" },
-  { label: "Full Pipeline",      task: "Create a dataset named 'Code QA' (task type: qa), generate 4 samples about Python best practices, register a model named 'CodeHelper-v1' (type: llm), start training, then store a summary insight in memory.", icon: RefreshCw, color: "text-rose-400" },
-];
+// ─── Header status bar ────────────────────────────────────────────────────────
 
-// ─── Chat message bubble ──────────────────────────────────────────────────────
-function ChatBubble({ role, content }: { role: string; content: string }) {
-  const isUser = role === "user";
+function SystemStatus({ agents, workers }: { agents: AgentStatus[]; workers: WorkerInfo[] }) {
+  const working = agents.filter(a => a.status === "working").length;
+  const errors  = agents.filter(a => a.status === "error").length;
+  const total   = AGENT_DEFS.length;
+
   return (
-    <div className={cn("flex gap-2.5 items-end", isUser && "flex-row-reverse")}>
-      <div className={cn(
-        "w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold",
-        isUser ? "bg-blue-500/20 text-blue-400" : "bg-emerald-500/20 text-emerald-400"
-      )}>
-        {isUser ? "U" : "AI"}
+    <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-1.5">
+        <motion.div
+          className="w-2 h-2 rounded-full bg-emerald-400"
+          animate={{ opacity: [1, 0.3, 1], scale: [1, 0.8, 1] }}
+          transition={{ duration: 2, repeat: Infinity }}
+        />
+        <span className="text-[11px] text-emerald-400 font-semibold font-mono">SYSTEM ONLINE</span>
       </div>
-      <div className={cn(
-        "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
-        isUser
-          ? "bg-blue-600/20 border border-blue-500/20 text-slate-200 rounded-br-sm"
-          : "bg-slate-800/80 border border-slate-700/50 text-slate-200 rounded-bl-sm"
-      )}>
-        {content}
-      </div>
+      <div className="h-3 w-px bg-slate-700" />
+      <span className="text-[11px] text-slate-500 font-mono">
+        <span className="text-emerald-400">{working}</span>/{total} active
+      </span>
+      {errors > 0 && (
+        <>
+          <div className="h-3 w-px bg-slate-700" />
+          <span className="text-[11px] text-red-400 font-mono">{errors} error{errors > 1 ? "s" : ""}</span>
+        </>
+      )}
+      <div className="h-3 w-px bg-slate-700" />
+      <span className="text-[11px] text-slate-600 font-mono">24/7 autonomous</span>
     </div>
   );
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
+
+type Tab = "command" | "activity" | "devagent";
+
 export default function AgentPage() {
-  // Agent task state
-  const [task, setTask] = useState("");
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [tab, setTab] = useState<Tab>("command");
+  const [selectedAgent, setSelectedAgent] = useState<AgentId | null>(null);
+
+  // Worker data
+  const [agents, setAgents] = useState<AgentStatus[]>([]);
+  const [workers, setWorkers] = useState<WorkerInfo[]>([]);
+  const [mail, setMail] = useState<AgentMail[]>([]);
+  const [metrics, setMetrics] = useState<AgentMetric[]>([]);
+  const [prevMailIds, setPrevMailIds] = useState<Set<number>>(new Set());
+  const [newMailIds, setNewMailIds] = useState<Set<number>>(new Set());
+  const [particles, setParticles] = useState<MailParticle[]>([]);
+  const particleIdRef = useRef(0);
+
+  // Dev Agent state
+  const [devTask, setDevTask] = useState("");
+  const [sessions, setSessions] = useState<Array<{ id: string; task: string; status: string; totalSteps: number; createdAt: string }>>([]);
   const [activeSession, setActiveSession] = useState<AgentSession | null>(null);
   const [activeId, setActiveId] = useState<string | null>(() => {
     try { return localStorage.getItem("agent_active_session_id"); } catch { return null; }
   });
-  const [autonomousEnabled, setAutonomousEnabled] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
-
-  // Tab state
-  const [tab, setTab] = useState<"agent" | "chat">("agent");
-
-  // Chat state
-  const [chatMessage, setChatMessage] = useState("");
-  const [chatConvs, setChatConvs] = useState<Array<{ id: number; title: string; updatedAt: string }>>([]);
-  const [activeChatId, setActiveChatId] = useState<number | null>(null);
-  const [chatMsgs, setChatMsgs] = useState<Array<{ id: number; role: string; content: string; createdAt: string }>>([]);
-  const [chatLoading, setChatLoading] = useState(false);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
-  const chatInputRef = useRef<HTMLTextAreaElement>(null);
-
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const dispatchRef = useRef<HTMLTextAreaElement>(null);
 
-  // ── Load chat conversations ────────────────────────────────────────────────
-  const loadChatConvs = useCallback(async () => {
+  // Nudge (dispatch) state
+  const [nudgeAgent, setNudgeAgent] = useState<AgentId | null>(null);
+  const [nudgeTask, setNudgeTask] = useState("");
+  const [nudging, setNudging] = useState(false);
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
+
+  const fetchWorkerStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${BASE}/api/agent/chat/conversations`);
-      if (res.ok) setChatConvs(await res.json());
+      const res = await fetch("/api/workers/status");
+      if (!res.ok) return;
+      const data = await res.json() as { workers: WorkerInfo[]; agents: AgentStatus[] };
+      setWorkers(data.workers ?? []);
+      setAgents(data.agents ?? []);
     } catch { /* ignore */ }
   }, []);
 
-  const loadChatMessages = useCallback(async (convId: number) => {
+  const fetchMail = useCallback(async () => {
     try {
-      const res = await fetch(`${BASE}/api/agent/chat/conversations/${convId}/messages`);
-      if (res.ok) {
-        const data = await res.json() as Array<{ id: number; role: string; content: string; createdAt: string }>;
-        setChatMsgs(data);
-      }
-    } catch { /* ignore */ }
-  }, []);
+      const res = await fetch("/api/workers/mail/all?limit=80");
+      if (!res.ok) return;
+      const data = await res.json() as { mail: AgentMail[] };
+      const incoming = data.mail ?? [];
 
-  const sendChat = useCallback(async () => {
-    const msg = chatMessage.trim();
-    if (!msg || chatLoading) return;
-    setChatMessage("");
-    setChatLoading(true);
-    const tempUserMsg = { id: Date.now(), role: "user", content: msg, createdAt: new Date().toISOString() };
-    setChatMsgs((prev) => [...prev, tempUserMsg]);
-    try {
-      const res = await fetch(`${BASE}/api/agent/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg, conversationId: activeChatId }),
+      // Detect new mail for highlights + particles
+      const incomingIds = new Set(incoming.map(m => m.id));
+      const newIds = new Set<number>();
+      incoming.forEach(m => {
+        if (!prevMailIds.has(m.id)) newIds.add(m.id);
       });
-      const data = await res.json() as { reply: string; conversationId: number; model?: string; error?: string };
-      if (data.error) throw new Error(data.error);
-      if (!activeChatId && data.conversationId) {
-        setActiveChatId(data.conversationId);
-        loadChatConvs();
+
+      if (newIds.size > 0) {
+        setNewMailIds(newIds);
+        // Spawn particles for first 3 new mails
+        const newMails = incoming.filter(m => newIds.has(m.id)).slice(0, 3);
+        const newParticles: MailParticle[] = newMails
+          .filter(m => AGENT_DEFS.some(a => a.id === m.fromAgent) && AGENT_DEFS.some(a => a.id === m.toAgent))
+          .map(m => ({
+            id: ++particleIdRef.current,
+            from: m.fromAgent as AgentId,
+            to: m.toAgent as AgentId,
+            subject: m.subject,
+            createdAt: Date.now(),
+          }));
+        if (newParticles.length > 0) {
+          setParticles(prev => [...prev, ...newParticles]);
+          setTimeout(() => setParticles(prev => prev.filter(p => !newParticles.some(np => np.id === p.id))), 3000);
+        }
+        setTimeout(() => setNewMailIds(new Set()), 3000);
       }
-      setChatMsgs((prev) => [...prev, { id: Date.now() + 1, role: "assistant", content: data.reply, createdAt: new Date().toISOString() }]);
-    } catch (e) {
-      setChatMsgs((prev) => [...prev, { id: Date.now() + 1, role: "assistant", content: `Error: ${String(e)}`, createdAt: new Date().toISOString() }]);
-    } finally {
-      setChatLoading(false);
-    }
-  }, [chatMessage, chatLoading, activeChatId, loadChatConvs]);
 
-  const deleteChatConv = useCallback(async (id: number) => {
-    await fetch(`${BASE}/api/agent/chat/conversations/${id}`, { method: "DELETE" });
-    if (id === activeChatId) { setActiveChatId(null); setChatMsgs([]); }
-    loadChatConvs();
-  }, [activeChatId, loadChatConvs]);
+      setPrevMailIds(incomingIds);
+      setMail(incoming);
+    } catch { /* ignore */ }
+  }, [prevMailIds]);
 
-  const newChatConv = useCallback(() => {
-    setActiveChatId(null);
-    setChatMsgs([]);
-    setChatMessage("");
-    setTimeout(() => chatInputRef.current?.focus(), 50);
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const res = await fetch("/api/workers/metrics?limit=50");
+      if (!res.ok) return;
+      const data = await res.json() as { metrics: AgentMetric[] };
+      setMetrics(data.metrics ?? []);
+    } catch { /* ignore */ }
   }, []);
 
-  // Auto-scroll chat
-  useEffect(() => { chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMsgs.length]);
-
-  // Load convs when switching to chat tab
-  useEffect(() => { if (tab === "chat") loadChatConvs(); }, [tab, loadChatConvs]);
-
-  // Auto-scroll when new events come in
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeSession?.events.length]);
-
-  // ── Fetch session list ──────────────────────────────────────────────────────
+  // Dev agent
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(`${BASE}/api/agent/sessions`);
+      const res = await fetch("/api/agent/sessions");
       if (res.ok) setSessions(await res.json());
     } catch { /* ignore */ }
   }, []);
 
-  // ── Fetch active session details ────────────────────────────────────────────
   const fetchActiveSession = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`${BASE}/api/agent/sessions/${id}`);
+      const res = await fetch(`/api/agent/sessions/${id}`);
       if (res.ok) {
         const data: AgentSession = await res.json();
         setActiveSession(data);
@@ -463,648 +590,711 @@ export default function AgentPage() {
     return null;
   }, []);
 
-  // ── Fetch autonomous status ────────────────────────────────────────────────
-  const fetchAutonomous = useCallback(async () => {
-    try {
-      const res = await fetch(`${BASE}/api/agent/autonomous`);
-      if (res.ok) {
-        const data = await res.json() as { enabled: boolean };
-        setAutonomousEnabled(data.enabled);
-      }
-    } catch { /* ignore */ }
-  }, []);
+  // ── Auto-refresh ──────────────────────────────────────────────────────────
 
-  // ── Initial data load ──────────────────────────────────────────────────────
   useEffect(() => {
+    fetchWorkerStatus();
+    fetchMail();
+    fetchMetrics();
     fetchSessions();
-    fetchAutonomous();
     if (activeId) fetchActiveSession(activeId);
+
+    const workerInterval = setInterval(() => { fetchWorkerStatus(); fetchMail(); }, 3000);
+    const metricsInterval = setInterval(fetchMetrics, 10000);
+    const sessionsInterval = setInterval(fetchSessions, 8000);
+
+    return () => {
+      clearInterval(workerInterval);
+      clearInterval(metricsInterval);
+      clearInterval(sessionsInterval);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Polling for running session ────────────────────────────────────────────
+  // Poll active dev session
   useEffect(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-
     if (!activeId) return;
-
     const poll = async () => {
       const data = await fetchActiveSession(activeId);
       await fetchSessions();
-      if (data && data.status !== "running") {
-        clearInterval(pollRef.current!);
-        pollRef.current = null;
-      }
+      if (data && data.status !== "running") clearInterval(pollRef.current!);
     };
-
-    // Start polling immediately if session might be running
     poll();
     pollRef.current = setInterval(poll, 2000);
-
-    return () => {
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    };
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeId, fetchActiveSession, fetchSessions]);
 
-  // ── Start a new task ───────────────────────────────────────────────────────
-  const run = useCallback(async () => {
-    if (!task.trim() || isStarting) return;
-    setIsStarting(true);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [activeSession?.events.length]);
+
+  // ── Nudge an agent ────────────────────────────────────────────────────────
+
+  const nudge = useCallback(async (agentId: AgentId, task?: string) => {
+    setNudging(true);
     try {
-      const res = await fetch(`${BASE}/api/agent/sessions`, {
+      await fetch(`/api/workers/${agentId}/nudge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: task.trim() }),
+        body: JSON.stringify({ task: task || undefined }),
+      });
+      setTimeout(() => { fetchWorkerStatus(); fetchMail(); }, 1000);
+    } catch { /* ignore */ }
+    setNudging(false);
+    setNudgeAgent(null);
+    setNudgeTask("");
+  }, [fetchWorkerStatus, fetchMail]);
+
+  // ── Dev Agent run ─────────────────────────────────────────────────────────
+
+  const runDevAgent = useCallback(async () => {
+    if (!devTask.trim() || isStarting) return;
+    setIsStarting(true);
+    try {
+      const res = await fetch("/api/agent/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: devTask.trim() }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json() as { id: string };
       setActiveId(data.id);
       localStorage.setItem("agent_active_session_id", data.id);
       setActiveSession(null);
-      setTask("");
+      setDevTask("");
       fetchSessions();
-    } catch (e) {
-      console.error("Failed to start agent session:", e);
-    } finally {
-      setIsStarting(false);
-    }
-  }, [task, isStarting, fetchSessions]);
+    } catch (e) { console.error(e); }
+    setIsStarting(false);
+  }, [devTask, isStarting, fetchSessions]);
 
-  // ── Stop active session ────────────────────────────────────────────────────
-  const stop = useCallback(async () => {
+  const stopDevAgent = useCallback(async () => {
     if (!activeId) return;
-    await fetch(`${BASE}/api/agent/sessions/${activeId}/stop`, { method: "POST" });
+    await fetch(`/api/agent/sessions/${activeId}/stop`, { method: "POST" });
     await fetchActiveSession(activeId);
     fetchSessions();
   }, [activeId, fetchActiveSession, fetchSessions]);
 
-  // ── Delete a session ───────────────────────────────────────────────────────
   const deleteSession = useCallback(async (id: string) => {
-    await fetch(`${BASE}/api/agent/sessions/${id}`, { method: "DELETE" });
-    if (id === activeId) {
-      setActiveId(null);
-      setActiveSession(null);
-      localStorage.removeItem("agent_active_session_id");
-    }
+    await fetch(`/api/agent/sessions/${id}`, { method: "DELETE" });
+    if (id === activeId) { setActiveId(null); setActiveSession(null); localStorage.removeItem("agent_active_session_id"); }
     fetchSessions();
   }, [activeId, fetchSessions]);
 
-  // ── Select a session to view ───────────────────────────────────────────────
-  const selectSession = useCallback((id: string) => {
-    setActiveId(id);
-    localStorage.setItem("agent_active_session_id", id);
-    fetchActiveSession(id);
-  }, [fetchActiveSession]);
+  // ── Computed ──────────────────────────────────────────────────────────────
 
-  // ── Toggle autonomous mode ─────────────────────────────────────────────────
-  const toggleAutonomous = useCallback(async () => {
-    const next = !autonomousEnabled;
-    setAutonomousEnabled(next);
-    const res = await fetch(`${BASE}/api/agent/autonomous`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: next }),
-    });
-    if (res.ok) {
-      const data = await res.json() as { enabled: boolean };
-      setAutonomousEnabled(data.enabled);
-    }
-  }, [autonomousEnabled]);
+  const agentMap = useMemo(() => {
+    const m: Record<string, AgentStatus> = {};
+    agents.forEach(a => { m[a.agentId] = a; });
+    return m;
+  }, [agents]);
 
-  const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run();
-  };
+  const selectedStatus = selectedAgent ? agentMap[selectedAgent] : null;
+  const selectedDef = selectedAgent ? AGENT_DEFS.find(a => a.id === selectedAgent) : null;
+  const selectedMail = useMemo(() =>
+    mail.filter(m => m.fromAgent === selectedAgent || m.toAgent === selectedAgent).slice(0, 20),
+    [mail, selectedAgent]
+  );
 
-  const isRunning = activeSession?.status === "running";
+  const bossInbox = useMemo(() => mail.filter(m => m.toAgent === "boss").slice(0, 25), [mail]);
+  const allActivity = useMemo(() => [...mail].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 60), [mail]);
+
+  const isDevRunning = activeSession?.status === "running";
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full flex-col bg-slate-950">
+    <div className="flex h-full flex-col bg-slate-950 overflow-hidden">
+
+      {/* ── Background ──────────────────────────────────────────────────── */}
+      <div className="absolute inset-0 pointer-events-none">
+        <NeuralParticles />
+        <div className="absolute inset-0 bg-gradient-to-b from-emerald-950/10 via-transparent to-slate-950/80" />
+      </div>
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 border-b border-slate-800 px-4 py-3 bg-slate-900/50">
+      <div className="relative flex-shrink-0 border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-md px-4 py-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 flex-shrink-0 rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 flex items-center justify-center">
-              {isRunning
-                ? <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
-                : <Bot className="w-4 h-4 text-emerald-400" />
-              }
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Animated logo */}
+            <div className="relative w-9 h-9 flex-shrink-0">
+              <motion.div
+                className="absolute inset-0 rounded-xl bg-emerald-500/20 border border-emerald-500/40"
+                animate={{ scale: [1, 1.1, 1], opacity: [0.6, 1, 0.6] }}
+                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              />
+              <div className="absolute inset-0 rounded-xl flex items-center justify-center">
+                <Bot className="w-5 h-5 text-emerald-400" />
+              </div>
             </div>
             <div className="min-w-0">
-              <h1 className="text-sm font-semibold text-slate-100 font-[Syne] truncate">AI Developer Agent</h1>
-              <p className="text-xs text-slate-500 hidden sm:block">
-                34 tools · <span className="font-mono text-emerald-400/70">Qwen2.5-Coder-32B</span> on HF GPU
-                {isRunning && <span className="ml-2 text-emerald-400 animate-pulse">● running in background…</span>}
-              </p>
+              <h1 className="text-sm font-bold text-slate-100 font-[Syne]">Agent Command Center</h1>
+              <div className="hidden sm:block mt-0.5">
+                <SystemStatus agents={agents} workers={workers} />
+              </div>
             </div>
           </div>
 
-          {/* Autonomous toggle */}
-          <button
-            onClick={toggleAutonomous}
-            className={cn(
-              "flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-all",
-              autonomousEnabled
-                ? "bg-violet-500/10 text-violet-400 border-violet-500/30 hover:bg-violet-500/20"
-                : "bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-400"
-            )}
-            title={autonomousEnabled ? "Autonomous mode ON — LLM picks tasks every 3 min using system state + memories" : "Enable autonomous mode"}
-          >
-            {autonomousEnabled
-              ? <ToggleRight className="w-3.5 h-3.5" />
-              : <ToggleLeft className="w-3.5 h-3.5" />
-            }
-            <span className="hidden sm:inline">Auto {autonomousEnabled ? "ON" : "OFF"}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* ── Tab switcher ─────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 flex border-b border-slate-800 bg-slate-900/30 px-4">
-        <button
-          onClick={() => setTab("agent")}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-all",
-            tab === "agent"
-              ? "border-emerald-500 text-emerald-400"
-              : "border-transparent text-slate-500 hover:text-slate-300"
-          )}
-        >
-          <Bot className="w-3.5 h-3.5" />
-          AI Agent
-        </button>
-        <button
-          onClick={() => setTab("chat")}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-all",
-            tab === "chat"
-              ? "border-blue-500 text-blue-400"
-              : "border-transparent text-slate-500 hover:text-slate-300"
-          )}
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          Chat
-          {chatConvs.length > 0 && (
-            <span className="ml-1 px-1 py-0.5 rounded bg-blue-500/20 text-blue-400 text-[9px] border border-blue-500/20">
-              {chatConvs.length}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {/* ── Preset chips (mobile scroll — agent tab only) ─────────────────── */}
-      {tab === "agent" && (
-      <div className="md:hidden flex-shrink-0 border-b border-slate-800 bg-slate-900/20">
-        <div className="flex gap-2 px-3 py-2 overflow-x-auto scrollbar-none">
-          {PRESETS.map((p) => (
-            <button
-              key={p.label}
-              onClick={() => { setTask(p.task); textareaRef.current?.focus(); }}
-              disabled={isRunning || isStarting}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 bg-slate-800/60 hover:bg-slate-700/60 hover:border-slate-600 disabled:opacity-40 transition-all text-xs text-slate-400 whitespace-nowrap"
+          {/* Live indicator */}
+          <div className="flex items-center gap-2">
+            <motion.div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20"
+              animate={{ borderColor: ["rgba(16,185,129,0.2)", "rgba(16,185,129,0.5)", "rgba(16,185,129,0.2)"] }}
+              transition={{ duration: 2, repeat: Infinity }}
             >
-              <p.icon className={cn("w-3 h-3", p.color)} />
-              {p.label}
-            </button>
-          ))}
+              <Radio className="w-3 h-3 text-emerald-400" />
+              <span className="text-[10px] text-emerald-400 font-mono font-semibold hidden sm:inline">LIVE</span>
+            </motion.div>
+          </div>
+        </div>
+
+        {/* Mobile status */}
+        <div className="sm:hidden mt-2">
+          <SystemStatus agents={agents} workers={workers} />
         </div>
       </div>
-      )}
 
-      {/* ── Agent Tab Body ────────────────────────────────────────────────── */}
-      {tab === "agent" && (
-      <div className="flex flex-1 overflow-hidden min-h-0">
-
-        {/* Desktop sidebar: preset tasks + session history */}
-        <div className="hidden md:flex w-56 flex-shrink-0 border-r border-slate-800 bg-slate-900/30 flex-col">
-
-          {/* Preset tasks */}
-          <div className="px-3 py-2 border-b border-slate-800">
-            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Quick Tasks</p>
-          </div>
-          <div className="p-2 space-y-1 border-b border-slate-800">
-            {PRESETS.map((p) => (
-              <button
-                key={p.label}
-                onClick={() => { setTask(p.task); textareaRef.current?.focus(); }}
-                disabled={isRunning || isStarting}
-                className="w-full text-left flex items-start gap-2 px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900/50 hover:bg-slate-800/60 hover:border-slate-700 disabled:opacity-40 transition-all group"
-              >
-                <p.icon className={cn("w-3 h-3 flex-shrink-0 mt-0.5", p.color)} />
-                <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors leading-snug">{p.label}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Session history */}
-          <div className="px-3 py-2 flex items-center justify-between">
-            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest flex items-center gap-1">
-              <History className="w-3 h-3" /> History
-            </p>
-            <button onClick={fetchSessions} className="p-0.5 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400 transition-colors">
-              <RefreshCw className="w-3 h-3" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1.5">
-            {sessions.length === 0 ? (
-              <p className="text-xs text-slate-700 px-2 py-4 text-center">No sessions yet</p>
-            ) : (
-              sessions.map((s) => (
-                <SessionItem
-                  key={s.id}
-                  session={s}
-                  isActive={s.id === activeId}
-                  onClick={() => selectSession(s.id)}
-                  onDelete={deleteSession}
-                />
-              ))
+      {/* ── Tab bar ──────────────────────────────────────────────────────── */}
+      <div className="relative flex-shrink-0 flex border-b border-slate-800/80 bg-slate-900/40 backdrop-blur-sm px-2 overflow-x-auto scrollbar-none">
+        {[
+          { id: "command" as Tab,  label: "Office",   icon: LayoutGrid, badge: null },
+          { id: "activity" as Tab, label: "Activity", icon: Activity,   badge: mail.length > 0 ? String(bossInbox.length) : null },
+          { id: "devagent" as Tab, label: "Dev Agent", icon: TerminalSquare, badge: isDevRunning ? "●" : null },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              "relative flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-all whitespace-nowrap flex-shrink-0",
+              tab === t.id
+                ? "border-emerald-500 text-emerald-400"
+                : "border-transparent text-slate-500 hover:text-slate-300"
             )}
-          </div>
-        </div>
-
-        {/* Main content area */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-
-          {/* Events timeline */}
-          <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-4 space-y-3">
-
-            {/* Empty state */}
-            {!activeSession && !isStarting && sessions.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center py-10 px-4">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 border border-emerald-500/20 flex items-center justify-center mb-3">
-                  <Bot className="w-6 h-6 text-emerald-400" />
-                </div>
-                <h2 className="text-base font-semibold text-slate-300 font-[Syne]">DLavie Agent</h2>
-                <p className="mt-1.5 text-xs text-slate-500 max-w-xs leading-relaxed">
-                  Powered by <code className="text-emerald-400 font-mono">Qwen2.5-Coder-32B</code> on HuggingFace GPU servers.
-                  34 real tools. Persistent memory. Zero local RAM.
-                </p>
-                <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-                  {["Search papers", "Execute code", "Build pipeline", "Recall memory"].map((hint) => (
-                    <span key={hint} className="px-2.5 py-1 rounded-full bg-slate-800 text-xs text-slate-500 border border-slate-700">{hint}</span>
-                  ))}
-                </div>
-                <div className="mt-5 flex flex-col items-center gap-1.5 text-xs text-slate-600">
-                  <div className="flex items-center gap-2">
-                    {autonomousEnabled
-                      ? <><span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" /><span className="text-violet-400">Autonomous mode active — LLM picks tasks every 3 min</span></>
-                      : <><ToggleLeft className="w-3.5 h-3.5" /><span>Enable Auto mode — LLM drives itself every 3 min</span></>
-                    }
-                  </div>
-                </div>
-              </div>
+          >
+            <t.icon className="w-3.5 h-3.5" />
+            {t.label}
+            {t.badge && (
+              <span className={cn(
+                "px-1 py-0.5 rounded text-[9px] font-mono",
+                t.badge === "●"
+                  ? "text-emerald-400 animate-pulse"
+                  : "bg-slate-700 text-slate-400"
+              )}>
+                {t.badge}
+              </span>
             )}
-
-            {/* Session selector (mobile) if no active session */}
-            {!activeSession && sessions.length > 0 && !isStarting && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                    <History className="w-3.5 h-3.5" /> Session History
-                  </h3>
-                  <button onClick={fetchSessions} className="p-1 rounded hover:bg-slate-800 text-slate-600 transition-colors">
-                    <RefreshCw className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="md:hidden space-y-1.5">
-                  {sessions.map((s) => (
-                    <SessionItem
-                      key={s.id}
-                      session={s}
-                      isActive={s.id === activeId}
-                      onClick={() => selectSession(s.id)}
-                      onDelete={deleteSession}
-                    />
-                  ))}
-                </div>
-                <div className="hidden md:block text-xs text-slate-600 text-center py-4">
-                  Select a session from the sidebar
-                </div>
-              </div>
-            )}
-
-            {/* Loading spinner while starting */}
-            {isStarting && (
-              <div className="flex items-center gap-2 text-xs text-slate-500 py-4 px-1">
-                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                Starting agent session…
-              </div>
-            )}
-
-            {/* Session header */}
-            {activeSession && (
-              <motion.div
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 mb-2 flex-wrap"
-              >
-                <StatusBadge status={activeSession.status} steps={activeSession.totalSteps} />
-                <span className="text-xs text-slate-500 truncate flex-1">{activeSession.task}</span>
-                {activeSession.memoriesLoaded > 0 && (
-                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 text-[10px] border border-violet-500/20 font-mono flex-shrink-0">
-                    <Brain className="w-2.5 h-2.5" />{activeSession.memoriesLoaded}m
-                  </span>
-                )}
-                <span className="text-[10px] font-mono text-slate-700 flex-shrink-0">
-                  {activeSession.model?.split("/").pop() ?? activeSession.model}
-                </span>
-                {activeSession.autonomous && (
-                  <span className="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 text-[10px] border border-violet-500/20 font-mono flex-shrink-0">AUTO</span>
-                )}
-              </motion.div>
-            )}
-
-            {/* Events grouped by step */}
-            {activeSession && activeSession.events.length > 0 && (() => {
-              // Group events by step number
-              const stepGroups = new Map<number, AgentEvent[]>();
-              for (const ev of activeSession.events) {
-                if (ev.type === "done") continue; // rendered separately
-                const stepNum = ev.step ?? 0;
-                if (!stepGroups.has(stepNum)) stepGroups.set(stepNum, []);
-                stepGroups.get(stepNum)!.push(ev);
-              }
-              const sortedSteps = [...stepGroups.entries()].sort((a, b) => a[0] - b[0]);
-
-              return (
-                <AnimatePresence mode="sync">
-                  {sortedSteps.map(([stepNum, events]) => (
-                    <StepGroup key={stepNum} stepNum={stepNum} events={events} />
-                  ))}
-                </AnimatePresence>
-              );
-            })()}
-
-            {/* Running indicator */}
-            {activeSession?.status === "running" && (
-              <div className="flex items-center gap-2 text-xs text-emerald-400/70 py-2 px-1">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Agent thinking… (berjalan di background)</span>
-              </div>
-            )}
-
-            <div ref={bottomRef} />
-          </div>
-
-          {/* ── Input area ──────────────────────────────────────────────── */}
-          <div className="flex-shrink-0 border-t border-slate-800 bg-slate-900/50 p-3">
-            <textarea
-              ref={textareaRef}
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-              onKeyDown={handleKey}
-              disabled={isRunning || isStarting}
-              placeholder="Describe a task for the agent… (Ctrl+Enter to run)"
-              rows={3}
-              className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 disabled:opacity-50 transition-all leading-relaxed"
-            />
-            <div className="flex gap-2 mt-2">
-              {isRunning ? (
-                <button
-                  onClick={stop}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors text-xs font-medium"
-                >
-                  <Square className="w-3.5 h-3.5" /> Stop Agent
-                </button>
-              ) : (
-                <button
-                  onClick={run}
-                  disabled={!task.trim() || isStarting}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs font-medium"
-                >
-                  {isStarting
-                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Starting…</>
-                    : <><Play className="w-3.5 h-3.5" /> Run Task</>
-                  }
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  setActiveId(null);
-                  setActiveSession(null);
-                  localStorage.removeItem("agent_active_session_id");
-                }}
-                className="px-3 py-2 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors text-xs"
-                title="New session"
-              >
-                <PlusCircle className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Autonomous mode hint */}
-            {autonomousEnabled && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="mt-2 flex items-center gap-1.5 text-[10px] text-violet-400/70 bg-violet-500/5 border border-violet-500/10 rounded-lg px-2.5 py-1.5"
-              >
-                <Brain className="w-3 h-3" />
-                Autonomous mode active — Qwen2.5-Coder-32B picks &amp; runs tasks every 3 min using persistent memory
-              </motion.div>
-            )}
-          </div>
-        </div>
+          </button>
+        ))}
       </div>
-      )} {/* end agent tab */}
 
-      {/* ── Chat Tab Body ─────────────────────────────────────────────────── */}
-      {tab === "chat" && (
-        <div className="flex flex-1 overflow-hidden min-h-0">
+      {/* ── Tab: Command Center (Office) ─────────────────────────────────── */}
+      {tab === "command" && (
+        <div className="relative flex-1 overflow-y-auto">
+          <div className="p-3 sm:p-4 space-y-4">
 
-          {/* Conversation sidebar */}
-          <div className="hidden md:flex w-56 flex-shrink-0 border-r border-slate-800 bg-slate-900/30 flex-col">
-            <div className="px-3 py-2 flex items-center justify-between border-b border-slate-800">
-              <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest flex items-center gap-1">
-                <MessageSquare className="w-3 h-3" /> Conversations
-              </p>
-              <div className="flex items-center gap-1">
-                <button onClick={loadChatConvs} className="p-0.5 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400 transition-colors">
+            {/* 3D Office Scene */}
+            <div className="relative">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-emerald-400" /> Live Office
+                </h2>
+                <button
+                  onClick={() => { fetchWorkerStatus(); fetchMail(); }}
+                  className="p-1 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400 transition-colors"
+                >
                   <RefreshCw className="w-3 h-3" />
                 </button>
-                <button onClick={newChatConv} className="p-0.5 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400 transition-colors" title="New conversation">
-                  <PlusCircle className="w-3 h-3" />
-                </button>
+              </div>
+
+              {/* 3D perspective container */}
+              <div
+                className="relative rounded-2xl overflow-hidden border border-slate-800/60 bg-slate-900/40"
+                style={{ perspective: "900px" }}
+              >
+                <motion.div
+                  initial={{ rotateX: 8, opacity: 0 }}
+                  animate={{ rotateX: 0, opacity: 1 }}
+                  transition={{ duration: 0.6, ease: "easeOut" }}
+                  style={{ transformStyle: "preserve-3d" }}
+                >
+                  {/* Orchestrator at top (row 0) */}
+                  <div className="px-3 pt-4 pb-2">
+                    <div className="flex justify-center">
+                      <div className="w-full max-w-[200px] sm:max-w-[240px] relative">
+                        {/* Particle flash above orchestrator */}
+                        <AnimatePresence>
+                          {particles.map(p => p.from === "orchestrator" && (
+                            <MailFlash key={p.id} subject={p.subject} />
+                          ))}
+                        </AnimatePresence>
+                        <AgentDesk
+                          def={AGENT_DEFS[0]}
+                          status={agentMap["orchestrator"]}
+                          isSelected={selectedAgent === "orchestrator"}
+                          onClick={() => setSelectedAgent(a => a === "orchestrator" ? null : "orchestrator")}
+                        />
+                      </div>
+                    </div>
+                    {/* Connector line down */}
+                    <div className="flex justify-center mt-2">
+                      <motion.div
+                        className="w-px h-4 bg-gradient-to-b from-emerald-500/40 to-transparent"
+                        animate={{ opacity: [0.3, 1, 0.3] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 1: trainer, librarian, guardian */}
+                  <div className="px-3 pb-2">
+                    <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                      {AGENT_DEFS.filter(a => a.row === 1).map(def => (
+                        <div key={def.id} className="relative">
+                          <AnimatePresence>
+                            {particles.map(p => (p.from === def.id || p.to === def.id) && (
+                              <MailFlash key={p.id} subject={p.subject} />
+                            ))}
+                          </AnimatePresence>
+                          <AgentDesk
+                            def={def}
+                            status={agentMap[def.id]}
+                            isSelected={selectedAgent === def.id}
+                            onClick={() => setSelectedAgent(a => a === def.id ? null : def.id as AgentId)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    {/* Connector line down */}
+                    <div className="flex justify-center mt-2">
+                      <motion.div
+                        className="w-px h-4 bg-gradient-to-b from-slate-700 to-transparent"
+                        animate={{ opacity: [0.2, 0.6, 0.2] }}
+                        transition={{ duration: 2.5, repeat: Infinity }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 2: analyst, botmaster, curator, engineer */}
+                  <div className="px-3 pb-4">
+                    <div className="grid grid-cols-4 gap-2 sm:gap-3">
+                      {AGENT_DEFS.filter(a => a.row === 2).map(def => (
+                        <div key={def.id} className="relative">
+                          <AnimatePresence>
+                            {particles.map(p => (p.from === def.id || p.to === def.id) && (
+                              <MailFlash key={p.id} subject={p.subject} />
+                            ))}
+                          </AnimatePresence>
+                          <AgentDesk
+                            def={def}
+                            status={agentMap[def.id]}
+                            isSelected={selectedAgent === def.id}
+                            onClick={() => setSelectedAgent(a => a === def.id ? null : def.id as AgentId)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+
+                {/* Ambient glow overlay */}
+                <div className="absolute inset-0 pointer-events-none rounded-2xl bg-gradient-to-t from-slate-950/60 via-transparent to-emerald-950/10" />
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
-              {/* New conversation entry */}
-              <button
-                onClick={newChatConv}
-                className={cn(
-                  "w-full text-left px-2.5 py-2 rounded-lg border text-xs transition-all",
-                  activeChatId === null
-                    ? "border-blue-500/30 bg-blue-500/5 text-blue-300"
-                    : "border-slate-800 bg-slate-900/50 text-slate-500 hover:text-slate-300 hover:bg-slate-800/50"
-                )}
-              >
-                + New conversation
-              </button>
-              {chatConvs.length === 0 ? (
-                <p className="text-xs text-slate-700 px-2 py-4 text-center">No conversations yet</p>
-              ) : (
-                chatConvs.map((c) => (
-                  <div
-                    key={c.id}
-                    className={cn(
-                      "group relative px-2.5 py-2 rounded-lg border cursor-pointer transition-all",
-                      activeChatId === c.id
-                        ? "border-blue-500/30 bg-blue-500/5 text-blue-300"
-                        : "border-slate-800/60 bg-slate-900/40 hover:bg-slate-800/40 text-slate-400"
-                    )}
-                    onClick={() => { setActiveChatId(c.id); loadChatMessages(c.id); }}
-                  >
-                    <p className="text-xs leading-snug line-clamp-2 pr-5">
-                      {c.title.replace(/^Agent Chat: /, "")}
-                    </p>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteChatConv(c.id); }}
-                      className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-red-400 text-slate-600 transition-all"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))
+
+            {/* Selected agent panel */}
+            <AnimatePresence>
+              {selectedAgent && selectedDef && (
+                <motion.div
+                  key={selectedAgent}
+                  initial={{ opacity: 0, height: 0, y: -10 }}
+                  animate={{ opacity: 1, height: "auto", y: 0 }}
+                  exit={{ opacity: 0, height: 0, y: -10 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 28 }}
+                  className="overflow-hidden"
+                >
+                  {(() => {
+                    const c = COLOR_MAP[selectedDef.color];
+                    return (
+                      <div className={cn("rounded-2xl border p-4 space-y-3", c.bg, c.border)}>
+                        {/* Header */}
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="text-2xl">{selectedDef.emoji}</div>
+                            <div>
+                              <h3 className={cn("text-sm font-bold font-[Syne]", c.text)}>{selectedDef.name}</h3>
+                              <p className="text-xs text-slate-500">{selectedDef.role}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {/* Nudge button */}
+                            <button
+                              onClick={() => setNudgeAgent(nudgeAgent === selectedAgent ? null : selectedAgent)}
+                              className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all", c.bg, c.border, c.text, "hover:opacity-80")}
+                            >
+                              <Send className="w-3 h-3" />
+                              <span className="hidden sm:inline">Dispatch</span>
+                            </button>
+                            <button
+                              onClick={() => setSelectedAgent(null)}
+                              className="p-1.5 rounded-lg bg-slate-800 text-slate-500 hover:text-slate-300 border border-slate-700 transition-colors"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Dispatch input */}
+                        <AnimatePresence>
+                          {nudgeAgent === selectedAgent && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="flex gap-2 pt-1">
+                                <input
+                                  ref={dispatchRef as React.RefObject<HTMLInputElement>}
+                                  value={nudgeTask}
+                                  onChange={e => setNudgeTask(e.target.value)}
+                                  onKeyDown={e => { if (e.key === "Enter") nudge(selectedAgent, nudgeTask || undefined); }}
+                                  placeholder={`Give a task to ${selectedDef.name}… (or leave blank to trigger now)`}
+                                  className="flex-1 bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/50"
+                                  autoFocus
+                                />
+                                <button
+                                  onClick={() => nudge(selectedAgent, nudgeTask || undefined)}
+                                  disabled={nudging}
+                                  className={cn("px-3 py-2 rounded-xl border text-xs font-medium transition-all flex-shrink-0", c.bg, c.border, c.text, "hover:opacity-80 disabled:opacity-50")}
+                                >
+                                  {nudging ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Current task */}
+                        {selectedStatus?.currentTask && (
+                          <div className="flex items-center gap-2 bg-slate-900/60 rounded-xl px-3 py-2">
+                            <Loader2 className={cn("w-3 h-3 animate-spin flex-shrink-0", c.text)} />
+                            <p className="text-xs text-slate-300 font-mono">{selectedStatus.currentTask}</p>
+                          </div>
+                        )}
+
+                        {/* Agent mail */}
+                        {selectedMail.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                              <Mail className="w-2.5 h-2.5" /> Recent messages
+                            </p>
+                            <div className="space-y-0 max-h-40 overflow-y-auto">
+                              {selectedMail.map(m => (
+                                <ActivityItem key={m.id} mail={m} isNew={newMailIds.has(m.id)} />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </motion.div>
               )}
+            </AnimatePresence>
+
+            {/* Metrics strip */}
+            {metrics.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest flex items-center gap-1">
+                  <BarChart2 className="w-3 h-3" /> Recent metrics
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {metrics.slice(0, 6).map(m => {
+                    const def = AGENT_DEFS.find(a => a.id === m.agentId);
+                    const c = def ? COLOR_MAP[def.color] : null;
+                    return (
+                      <motion.div
+                        key={m.id}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className={cn("rounded-xl border p-2.5", c?.bg ?? "bg-slate-900/60", c?.border ?? "border-slate-800")}
+                      >
+                        <p className={cn("text-[10px] font-semibold truncate", c?.text ?? "text-slate-400")}>{def?.emoji} {def?.name}</p>
+                        <p className="text-[10px] text-slate-500 truncate font-mono mt-0.5">{m.metricType.replace(/_/g, " ")}</p>
+                        <p className="text-sm font-bold text-slate-200 mt-1 truncate">{m.label ?? m.value}</p>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab: Activity ─────────────────────────────────────────────────── */}
+      {tab === "activity" && (
+        <div className="relative flex-1 overflow-hidden flex flex-col min-h-0">
+          <div className="flex-shrink-0 px-4 py-2 flex items-center justify-between border-b border-slate-800/60">
+            <p className="text-xs text-slate-500 font-mono">{allActivity.length} messages</p>
+            <div className="flex items-center gap-2">
+              <button onClick={() => { fetchMail(); fetchWorkerStatus(); }} className="p-1 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400">
+                <RefreshCw className="w-3 h-3" />
+              </button>
             </div>
           </div>
 
-          {/* Chat message area */}
-          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-              {chatMsgs.length === 0 && !chatLoading && (
-                <div className="flex flex-col items-center justify-center h-full text-center py-10">
-                  <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-3">
-                    <MessageSquare className="w-5 h-5 text-blue-400" />
-                  </div>
-                  <h2 className="text-sm font-semibold text-slate-300 font-[Syne]">Chat with AI Agent</h2>
-                  <p className="mt-1.5 text-xs text-slate-500 max-w-xs leading-relaxed">
-                    Percakapan bilingual (ID/EN). Riwayat tersimpan permanen.
-                    Powered by <code className="text-blue-400 font-mono">Qwen2.5-Coder-32B</code>.
-                  </p>
-                  <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-                    {["Bantu debug kode", "Jelaskan konsep ML", "Buat rencana proyek", "Tanya soal model AI"].map((hint) => (
-                      <button
-                        key={hint}
-                        onClick={() => { setChatMessage(hint); chatInputRef.current?.focus(); }}
-                        className="px-2.5 py-1 rounded-full bg-slate-800 text-xs text-slate-500 border border-slate-700 hover:text-slate-300 hover:border-slate-600 transition-colors"
-                      >
-                        {hint}
-                      </button>
+          <div className="flex flex-1 overflow-hidden min-h-0 divide-x divide-slate-800/60">
+            {/* All activity */}
+            <div className="flex-1 overflow-y-auto p-4">
+              <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest mb-3 flex items-center gap-1">
+                <Activity className="w-2.5 h-2.5" /> Inter-Agent Communication
+              </p>
+              {allActivity.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <Activity className="w-8 h-8 text-slate-700 mb-3" />
+                  <p className="text-xs text-slate-600">No activity yet — agents are starting up</p>
+                </div>
+              ) : (
+                <div className="space-y-0">
+                  <AnimatePresence mode="popLayout">
+                    {allActivity.map(m => (
+                      <ActivityItem key={m.id} mail={m} isNew={newMailIds.has(m.id)} />
                     ))}
-                  </div>
+                  </AnimatePresence>
                 </div>
               )}
-
-              {chatMsgs.map((m, i) => (
-                <ChatBubble key={m.id ?? i} role={m.role} content={m.content} />
-              ))}
-
-              {chatLoading && (
-                <div className="flex gap-2.5 items-end">
-                  <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] font-bold text-emerald-400">AI</div>
-                  <div className="bg-slate-800/80 border border-slate-700/50 rounded-2xl rounded-bl-sm px-4 py-3">
-                    <div className="flex gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div ref={chatBottomRef} />
             </div>
 
-            {/* Chat input */}
-            <div className="flex-shrink-0 border-t border-slate-800 bg-slate-900/50 p-3">
-              <div className="flex gap-2">
+            {/* Boss inbox (desktop sidebar) */}
+            <div className="hidden sm:flex w-64 flex-col">
+              <div className="px-3 py-2 border-b border-slate-800/60 flex-shrink-0">
+                <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest flex items-center gap-1">
+                  <Inbox className="w-2.5 h-2.5" /> Boss Inbox
+                </p>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-0">
+                {bossInbox.length === 0 ? (
+                  <p className="text-[10px] text-slate-700 text-center py-8">No messages</p>
+                ) : (
+                  <AnimatePresence mode="popLayout">
+                    {bossInbox.map(m => (
+                      <motion.div
+                        key={m.id}
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0 }}
+                        className={cn(
+                          "py-2 border-b border-slate-800/40 last:border-0",
+                          m.priority === "critical" && "bg-red-950/20 -mx-3 px-3",
+                          m.priority === "high" && "bg-amber-950/10 -mx-3 px-3",
+                        )}
+                      >
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className="text-[10px] text-emerald-400 font-semibold">
+                            {AGENT_DEFS.find(a => a.id === m.fromAgent)?.emoji} {AGENT_DEFS.find(a => a.id === m.fromAgent)?.name ?? m.fromAgent}
+                          </span>
+                          {m.priority === "critical" && <span className="px-1 py-0.5 rounded text-[8px] bg-red-500/20 text-red-400 border border-red-500/20">CRIT</span>}
+                          {m.priority === "high" && <span className="px-1 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-400 border border-amber-500/20">HIGH</span>}
+                        </div>
+                        <p className="text-[10px] text-slate-300 leading-snug font-medium line-clamp-1">{m.subject}</p>
+                        <p className="text-[10px] text-slate-600 leading-snug line-clamp-2 mt-0.5">{m.body}</p>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab: Dev Agent ────────────────────────────────────────────────── */}
+      {tab === "devagent" && (
+        <div className="relative flex-1 flex flex-col overflow-hidden min-h-0">
+
+          {/* Info bar */}
+          <div className="flex-shrink-0 px-4 py-2.5 border-b border-slate-800/60 bg-slate-900/40 flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <Brain className="w-3 h-3 text-violet-400" />
+              <span className="text-[10px] text-violet-400 font-mono font-semibold">Qwen2.5-Coder-32B</span>
+            </div>
+            <span className="text-[10px] text-slate-600">·</span>
+            <span className="text-[10px] text-slate-500 font-mono">34 tools · ReAct loop · persistent memory</span>
+            {isDevRunning && (
+              <motion.span
+                animate={{ opacity: [1, 0.4, 1] }}
+                transition={{ duration: 1.2, repeat: Infinity }}
+                className="ml-auto text-[10px] text-emerald-400 font-mono flex items-center gap-1"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                running in background
+              </motion.span>
+            )}
+          </div>
+
+          {/* Session list + events */}
+          <div className="flex flex-1 overflow-hidden min-h-0">
+
+            {/* Session sidebar */}
+            <div className="hidden md:flex w-52 flex-col border-r border-slate-800/60 bg-slate-900/20 flex-shrink-0">
+              <div className="px-3 py-2 border-b border-slate-800/60 flex items-center justify-between">
+                <p className="text-[10px] font-semibold text-slate-600 uppercase tracking-widest">Sessions</p>
+                <button onClick={fetchSessions} className="p-0.5 rounded hover:bg-slate-800 text-slate-600 hover:text-slate-400">
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                {sessions.length === 0 ? (
+                  <p className="text-[10px] text-slate-700 px-2 py-6 text-center">No sessions yet</p>
+                ) : (
+                  sessions.map(s => (
+                    <div
+                      key={s.id}
+                      onClick={() => { setActiveId(s.id); fetchActiveSession(s.id); }}
+                      className={cn(
+                        "group relative flex flex-col gap-1 px-2.5 py-2 rounded-xl cursor-pointer border transition-all",
+                        activeId === s.id
+                          ? "bg-emerald-500/5 border-emerald-500/20"
+                          : "bg-slate-900/40 border-slate-800/60 hover:bg-slate-800/40 hover:border-slate-700"
+                      )}
+                    >
+                      <p className="text-[10px] text-slate-300 line-clamp-2 leading-snug pr-4">{s.task}</p>
+                      <div className="flex items-center gap-1">
+                        <span className={cn(
+                          "px-1.5 py-0.5 rounded-full text-[9px] font-medium border",
+                          s.status === "running" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                          s.status === "done" ? "bg-sky-500/10 text-sky-400 border-sky-500/20" :
+                          "bg-red-500/10 text-red-400 border-red-500/20"
+                        )}>
+                          {s.status}
+                        </span>
+                        <span className="text-[9px] text-slate-700 ml-auto">{s.totalSteps}s</span>
+                      </div>
+                      <button
+                        onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
+                        className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:text-red-400 text-slate-600"
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Events area */}
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2.5">
+                {!activeSession && !isStarting && (
+                  <div className="flex flex-col items-center justify-center h-full text-center py-12 px-4">
+                    <motion.div
+                      animate={{ scale: [1, 1.05, 1] }}
+                      transition={{ duration: 3, repeat: Infinity }}
+                      className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500/10 to-emerald-500/10 border border-violet-500/20 flex items-center justify-center mb-4"
+                    >
+                      <TerminalSquare className="w-6 h-6 text-violet-400" />
+                    </motion.div>
+                    <h2 className="text-sm font-bold text-slate-300 font-[Syne]">Dev Agent</h2>
+                    <p className="mt-2 text-xs text-slate-500 max-w-xs leading-relaxed">
+                      Full ReAct agent with 34 tools — can write code, execute scripts, search papers, manage training, and learn from memory.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-1.5 justify-center">
+                      {["Run Python code", "Search HuggingFace", "Start training job", "Build RAG pipeline"].map(h => (
+                        <button
+                          key={h}
+                          onClick={() => setDevTask(h)}
+                          className="px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-all"
+                        >
+                          {h}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {isStarting && (
+                  <div className="flex items-center gap-2 text-xs text-slate-500 py-4">
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                    Starting dev agent session…
+                  </div>
+                )}
+
+                {activeSession && (
+                  <>
+                    <div className="flex items-center gap-2 flex-wrap mb-2">
+                      <span className={cn(
+                        "flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border",
+                        activeSession.status === "running" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                        activeSession.status === "done" ? "bg-sky-500/10 text-sky-400 border-sky-500/20" :
+                        "bg-red-500/10 text-red-400 border-red-500/20"
+                      )}>
+                        {activeSession.status === "running" && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                        {activeSession.status}
+                      </span>
+                      <span className="text-xs text-slate-500 flex-1 truncate">{activeSession.task}</span>
+                    </div>
+                    <AnimatePresence mode="popLayout">
+                      {activeSession.events.filter(e => e.type !== "done").map((ev, i) => (
+                        <motion.div
+                          key={i}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.25 }}
+                        >
+                          <EventCard event={ev} />
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                    {activeSession.events.filter(e => e.type === "done").map((ev, i) => (
+                      <EventCard key={`done-${i}`} event={ev} />
+                    ))}
+                    {activeSession.status === "running" && (
+                      <motion.div
+                        animate={{ opacity: [1, 0.4, 1] }}
+                        transition={{ duration: 1.2, repeat: Infinity }}
+                        className="flex items-center gap-2 text-xs text-emerald-400/70 py-2"
+                      >
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Agent thinking…
+                      </motion.div>
+                    )}
+                  </>
+                )}
+                <div ref={bottomRef} />
+              </div>
+
+              {/* Input */}
+              <div className="flex-shrink-0 border-t border-slate-800/60 bg-slate-900/50 p-3">
                 <textarea
-                  ref={chatInputRef}
-                  value={chatMessage}
-                  onChange={(e) => setChatMessage(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-                  disabled={chatLoading}
-                  placeholder="Ketik pesan… (Enter untuk kirim, Shift+Enter untuk baris baru)"
+                  value={devTask}
+                  onChange={e => setDevTask(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runDevAgent(); }}
+                  disabled={isDevRunning || isStarting}
+                  placeholder="Describe a task for the Dev Agent… (Ctrl+Enter to run)"
                   rows={2}
-                  className="flex-1 bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 disabled:opacity-50 transition-all leading-relaxed"
+                  className="w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-200 placeholder-slate-600 resize-none focus:outline-none focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20 disabled:opacity-50 transition-all leading-relaxed"
                 />
-                <div className="flex flex-col gap-1.5">
+                <div className="flex gap-2 mt-2">
+                  {isDevRunning ? (
+                    <button onClick={stopDevAgent} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors text-xs font-medium">
+                      <Square className="w-3.5 h-3.5" /> Stop
+                    </button>
+                  ) : (
+                    <button onClick={runDevAgent} disabled={!devTask.trim() || isStarting} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30 text-violet-400 hover:bg-violet-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs font-medium">
+                      {isStarting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Starting…</> : <><Play className="w-3.5 h-3.5" /> Run Task</>}
+                    </button>
+                  )}
                   <button
-                    onClick={sendChat}
-                    disabled={chatLoading || !chatMessage.trim()}
-                    className="px-3 py-2 rounded-xl bg-blue-500/20 border border-blue-500/30 text-blue-400 hover:bg-blue-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    onClick={() => { setActiveId(null); setActiveSession(null); localStorage.removeItem("agent_active_session_id"); }}
+                    className="px-3 py-2 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors text-xs"
                   >
-                    {chatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </button>
-                  <button
-                    onClick={newChatConv}
-                    className="px-3 py-2 rounded-xl border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors"
-                    title="New conversation"
-                  >
-                    <PlusCircle className="w-4 h-4" />
+                    <PlusCircle className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      )} {/* end chat tab */}
+      )}
 
     </div>
-  );
-}
-
-// ─── Step group (collapsible) ─────────────────────────────────────────────────
-function StepGroup({ stepNum, events }: { stepNum: number; events: AgentEvent[] }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const hasError = events.some((e) => e.type === "error");
-  const toolCall = events.find((e) => e.type === "tool_call");
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        "rounded-lg border bg-slate-900/50 overflow-hidden",
-        hasError ? "border-red-900/50" : "border-slate-800/70"
-      )}
-    >
-      <button
-        onClick={() => setCollapsed((c) => !c)}
-        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-slate-800/40 transition-colors"
-      >
-        <span className="text-xs font-mono text-slate-600 w-5 text-right flex-shrink-0">{stepNum}</span>
-        <span className="flex-1 text-sm text-slate-400 truncate">
-          {toolCall ? (
-            <span>
-              <span className="text-slate-500">→ </span>
-              <code className="text-emerald-400 font-mono text-xs">{toolCall.tool}()</code>
-            </span>
-          ) : (
-            <span className="text-slate-500">Thinking…</span>
-          )}
-        </span>
-        {collapsed
-          ? <ChevronRight className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
-          : <ChevronDown className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
-        }
-      </button>
-      <AnimatePresence>
-        {!collapsed && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="px-4 pb-4 space-y-3 border-t border-slate-800/50"
-          >
-            <div className="pt-3 space-y-3">
-              {events.map((ev, i) => (
-                <EventCard key={i} event={ev} />
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
   );
 }

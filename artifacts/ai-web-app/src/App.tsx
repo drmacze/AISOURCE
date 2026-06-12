@@ -28,6 +28,7 @@ import WaBotPage from "@/pages/wa-bot";
 import BotsPage from "@/pages/bots";
 import BrandKitPage from "@/pages/brand-kit";
 import OpenClawPage from "@/pages/openclaw";
+import AgentCommandCenter from "@/pages/agent";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -59,9 +60,7 @@ function Router() {
         <Route path="/settings" component={SettingsPage} />
         <Route path="/notebook" component={NotebookPage} />
         <Route path="/web-search" component={WebSearchPage} />
-        <Route path="/agent">
-          <Redirect to="/openclaw" />
-        </Route>
+        <Route path="/agent" component={AgentCommandCenter} />
         <Route path="/storage" component={StoragePage} />
         <Route path="/playground" component={PlaygroundPage} />
         <Route path="/training-lab" component={TrainingLabPage} />
@@ -70,7 +69,9 @@ function Router() {
         <Route path="/brand-kit" component={BrandKitPage} />
         <Route path="/whatsapp" component={WhatsAppPage} />
         <Route path="/wa-bot" component={WaBotPage} />
-        <Route path="/openclaw" component={OpenClawPage} />
+        <Route path="/openclaw">
+          <Redirect to="/agent" />
+        </Route>
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

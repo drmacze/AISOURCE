@@ -1,13 +1,13 @@
 {
-  "updatedAt": "2026-06-12T14:38:20.482Z",
+  "updatedAt": "2026-06-12T18:50:39.104Z",
   "secrets": {
-    "OPENROUTER_API_KEY": "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",
-    "GITHUB_TOKEN": "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",
     "SPOTIFY_REFRESH_TOKEN": "AQDhmbTu8UedSZ1JBcdgpwVeXxLyBKMqwGekwtDc9KmsntJ0f5rGlB50EZbdYBqpJPN86E5wBLALnh6UtoOwBFB421fl5uY4NTm-P1v4scmTy_D-wQgTZ92Q3SG2bATXqE8",
     "ONEDRIVE_REFRESH_TOKEN": "M.C524_SN1.0.U.MsaArtifacts.-CkBdfQ!lQEslhY6nro9jel6K6VatwJQLuooO0!j9BtJWtOZ8WVwP3zYWIiXR4G0B*xhQr2DglJ7dmaDq0eQqAn6s!uPj!G!Zzx3UPah4M87Mrdt6t8sKSAoywpd*55QYflbY06TxyorqAlwf7cwed3xks1imubMgDdbhi0ghRmvd5OABEKpXi2wEPM6iO3nefzwpP3Myuzft!Ylr6CszHNECbF8ie*xwpS2jEYflybEmfLn3BIAbPU0N53FHsCOY3VTH15P0i8CHswClkVT!miXIHzfaCtcKn6Xlm0X1pRx35JCNsHPgCpfflV8gGq1VUpJOC8ehGPN6x4n4WMxI4UtsIOk*58VG7CkGvaDR600GdGxTZMnRMvQ5PJnJzOB*fw$$",
     "ONEDRIVE_CLIENT_ID": "ff601f06-698c-4f2c-b355-0fb7af20470c",
-    "HF_TOKEN": "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",
-    "GROQ_API_KEY": "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"
+    "HF_TOKEN": "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",
+    "GITHUB_TOKEN": "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",
+    "OPENROUTER_API_KEY": "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",
+    "GROQ_API_KEY": "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"
   },
   "spotify": {
     "pinnedTrackId": "4wCiTliB8X4GioUQW0nupW",
