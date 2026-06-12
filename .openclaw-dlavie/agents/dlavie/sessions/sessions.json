@@ -1,0 +1,87 @@
+{
+  "agent:dlavie:main": {
+    "sessionId": "c50ba20b-045b-4e04-9f2a-22834ff8dd70",
+    "updatedAt": 1781276150797,
+    "sessionStartedAt": 1781276150163,
+    "systemSent": true,
+    "abortedLastRun": false,
+    "chatType": "direct",
+    "sessionFile": "/home/runner/workspace/.openclaw-dlavie/agents/dlavie/sessions/c50ba20b-045b-4e04-9f2a-22834ff8dd70.jsonl",
+    "compactionCount": 0,
+    "skillsSnapshot": {
+      "skills": [
+        {
+          "name": "browser-automation"
+        },
+        {
+          "name": "canvas"
+        },
+        {
+          "name": "diagram-maker"
+        },
+        {
+          "name": "gh-issues",
+          "primaryEnv": "GH_TOKEN",
+          "requiredEnv": []
+        },
+        {
+          "name": "github",
+          "requiredEnv": []
+        },
+        {
+          "name": "healthcheck"
+        },
+        {
+          "name": "meme-maker",
+          "requiredEnv": []
+        },
+        {
+          "name": "node-connect"
+        },
+        {
+          "name": "node-inspect-debugger",
+          "requiredEnv": []
+        },
+        {
+          "name": "notion",
+          "primaryEnv": "NOTION_API_TOKEN",
+          "requiredEnv": []
+        },
+        {
+          "name": "python-debugpy",
+          "requiredEnv": []
+        },
+        {
+          "name": "session-logs",
+          "requiredEnv": []
+        },
+        {
+          "name": "skill-creator"
+        },
+        {
+          "name": "spike"
+        },
+        {
+          "name": "taskflow"
+        },
+        {
+          "name": "taskflow-inbox-triage"
+        },
+        {
+          "name": "video-frames",
+          "requiredEnv": []
+        },
+        {
+          "name": "weather"
+        }
+      ],
+      "version": 0,
+      "promptRef": {
+        "version": 1,
+        "algorithm": "sha256",
+        "hash": "96dc957bfa10b64fdca2901a5e3f1991b14fe50a868a840d04b17982a3cf2519",
+        "bytes": 5845
+      }
+    }
+  }
+}

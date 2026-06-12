@@ -6,6 +6,7 @@ import { logger } from "./lib/logger";
 import { startOllamaServer } from "./ollama";
 import { startAutoTraining, startMicroTraining } from "./autotraining";
 import { startGateway as startOpenClaw } from "./openclaw-manager";
+import { startWorkers, stopWorkers } from "./agent-workers";
 import { isHFConfigured, HF_STATUS, probeHFToken } from "./huggingface";
 
 // ─── Load saved secrets from config file on startup ──────────────────────────
@@ -114,6 +115,14 @@ setTimeout(async () => {
 startOpenClaw().catch((err) => {
   logger.warn({ err }, "OpenClaw gateway failed to start — will retry automatically");
 });
+
+// ─── Multi-Agent Job Workers (background 24/7) ────────────────────────────────
+// 8 specialist agents covering every DLavie OS feature — boot after 15s
+// so the HTTP server and DB are fully ready before workers start.
+setTimeout(() => {
+  startWorkers();
+  logger.info("Multi-agent worker system started (8 agents, 24/7)");
+}, 15_000);
 
 // ─── Auto-training ────────────────────────────────────────────────────────────
 const AUTO_TRAIN_INTERVAL_MS = Number(process.env.AUTO_TRAIN_INTERVAL_MS) || 3 * 60 * 60 * 1000;

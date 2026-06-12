@@ -2,19 +2,19 @@
   "entries": {
     "/home/runner/workspace/.openclaw-dlavie/openclaw.json": {
       "lastKnownGood": {
-        "hash": "520ca6abe641d02c00ea82068f3ae7b858d58d1d388244ae30b7a1fe89a4e030",
-        "bytes": 618,
-        "mtimeMs": 1781275504873.3672,
-        "ctimeMs": 1781275504873.3672,
+        "hash": "4c06530f960e547e0970df73259ff3602485b6458635d3be397b16ad1e1611d8",
+        "bytes": 2861,
+        "mtimeMs": 1781277298760.3672,
+        "ctimeMs": 1781277298760.3672,
         "dev": "146",
         "ino": "1396",
-        "mode": 33188,
+        "mode": 420,
         "nlink": 1,
         "uid": 1000,
         "gid": 1000,
         "hasMeta": true,
         "gatewayMode": "local",
-        "observedAt": "2026-06-12T14:45:13.062Z"
+        "observedAt": "2026-06-12T15:15:00.981Z"
       },
       "lastObservedSuspiciousSignature": null,
       "lastPromotedGood": {

@@ -5,24 +5,94 @@
   },
   "agents": {
     "defaults": {
-      "workspace": "/home/runner/workspace/.openclaw-dlavie/workspace",
+      "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/dlavie",
       "skipBootstrap": true
     },
     "list": [
       {
         "id": "dlavie",
         "default": true,
-        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspace",
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/dlavie",
         "identity": {
           "name": "DLavie",
-          "theme": "autonomous AI developer for DLavie OS",
+          "theme": "autonomous AI developer and general assistant for DLavie OS",
           "emoji": "🤖"
+        }
+      },
+      {
+        "id": "trainer",
+        "default": false,
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/trainer",
+        "identity": {
+          "name": "Trainer",
+          "theme": "AI training specialist — datasets, benchmarks, model quality",
+          "emoji": "🧠"
+        }
+      },
+      {
+        "id": "librarian",
+        "default": false,
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/librarian",
+        "identity": {
+          "name": "Librarian",
+          "theme": "knowledge base and RAG pipeline guardian",
+          "emoji": "📚"
+        }
+      },
+      {
+        "id": "guardian",
+        "default": false,
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/guardian",
+        "identity": {
+          "name": "Guardian",
+          "theme": "ticket handler, user feedback, and quality officer",
+          "emoji": "🛡️"
+        }
+      },
+      {
+        "id": "analyst",
+        "default": false,
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/analyst",
+        "identity": {
+          "name": "Analyst",
+          "theme": "data intelligence officer — metrics, anomalies, insights",
+          "emoji": "📊"
+        }
+      },
+      {
+        "id": "botmaster",
+        "default": false,
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/botmaster",
+        "identity": {
+          "name": "Botmaster",
+          "theme": "bot operations manager for Telegram and WhatsApp",
+          "emoji": "🤖"
+        }
+      },
+      {
+        "id": "curator",
+        "default": false,
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/curator",
+        "identity": {
+          "name": "Curator",
+          "theme": "conversation curator and prompt library manager",
+          "emoji": "✨"
+        }
+      },
+      {
+        "id": "engineer",
+        "default": false,
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspaces/engineer",
+        "identity": {
+          "name": "Engineer",
+          "theme": "system engineer — Ollama, models, infrastructure",
+          "emoji": "⚙️"
         }
       }
     ]
   },
   "meta": {
-    "lastTouchedVersion": "2026.6.5",
-    "lastTouchedAt": "2026-06-12T14:45:04.873Z"
+    "lastTouchedVersion": "2026.6.12",
+    "lastTouchedAt": "2026-06-12T15:15:06.386Z"
   }
 }

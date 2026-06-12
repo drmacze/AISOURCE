@@ -31,6 +31,7 @@ import brandKitRouter from "./brand-kit";
 import tgBotRouter from "./tg-bot";
 import openclawRouter from "./openclaw";
 import openaiCompatRouter from "./openai-compat";
+import workersRouter from "./workers";
 
 const router: IRouter = Router();
 
@@ -118,5 +119,8 @@ router.use(openclawRouter);
 
 // OpenAI-compatible endpoint — for OpenClaw and external integrations (mounted at /api by app.ts)
 router.use(openaiCompatRouter);
+
+// Multi-agent job worker status, mail, metrics, nudge
+router.use(workersRouter);
 
 export default router;
