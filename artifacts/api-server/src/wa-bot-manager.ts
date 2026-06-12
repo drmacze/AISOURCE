@@ -277,6 +277,9 @@ class WaBotManager {
   private reconnecting:     boolean         = false;
   private wasEverConnected: boolean         = false;
   private reportSessions    = new Map<string, ReportSession>();
+  /** Incremented on every connect() call so stale event handlers from previous sockets
+   *  can detect they're out-of-date and skip mutations to this.status. */
+  private connGen           = 0;
 
   // ── Public getters ────────────────────────────────────────────────────────
 
@@ -336,6 +339,9 @@ class WaBotManager {
   // ── Connect ───────────────────────────────────────────────────────────────
 
   async connect(phoneNumber: string): Promise<string> {
+    // Bump generation so stale event handlers from previous sockets are ignored
+    const myGen = ++this.connGen;
+
     // Tear down any existing socket
     if (this.sock) {
       try { this.sock.end(new Error("reconnect")); } catch { /* ignore */ }
@@ -379,6 +385,8 @@ class WaBotManager {
     // If "open" fires during or right after requestPairingCode, we must not miss it.
 
     sock.ev.on("connection.update", (update) => {
+      // Guard: ignore events from a superseded socket (race condition protection)
+      if (this.connGen !== myGen) return;
       try {
         const { connection, lastDisconnect } = update;
 
@@ -526,18 +534,24 @@ class WaBotManager {
     });
 
     // ── Request pairing code AFTER all handlers are registered ───────────────
-    // Handlers are registered first so we never miss a "connection: open" event
-    // that fires during or immediately after requestPairingCode resolves.
+    // Wait for the first connection.update (= noise handshake done, first WA message
+    // received) instead of a fixed timer — more reliable on slow/proxied networks.
 
     let pairingCode = "";
 
     if (!state.creds.registered) {
+      // Wait for the WA noise-handshake + any initial session-reset reconnect to complete.
+      // WA commonly closes the first raw TCP connection for a fresh session and Baileys
+      // internally reconnects; empirically this takes ~3 s from socket creation.
+      // Using a fixed delay is simpler and more reliable than event-driven heuristics here.
+      console.log("[WaBot] Waiting for WA handshake (3.5 s)…");
+      await new Promise((r) => setTimeout(r, 3500));
+      console.log("[WaBot] Ready — requesting pairing code…");
+
       let lastErr: unknown;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          // Brief delay on first attempt so WS handshake completes;
-          // longer delay on retries
-          await new Promise((r) => setTimeout(r, attempt === 1 ? 800 : 3000));
+          if (attempt > 1) await new Promise((r) => setTimeout(r, 3000));
           let code = await sock.requestPairingCode(cleaned);
           if (code && !code.includes("-") && code.length === 8)
             code = `${code.slice(0, 4)}-${code.slice(4)}`;
@@ -549,7 +563,10 @@ class WaBotManager {
           break;
         } catch (e) {
           lastErr = e;
-          console.warn(`[WaBot] Attempt ${attempt} failed:`, String(e));
+          const errMsg = e instanceof Error
+            ? `${e.constructor.name}: ${e.message}\n${e.stack ?? ""}`
+            : String(e);
+          console.warn(`[WaBot] Attempt ${attempt} failed — ${errMsg}`);
           if (attempt === 3) {
             this.status = {
               connected: false, pairingStep: "error",
