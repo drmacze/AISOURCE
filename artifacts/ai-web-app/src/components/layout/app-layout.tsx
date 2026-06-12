@@ -33,25 +33,23 @@ import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// ─── Global Agent Running Indicator hook ─────────────────────────────────────
-function useAgentRunning() {
+// ─── OpenClaw Running Indicator hook ─────────────────────────────────────────
+function useOpenClawRunning() {
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
-    const base = "";
-
     const check = async () => {
       try {
-        const res = await fetch(`${base}/api/agent/sessions`);
+        const res = await fetch(`/api/openclaw/status`);
         if (res.ok) {
-          const sessions = await res.json() as Array<{ status: string }>;
-          setRunning(sessions.some((s) => s.status === "running"));
+          const data = await res.json() as { running: boolean };
+          setRunning(!!data.running);
         }
       } catch { /* ignore */ }
     };
 
     check();
-    const interval = setInterval(check, 5000);
+    const interval = setInterval(check, 8000);
     return () => clearInterval(interval);
   }, []);
 
@@ -82,7 +80,7 @@ const NAV_GROUPS = [
   {
     label: "Training & Models",
     items: [
-      { href: "/agent",        label: "AI Agent",       icon: Bot,              color: "text-emerald-400" },
+      { href: "/openclaw",     label: "AI Agent",       icon: Rabbit,           color: "text-orange-400" },
       { href: "/training",     label: "Training Hub",   icon: Network,          color: "text-orange-400" },
       { href: "/training-lab", label: "Training Lab",   icon: Activity,         color: "text-green-400" },
       { href: "/models",       label: "Models",         icon: Box,              color: "text-rose-400" },
@@ -91,7 +89,6 @@ const NAV_GROUPS = [
   {
     label: "Integrations",
     items: [
-      { href: "/openclaw",   label: "OpenClaw Agent", icon: Rabbit,           color: "text-orange-400" },
       { href: "/bots",       label: "Bot Center",     icon: Bot,              color: "text-green-400" },
       { href: "/brand-kit",  label: "Brand Kit",      icon: Palette,          color: "text-purple-400" },
       { href: "/storage",    label: "OneDrive",       icon: HardDrive,        color: "text-blue-400" },
@@ -259,7 +256,7 @@ function GlobalSearch() {
 }
 
 function SidebarContent({ location, onClose }: { location: string; onClose?: () => void }) {
-  const agentRunning = useAgentRunning();
+  const openClawRunning = useOpenClawRunning();
   return (
     <div className="flex flex-col h-full">
       {/* Logo */}
@@ -294,7 +291,7 @@ function SidebarContent({ location, onClose }: { location: string; onClose?: () 
               {group.items.map((item) => {
                 const isActive = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
                 const Icon = item.icon;
-                const isAgent = item.href === "/agent";
+                const isOpenClaw = item.href === "/openclaw";
                 return (
                   <Link
                     key={item.href}
@@ -309,10 +306,10 @@ function SidebarContent({ location, onClose }: { location: string; onClose?: () 
                   >
                     <Icon className={cn("w-4 h-4 flex-shrink-0 transition-colors", isActive ? item.color : "opacity-60 group-hover:opacity-100")} />
                     <span className="flex-1 truncate">{item.label}</span>
-                    {isAgent && agentRunning && (
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" title="Agent running in background" />
+                    {isOpenClaw && openClawRunning && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" title="OpenClaw running" />
                     )}
-                    {isActive && !agentRunning && <ChevronRight className="w-3 h-3 text-emerald-400 opacity-60 flex-shrink-0" />}
+                    {isActive && !openClawRunning && <ChevronRight className="w-3 h-3 text-emerald-400 opacity-60 flex-shrink-0" />}
                   </Link>
                 );
               })}

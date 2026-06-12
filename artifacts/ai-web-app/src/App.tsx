@@ -20,7 +20,6 @@ import PromptsPage from "@/pages/prompts";
 import AnalyticsPage from "@/pages/analytics";
 import NotebookPage from "@/pages/notebook";
 import WebSearchPage from "@/pages/websearch";
-import AgentPage from "@/pages/agent";
 import PlaygroundPage from "@/pages/playground";
 import TrainingLabPage from "@/pages/training-lab";
 import StoragePage from "@/pages/storage";
@@ -60,7 +59,9 @@ function Router() {
         <Route path="/settings" component={SettingsPage} />
         <Route path="/notebook" component={NotebookPage} />
         <Route path="/web-search" component={WebSearchPage} />
-        <Route path="/agent" component={AgentPage} />
+        <Route path="/agent">
+          <Redirect to="/openclaw" />
+        </Route>
         <Route path="/storage" component={StoragePage} />
         <Route path="/playground" component={PlaygroundPage} />
         <Route path="/training-lab" component={TrainingLabPage} />

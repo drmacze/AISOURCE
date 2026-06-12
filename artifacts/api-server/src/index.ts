@@ -7,7 +7,6 @@ import { startOllamaServer } from "./ollama";
 import { startAutoTraining, startMicroTraining } from "./autotraining";
 import { startGateway as startOpenClaw } from "./openclaw-manager";
 import { isHFConfigured, HF_STATUS, probeHFToken } from "./huggingface";
-import { startAutonomousMode } from "./routes/agent";
 
 // ─── Load saved secrets from config file on startup ──────────────────────────
 // (The settings route module applies them too, but we need them before routes load)
@@ -143,15 +142,7 @@ app.listen(port, "0.0.0.0", (err?: Error) => {
     "DLavie OS API Server ready"
   );
 
-  // ─── Autonomous Agent (auto-start on every boot) ──────────────────────────
-  // Starts 5 s after server is ready so DB connections are fully settled.
-  // Disable by setting AGENT_AUTONOMOUS=false in env.
-  if (process.env.AGENT_AUTONOMOUS !== "false") {
-    startAutonomousMode();
-    logger.info({ intervalMs: Number(process.env.AGENT_INTERVAL_MS) || 3 * 60 * 1000 }, "Autonomous agent started");
-  } else {
-    logger.info("Autonomous agent DISABLED (AGENT_AUTONOMOUS=false)");
-  }
+  // Autonomous agent disabled — replaced by OpenClaw gateway.
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
