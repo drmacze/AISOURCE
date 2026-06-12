@@ -5,6 +5,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startOllamaServer } from "./ollama";
 import { startAutoTraining, startMicroTraining } from "./autotraining";
+import { startGateway as startOpenClaw } from "./openclaw-manager";
 import { isHFConfigured, HF_STATUS } from "./huggingface";
 
 // ─── Load saved secrets from config file on startup ──────────────────────────
@@ -98,6 +99,11 @@ setTimeout(async () => {
     logger.warn({ err: e }, "Prompts auto-seed failed (non-fatal)");
   }
 }, 3000);
+
+// ─── OpenClaw Gateway (background) ───────────────────────────────────────────
+startOpenClaw().catch((err) => {
+  logger.warn({ err }, "OpenClaw gateway failed to start — will retry automatically");
+});
 
 // ─── Auto-training ────────────────────────────────────────────────────────────
 const AUTO_TRAIN_INTERVAL_MS = Number(process.env.AUTO_TRAIN_INTERVAL_MS) || 3 * 60 * 60 * 1000;

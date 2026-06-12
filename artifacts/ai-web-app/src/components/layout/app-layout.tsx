@@ -27,6 +27,7 @@ import {
   HardDrive,
   MessageCircle,
   Palette,
+  Rabbit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
@@ -90,6 +91,7 @@ const NAV_GROUPS = [
   {
     label: "Integrations",
     items: [
+      { href: "/openclaw",   label: "OpenClaw Agent", icon: Rabbit,           color: "text-orange-400" },
       { href: "/bots",       label: "Bot Center",     icon: Bot,              color: "text-green-400" },
       { href: "/brand-kit",  label: "Brand Kit",      icon: Palette,          color: "text-purple-400" },
       { href: "/storage",    label: "OneDrive",       icon: HardDrive,        color: "text-blue-400" },

@@ -8,3 +8,6 @@
 - [API Key Auth Bootstrap](api-key-auth.md) — DB-backed dlv_ keys; bootstrap mode lets first admin key be created without auth when DB empty + no DLAVIE_API_KEY
 - [Provider Fallback Chain](provider-chain.md) — `src/lib/provider-chain.ts`; order: Groq→OpenRouter→HF→Ollama; generateUnified() returns `{text, provider, modelUsed}` not plain string
 - [Session API](provider-chain.md#sessions) — `/api/v1/sessions/:sessionId/message`; DB title = `session:<id>`; multi-turn history injected automatically; designed for WhatsApp bots
+- [OpenClaw config format](openclaw-integration.md) — uses `openclaw.json` (JSON5/JSON), NOT YAML; valid fields: gateway.mode/bind, agents.defaults.workspace+skipBootstrap, agents.list[].id/default/workspace/identity; NO auth in JSON — pass `--auth none` as CLI arg
+- [OpenClaw Node 22 requirement](openclaw-integration.md) — requires Node.js v22+; upgrade via installProgrammingLanguage({language:"nodejs-22"}); run `artifacts/api-server: API Server` workflow (not `Start API Server`)
+- [OpenClaw gateway spawn](openclaw-integration.md) — binary at `node_modules/.bin/openclaw`; use OPENCLAW_STATE_DIR + OPENCLAW_CONFIG_PATH env vars; `--allow-unconfigured --auth none --force` flags; agent routes at `/api/openclaw/*`; OpenAI-compat at `/api/openai/v1/*`

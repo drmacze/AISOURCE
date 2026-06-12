@@ -1,0 +1,30 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "port": 18789,
+    "auth": "none"
+  },
+  "providers": {
+    "groq": {
+      "apiKey": "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",
+      "model": "llama-3.3-70b-versatile"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "systemPrompt": "You are DLavie OS, an autonomous AI developer agent. You help manage, develop, and improve the DLavie OS platform. You have tools to check system status, manage training jobs, search the knowledge base, pull AI models, and run any DLavie OS operation. Always reply in the same language the user uses."
+    }
+  },
+  "channels": {
+    "telegram": {
+      "token": "8621826018:AAFx-Axg7SCPowWAGH7Q6Vgc_Mmp_YReCZ0",
+      "dmPolicy": "open",
+      "allowFrom": [
+        "*"
+      ]
+    }
+  }
+}

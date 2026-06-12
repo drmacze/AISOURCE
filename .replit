@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "python-3.12", "web", "dotnet-7.0"]
+modules = ["python-3.12", "web", "dotnet-7.0", "nodejs-22"]
 
 [deployment]
 router = "application"
@@ -70,6 +70,11 @@ externalPort = 80
 [[ports]]
 localPort = 8080
 externalPort = 8080
+
+[[ports]]
+localPort = 18789
+externalPort = 3001
+exposeLocalhost = true
 
 [nix]
 channel = "stable-25_05"

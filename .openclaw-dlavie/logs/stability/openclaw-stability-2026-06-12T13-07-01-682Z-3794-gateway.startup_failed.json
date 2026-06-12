@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-12T13:07:01.682Z",
+  "reason": "gateway.startup_failed",
+  "process": {
+    "pid": 3794,
+    "platform": "linux",
+    "arch": "x64",
+    "node": "22.22.0",
+    "uptimeMs": 1567
+  },
+  "host": {
+    "hostname": "<redacted-hostname>"
+  },
+  "error": {
+    "name": "Error",
+    "message": "Invalid config at /home/runner/workspace/.openclaw-dlavie/openclaw.json. agents.list.0: Invalid input Run \"openclaw doctor --fix\" to repair, then retry. If startup is still blocked, inspect the adjacent .bak backup before restoring it manually."
+  },
+  "snapshot": {
+    "generatedAt": "2026-06-12T13:07:01.683Z",
+    "capacity": 1000,
+    "count": 0,
+    "dropped": 0,
+    "events": [],
+    "summary": {
+      "byType": {}
+    }
+  }
+}

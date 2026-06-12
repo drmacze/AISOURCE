@@ -28,6 +28,7 @@ import WhatsAppPage from "@/pages/whatsapp";
 import WaBotPage from "@/pages/wa-bot";
 import BotsPage from "@/pages/bots";
 import BrandKitPage from "@/pages/brand-kit";
+import OpenClawPage from "@/pages/openclaw";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,6 +69,7 @@ function Router() {
         <Route path="/brand-kit" component={BrandKitPage} />
         <Route path="/whatsapp" component={WhatsAppPage} />
         <Route path="/wa-bot" component={WaBotPage} />
+        <Route path="/openclaw" component={OpenClawPage} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

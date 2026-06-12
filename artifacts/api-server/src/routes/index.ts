@@ -29,6 +29,8 @@ import whatsappRouter from "./whatsapp";
 import waBotRouter from "./wa-bot";
 import brandKitRouter from "./brand-kit";
 import tgBotRouter from "./tg-bot";
+import openclawRouter from "./openclaw";
+import openaiCompatRouter from "./openai-compat";
 
 const router: IRouter = Router();
 
@@ -110,5 +112,11 @@ router.use(brandKitRouter);
 
 // Telegram Bot — AI auto-reply + .report ticket system
 router.use(tgBotRouter);
+
+// OpenClaw Gateway — multi-channel AI agent (WhatsApp, Telegram, Discord, 20+ platforms)
+router.use(openclawRouter);
+
+// OpenAI-compatible endpoint — for OpenClaw and external integrations (mounted at /api by app.ts)
+router.use(openaiCompatRouter);
 
 export default router;

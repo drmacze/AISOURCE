@@ -1,0 +1,28 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback"
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/runner/workspace/.openclaw-dlavie/workspace",
+      "skipBootstrap": true
+    },
+    "list": [
+      {
+        "id": "dlavie",
+        "default": true,
+        "workspace": "/home/runner/workspace/.openclaw-dlavie/workspace",
+        "identity": {
+          "name": "DLavie",
+          "theme": "autonomous AI developer for DLavie OS",
+          "emoji": "🤖"
+        }
+      }
+    ]
+  },
+  "meta": {
+    "lastTouchedVersion": "2026.6.5",
+    "lastTouchedAt": "2026-06-12T13:07:19.415Z"
+  }
+}
