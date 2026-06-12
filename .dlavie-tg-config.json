@@ -1,0 +1,11 @@
+{
+  "token": "8621826018:AAFx-Axg7SCPowWAGH7Q6Vgc_Mmp_YReCZ0",
+  "botName": "DLavie Bot",
+  "ownerName": "Owner",
+  "style": "santai",
+  "customPrompt": "",
+  "activeModel": "auto",
+  "autoReply": true,
+  "replyInGroup": false,
+  "welcomeMessage": "Halo! Saya DLavie Bot, asisten AI Anda. Ketik apa saja untuk mulai."
+}

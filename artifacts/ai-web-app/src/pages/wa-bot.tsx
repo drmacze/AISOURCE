@@ -291,33 +291,44 @@ function ThumbnailPanel({ connected }: { connected: boolean }) {
 
 const PAIRING_TTL_SEC = 60; // pairing codes expire ~60s
 
-function PairingCountdown({ startedAt }: { startedAt: number }) {
+function PairingCountdown({ startedAt, onExpire }: { startedAt: number; onExpire: () => void }) {
   const [remaining, setRemaining] = useState(() =>
     Math.max(0, PAIRING_TTL_SEC - Math.floor((Date.now() - startedAt) / 1000))
   );
+  const expiredRef = useRef(false);
+
   useEffect(() => {
+    expiredRef.current = false;
     const t = setInterval(() => {
-      setRemaining(Math.max(0, PAIRING_TTL_SEC - Math.floor((Date.now() - startedAt) / 1000)));
+      const r = Math.max(0, PAIRING_TTL_SEC - Math.floor((Date.now() - startedAt) / 1000));
+      setRemaining(r);
+      if (r === 0 && !expiredRef.current) {
+        expiredRef.current = true;
+        onExpire();
+      }
     }, 500);
     return () => clearInterval(t);
-  }, [startedAt]);
+  }, [startedAt, onExpire]);
+
   const pct = (remaining / PAIRING_TTL_SEC) * 100;
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs">
         <span className="flex items-center gap-1 text-slate-400"><Clock className="w-3 h-3" /> Kode berlaku</span>
-        <span className={cn("font-mono font-bold", remaining < 15 ? "text-red-400" : "text-green-400")}>
+        <span className={cn("font-mono font-bold", remaining < 15 ? "text-red-400" : remaining < 30 ? "text-yellow-400" : "text-green-400")}>
           {remaining}s
         </span>
       </div>
       <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
         <div
-          className={cn("h-full rounded-full transition-all duration-500", remaining < 15 ? "bg-red-500" : "bg-green-500")}
+          className={cn("h-full rounded-full transition-all duration-500",
+            remaining < 15 ? "bg-red-500" : remaining < 30 ? "bg-yellow-500" : "bg-green-500"
+          )}
           style={{ width: `${pct}%` }}
         />
       </div>
       {remaining === 0 && (
-        <p className="text-xs text-red-400 text-center">⚠ Kode kedaluwarsa — klik Connect lagi untuk mendapat kode baru</p>
+        <p className="text-xs text-red-400 text-center font-medium">⚠ Kode kedaluwarsa — masukkan nomor & klik Connect lagi</p>
       )}
     </div>
   );
@@ -335,6 +346,7 @@ export default function WaBotPage() {
   const [configDirty, setConfigDirty] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [pairingStartedAt, setPairingStartedAt] = useState<number | null>(null);
+  const [codeExpired, setCodeExpired]           = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -346,9 +358,12 @@ export default function WaBotPage() {
       const s = JSON.parse(e.data) as BotStatus;
       setStatus(s);
       if (s.pairingStep === "waiting_scan" && s.pairingCode) {
-        setPairingStartedAt((prev) => prev ?? Date.now());
+        // Fresh pairing code arrived — reset timer and expired flag
+        setPairingStartedAt(Date.now());
+        setCodeExpired(false);
       } else if (s.pairingStep !== "waiting_scan") {
         setPairingStartedAt(null);
+        setCodeExpired(false);
       }
     });
     es.addEventListener("wa_message", (e) => {
@@ -582,13 +597,36 @@ export default function WaBotPage() {
                         value={phoneInput}
                         onChange={(e) => setPhoneInput(e.target.value)}
                         placeholder="6281234567890"
-                        className="flex-1 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 font-mono focus:outline-none focus:border-green-500 transition-colors"
+                        disabled={pairingStep === "waiting_code" || (pairingStep === "waiting_scan" && !codeExpired)}
+                        className="flex-1 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 font-mono focus:outline-none focus:border-green-500 transition-colors disabled:opacity-50"
                         onKeyDown={(e) => e.key === "Enter" && handleConnect()}
                       />
-                      <button onClick={handleConnect} disabled={connecting || !phoneInput.trim()}
-                        className="flex items-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-                        {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
-                        Connect
+                      <button
+                        onClick={handleConnect}
+                        disabled={
+                          connecting ||
+                          !phoneInput.trim() ||
+                          pairingStep === "waiting_code" ||
+                          (pairingStep === "waiting_scan" && !codeExpired)
+                        }
+                        title={
+                          pairingStep === "waiting_scan" && !codeExpired
+                            ? "Tunggu countdown selesai sebelum request kode baru"
+                            : undefined
+                        }
+                        className="flex items-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
+                        {connecting
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : codeExpired ? <RefreshCw className="w-4 h-4" /> : <Plug className="w-4 h-4" />
+                        }
+                        {pairingStep === "waiting_code"
+                          ? "Meminta..."
+                          : pairingStep === "waiting_scan" && !codeExpired
+                            ? "Menunggu..."
+                            : codeExpired
+                              ? "Coba Lagi"
+                              : "Connect"
+                        }
                       </button>
                     </div>
                     <p className="text-xs text-slate-500">Contoh: 6281234567890 (kode negara + nomor tanpa 0 di depan)</p>
@@ -604,7 +642,10 @@ export default function WaBotPage() {
                       {/* Countdown timer */}
                       {pairingStartedAt && (
                         <div className="mx-auto max-w-xs">
-                          <PairingCountdown startedAt={pairingStartedAt} />
+                          <PairingCountdown
+                            startedAt={pairingStartedAt}
+                            onExpire={() => setCodeExpired(true)}
+                          />
                         </div>
                       )}
                       <div className="space-y-1.5 text-xs text-slate-400 text-left bg-slate-900/50 rounded-lg p-3">

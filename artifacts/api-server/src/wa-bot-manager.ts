@@ -349,6 +349,7 @@ class WaBotManager {
     saveConfig(this.config);
 
     this.status = { connected: false, pairingStep: "waiting_code", messageCount: 0, phoneNumber: cleaned, hasThumb: existsSync(THUMB_PATH) };
+    broadcast("wa_status", this.getStatus());
 
     // Always wipe stale session so WhatsApp doesn't see a half-registered device
     this.clearSession();
@@ -367,62 +368,15 @@ class WaBotManager {
       printQRInTerminal:              false,
       syncFullHistory:                false,
       generateHighQualityLinkPreview: false,
+      markOnlineOnConnect:            false,   // required for pairing code flow
       getMessage:                     async () => undefined,
     });
 
     this.sock = sock;
     sock.ev.on("creds.update", saveCreds);
 
-    // ── Pairing code — requested inside connection.update once WS is ready ──
-
-    let pairingCode = "";
-
-    if (!state.creds.registered) {
-      // Wait for the socket to signal it's ready for pairing (or timeout after 30s)
-      pairingCode = await new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("Timeout menunggu koneksi WhatsApp (30s)")), 30_000);
-
-        let pairingRequested = false;
-
-        const handler = async (update: { connection?: string; lastDisconnect?: unknown }) => {
-          if (pairingRequested) return;
-          try {
-            if (update.connection === "connecting") {
-              // WS handshake started — wait briefly for the channel to stabilise
-              pairingRequested = true;
-              clearTimeout(timer);
-              sock.ev.off("connection.update", handler as never);
-              await new Promise((r) => setTimeout(r, 1500));
-              try {
-                let code = await sock.requestPairingCode(cleaned);
-                if (code && !code.includes("-") && code.length === 8)
-                  code = `${code.slice(0, 4)}-${code.slice(4)}`;
-                console.log(`[WaBot] Pairing code issued: ${code}`);
-                this.status.pairingCode = code;
-                this.status.pairingStep = "waiting_scan";
-                broadcast("wa_status", this.getStatus());
-                resolve(code);
-              } catch (e) {
-                this.status = { connected: false, pairingStep: "error", error: String(e), messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
-                reject(e);
-              }
-            } else if (update.connection === "close") {
-              clearTimeout(timer);
-              sock.ev.off("connection.update", handler as never);
-              const err = new Error("Connection Closed — coba lagi");
-              this.status = { connected: false, pairingStep: "error", error: String(err), messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
-              reject(err);
-            }
-          } catch (e) { reject(e as Error); }
-        };
-
-        sock.ev.on("connection.update", handler as never);
-      });
-    } else {
-      this.status.pairingStep = "waiting_scan";
-    }
-
-    // ── Persistent connection events (after pairing code is issued) ───────────
+    // ── CRITICAL: Register persistent handlers BEFORE requestPairingCode ──────
+    // If "open" fires during or right after requestPairingCode, we must not miss it.
 
     sock.ev.on("connection.update", (update) => {
       try {
@@ -443,7 +397,7 @@ class WaBotManager {
           console.log(`[WaBot] ✅ Connected — ${cleaned} (${this.config.deviceType})`);
           broadcast("wa_status", this.getStatus());
 
-          // Auto-apply profile pic if we have one, else generate first
+          // Auto-apply profile pic
           setTimeout(async () => {
             try {
               if (!existsSync(THUMB_PATH)) {
@@ -465,11 +419,10 @@ class WaBotManager {
           console.log(`[WaBot] Disconnected (code=${code}, wasConnected=${this.wasEverConnected})`);
 
           if (loggedOut) {
-            // Explicit logout — stop everything, let user reconnect manually
             this.status.pairingStep = "error";
             this.status.error       = "Logged out — silakan hubungkan ulang";
           } else if (this.wasEverConnected && !this.reconnecting) {
-            // Was fully connected before — safe to auto-reconnect without disturbing user
+            // Was fully connected before — safe to auto-reconnect
             this.status.pairingStep = "idle";
             this.reconnecting = true;
             setTimeout(async () => {
@@ -477,17 +430,16 @@ class WaBotManager {
               try { await this.connect(cleaned); } catch { /* ignore */ }
             }, 5000);
           } else {
-            // Never reached "open" — still in pairing phase; keep the pairing code
-            // visible and let the user retry manually (don't auto-reconnect and
-            // regenerate the code under their feet)
+            // Disconnected during pairing phase — show error, let user retry
             this.status.pairingStep = "error";
             this.status.error       = "Koneksi terputus — tekan Hubungkan lagi";
           }
+          broadcast("wa_status", this.getStatus());
         }
       } catch (e) { console.error("[WaBot] connection.update error:", e); }
     });
 
-    // ── Message handler ───────────────────────────────────────────────────
+    // ── Message handler (also registered before pairing code request) ─────────
 
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
       if (type !== "notify") return;
@@ -572,6 +524,48 @@ class WaBotManager {
         }
       }
     });
+
+    // ── Request pairing code AFTER all handlers are registered ───────────────
+    // Handlers are registered first so we never miss a "connection: open" event
+    // that fires during or immediately after requestPairingCode resolves.
+
+    let pairingCode = "";
+
+    if (!state.creds.registered) {
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          // Brief delay on first attempt so WS handshake completes;
+          // longer delay on retries
+          await new Promise((r) => setTimeout(r, attempt === 1 ? 800 : 3000));
+          let code = await sock.requestPairingCode(cleaned);
+          if (code && !code.includes("-") && code.length === 8)
+            code = `${code.slice(0, 4)}-${code.slice(4)}`;
+          console.log(`[WaBot] ✅ Pairing code (attempt ${attempt}): ${code}`);
+          pairingCode = code;
+          this.status.pairingCode = code;
+          this.status.pairingStep = "waiting_scan";
+          broadcast("wa_status", this.getStatus());
+          break;
+        } catch (e) {
+          lastErr = e;
+          console.warn(`[WaBot] Attempt ${attempt} failed:`, String(e));
+          if (attempt === 3) {
+            this.status = {
+              connected: false, pairingStep: "error",
+              error: `Gagal mendapat pairing code: ${String(e)}`,
+              messageCount: 0, hasThumb: existsSync(THUMB_PATH),
+            };
+            broadcast("wa_status", this.getStatus());
+            throw lastErr;
+          }
+        }
+      }
+    } else {
+      // Existing registered session — skip pairing, wait for connection open
+      this.status.pairingStep = "waiting_scan";
+      broadcast("wa_status", this.getStatus());
+    }
 
     return pairingCode;
   }
