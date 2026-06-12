@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+    <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+    <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+    <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+    <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+    <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+    <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+    <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+    <polygon points="302.0,253.0 277.5,295.4 228.5,295.4 204.0,253.0 228.5,210.6 277.5,210.6" fill="#22c55e" opacity="0.10" />
+  <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+    <circle cx="253" cy="253" r="3" fill="#22c55e" opacity="0.45" />
+  
+    <circle cx="256" cy="256" r="140.8" fill="none" stroke="#22c55e" stroke-width="2" opacity="0.6"/>
+    <circle cx="256" cy="256" r="101.376" fill="#020617" opacity="0.7"/>
+    <text x="256" y="241.6" text-anchor="middle" dominant-baseline="middle"
+          font-family="'Space Mono', monospace" font-weight="700" font-size="57.599999999999994"
+          fill="#ffffff">DL</text>
+    <text x="256" y="301.6" text-anchor="middle" dominant-baseline="middle"
+          font-family="'Syne', sans-serif" font-weight="600" font-size="18.7"
+          fill="#22c55e" letter-spacing="4">OS</text>
+  <text x="504" y="504" text-anchor="end"
+        font-family="monospace" font-size="9" fill="#94a3b8" opacity="0.5">DLavie OS</text>
+</svg>
