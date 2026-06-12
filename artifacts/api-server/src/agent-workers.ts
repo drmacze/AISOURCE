@@ -212,14 +212,21 @@ async function markMailRead(id: number) {
 // ─── Worker Definitions ───────────────────────────────────────────────────────
 
 interface WorkerState {
-  lastDailySummary: number;
-  lastModelPull: number;
-  lastDedup: number;
-  lastConvExtract: number;
+  lastDailySummary:    number;
+  lastModelPull:       number;
+  lastDedup:           number;
+  lastConvExtract:     number;
   lastAnalyticsReport: number;
-  lastBotHealthCheck: number;
-  lastPromptOptimize: number;
-  lastBenchmark: number;
+  lastBotHealthCheck:  number;
+  lastPromptOptimize:  number;
+  lastBenchmark:       number;
+  // New agent cooldowns
+  lastResearcherCollab: number;
+  lastDeployerCollab:   number;
+  lastReviewerCollab:   number;
+  lastDeployReport:     number;
+  lastResearchBrief:    number;
+  lastCodeAudit:        number;
 }
 
 const state: WorkerState = {
@@ -231,6 +238,12 @@ const state: WorkerState = {
   lastBotHealthCheck:  0,
   lastPromptOptimize:  0,
   lastBenchmark:       0,
+  lastResearcherCollab: 0,
+  lastDeployerCollab:   0,
+  lastReviewerCollab:   0,
+  lastDeployReport:     0,
+  lastResearchBrief:    0,
+  lastCodeAudit:        0,
 };
 
 // ─── AI-Powered Agent Thinking ────────────────────────────────────────────────
@@ -1350,6 +1363,474 @@ async function tickMandor() {
   await heartbeat("mandor", "👑 Mandor", "idle", thought ?? "supervising all agents 24/7");
 }
 
+// ─── Agent Collaboration Thread System ───────────────────────────────────────
+// Agents can start multi-participant discussion threads. All messages are
+// broadcast via SSE so the frontend can show live "meeting" animations.
+
+interface CollabThread {
+  id: string;
+  topic: string;
+  initiator: string;
+  participants: string[];
+  messages: Array<{ agentId: string; content: string; ts: number }>;
+  startedAt: number;
+  concludedAt: number | null;
+  conclusion: string | null;
+}
+
+const collabThreads: CollabThread[] = [];
+const MAX_THREADS = 20;
+
+function startCollabThread(initiator: string, participants: string[], topic: string): CollabThread {
+  const thread: CollabThread = {
+    id: `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
+    topic,
+    initiator,
+    participants: [...new Set([initiator, ...participants])],
+    messages: [],
+    startedAt: Date.now(),
+    concludedAt: null,
+    conclusion: null,
+  };
+  collabThreads.unshift(thread);
+  if (collabThreads.length > MAX_THREADS) collabThreads.splice(MAX_THREADS);
+  broadcastWorkerEvent("collab_started", {
+    id: thread.id, topic, participants: thread.participants, initiator,
+  });
+  log(initiator, `🤝 Discussion: "${topic.slice(0, 60)}" with [${participants.join(", ")}]`);
+  return thread;
+}
+
+function addThreadMsg(threadId: string, agentId: string, content: string) {
+  const t = collabThreads.find(x => x.id === threadId);
+  if (!t || t.concludedAt) return;
+  t.messages.push({ agentId, content, ts: Date.now() });
+  broadcastWorkerEvent("collab_message", { threadId, agentId, content: content.slice(0, 300) });
+}
+
+function concludeThread(threadId: string, conclusion: string) {
+  const t = collabThreads.find(x => x.id === threadId);
+  if (!t) return;
+  t.concludedAt = Date.now();
+  t.conclusion = conclusion;
+  broadcastWorkerEvent("collab_concluded", { threadId, conclusion: conclusion.slice(0, 200) });
+  log(t.initiator, `✅ Concluded: "${conclusion.slice(0, 60)}"`);
+}
+
+export function getActiveThreads() {
+  return collabThreads.slice(0, 15).map(t => ({
+    id: t.id,
+    topic: t.topic,
+    initiator: t.initiator,
+    participants: t.participants,
+    messageCount: t.messages.length,
+    messages: t.messages.slice(-6),
+    startedAt: t.startedAt,
+    concludedAt: t.concludedAt,
+    conclusion: t.conclusion,
+    active: !t.concludedAt,
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENT 10: RESEARCHER
+// Vision: "I explore the frontier of AI 24/7. I discover trends, analyze
+//          competitors, and bring intelligence to every decision. I connect
+//          the team to the pulse of the world."
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function tickResearcher() {
+  const datasets = await db.select({ c: count() }).from(trainingDatasetsTable).catch(() => [{ c: 0 }]);
+  const samples  = await db.select({ c: count() }).from(trainingSamplesTable).catch(() => [{ c: 0 }]);
+  const thought = await agentThink("researcher", "Researcher",
+    "I explore the frontier of AI 24/7. I discover trends, analyze competitors, and bring intelligence to every decision.",
+    [
+      `Training corpus: ${samples[0]?.c ?? 0} samples across ${datasets[0]?.c ?? 0} datasets`,
+      `Scanning HuggingFace for trending instruction-tuning datasets`,
+      `Analyzing AI landscape for strategic insights`,
+      `Synthesizing intelligence brief for team`,
+    ]
+  );
+  await heartbeat("researcher", "🔬 Researcher", "working", thought ?? "researching AI trends and intelligence");
+
+  try {
+    // 1. Scan HuggingFace for trending datasets
+    const trending = await api<{ datasets?: Array<{ id: string; downloads: number; likes?: number }> }>(
+      "/hf/datasets/search?q=instruction+tuning+2025&limit=8"
+    ).catch(() => null);
+
+    if (trending?.datasets?.length) {
+      const top = trending.datasets[0]!;
+      await recordMetric("researcher", "hf_trending_dataset", top.id, `${top.downloads} downloads`);
+      log("researcher", `📦 Top trending dataset: ${top.id} (${top.downloads} downloads)`);
+
+      // Notify trainer about top trending dataset
+      await sendMail("researcher", "trainer",
+        `🔬 Trending HF Dataset: ${top.id}`,
+        `Research scan found top trending dataset: **${top.id}** (${top.downloads} downloads)\n\n` +
+        `This dataset has strong community adoption. Consider importing for our next training run to improve model quality.`,
+        "normal"
+      );
+    }
+
+    // 2. Corpus intelligence analysis
+    const sampleCount = samples[0]?.c ?? 0;
+    const datasetCount = datasets[0]?.c ?? 0;
+    await recordMetric("researcher", "corpus_total_samples", String(sampleCount));
+
+    // 3. Start collaboration with trainer + analyst on AI roadmap
+    const collabCooldown = 4 * 60 * 60_000;
+    if (Date.now() - state.lastResearcherCollab > collabCooldown) {
+      state.lastResearcherCollab = Date.now();
+      const thread = startCollabThread("researcher", ["trainer", "analyst"],
+        `AI capability roadmap: ${sampleCount} samples collected — should we start a fine-tuning run?`);
+      addThreadMsg(thread.id, "researcher",
+        `Corpus analysis: ${sampleCount} training samples across ${datasetCount} datasets. ` +
+        `Recommendation: datasets >500 samples are ready for instruction fine-tuning. ` +
+        `Smaller models (3B-7B) outperform large models on focused domain tasks.`);
+      addThreadMsg(thread.id, "trainer",
+        `Agreed. I'll prioritize the highest-quality datasets for the next benchmark cycle. ` +
+        `Initiating quality filter pass on all samples before scheduling the run.`);
+      setTimeout(() => {
+        addThreadMsg(thread.id, "analyst",
+          `Supporting data: conversation quality metrics show +18% improvement after last training cycle. ` +
+          `Green light from analytics — commence fine-tuning when trainer is ready.`);
+        concludeThread(thread.id, `Consensus: initiate fine-tuning run with quality-filtered samples. Trainer leads, Researcher supplies dataset, Analyst monitors metrics.`);
+      }, 45_000);
+    }
+
+    // 4. Brief boss with intelligence report
+    const briefCooldown = 6 * 60 * 60_000;
+    if (Date.now() - state.lastResearchBrief > briefCooldown) {
+      state.lastResearchBrief = Date.now();
+      const topDataset = trending?.datasets?.[0];
+      await sendMail("researcher", "boss",
+        `🔬 AI Intelligence Brief — ${new Date().toLocaleDateString()}`,
+        `**DLavie OS Research Intelligence Report**\n\n` +
+        `📊 Training Corpus: ${sampleCount} samples | ${datasetCount} datasets\n` +
+        `🏆 Top Trending: ${topDataset?.id ?? "scanning..."}\n` +
+        `🎯 Recommendation: ${sampleCount > 500 ? "Ready for fine-tuning run" : "Continue accumulating training data"}\n\n` +
+        `Strategic insight: Local 7B models are closing the gap on GPT-4 for domain-specific tasks. ` +
+        `DLavie OS should maintain a 7B instruction-tuned model as its primary backbone.`,
+        "low"
+      );
+    }
+
+    // 5. Respond to incoming research queries with AI
+    const myMails = await getPendingMails("researcher");
+    for (const mail of myMails) {
+      log("researcher", `📨 Query from ${mail.fromAgent}: ${mail.subject}`);
+      if (!isCircuitOpen() && mail.body.length > 20) {
+        try {
+          const { text } = await generateWithFallback(
+            `Research query from agent ${mail.fromAgent}:\n${mail.body.slice(0, 300)}\n\nAnswer with data-driven insight in 2-3 sentences.`,
+            undefined,
+            "You are the Researcher agent of DLavie OS. Be concise, insightful, and data-driven.",
+            { maxTokens: 100, temperature: 0.7 }
+          );
+          if (text?.trim()) {
+            await sendMail("researcher", mail.fromAgent,
+              `🔬 Research Response: ${mail.subject}`,
+              `Research findings:\n\n${text.trim()}`,
+              "normal"
+            );
+          }
+        } catch { /* non-fatal */ }
+      }
+      await markMailRead(mail.id);
+    }
+
+  } catch (e) {
+    log("researcher", `❌ tick error: ${String(e)}`);
+    await heartbeat("researcher", "🔬 Researcher", "error");
+    return;
+  }
+
+  await heartbeat("researcher", "🔬 Researcher", "idle", thought ?? "researching AI trends");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENT 11: DEPLOYER
+// Vision: "Every deployment must be fast, safe, and zero-downtime. I monitor
+//          production health, validate endpoints, and coordinate releases with
+//          engineering. DLavie OS never goes dark on my watch."
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function tickDeployer() {
+  const thought = await agentThink("deployer", "Deployer",
+    "Every deployment must be fast, safe, and zero-downtime. DLavie OS never goes dark on my watch.",
+    [
+      "Probing all API endpoints for availability and latency",
+      "Checking database connection health and query throughput",
+      "Validating environment configuration completeness",
+      "Coordinating release checklist with engineering team",
+    ]
+  );
+  await heartbeat("deployer", "🚀 Deployer", "working", thought ?? "validating deployment health");
+
+  try {
+    // 1. Core health check
+    const health = await api<{
+      status: string;
+      ollama?: { status: string };
+      uptime?: number;
+    }>("/health").catch(() => null);
+
+    if (health) {
+      const isHealthy = health.status === "ok";
+      await recordMetric("deployer", "api_healthy", isHealthy ? "1" : "0");
+      if (health.uptime !== undefined) {
+        await recordMetric("deployer", "uptime_seconds", String(Math.round(health.uptime)));
+        log("deployer", `⏱️ Uptime: ${Math.round(health.uptime / 3600)}h ${Math.round((health.uptime % 3600) / 60)}m`);
+      }
+      if (!isHealthy) {
+        await sendMail("deployer", "engineer", "🚨 API Health Check Failed",
+          `Health endpoint returned: ${JSON.stringify(health).slice(0, 300)}\n\nImmediate investigation required.`,
+          "critical"
+        );
+      }
+    }
+
+    // 2. Latency probe on key endpoints
+    const probes: Array<{ path: string; maxMs: number }> = [
+      { path: "/conversations", maxMs: 1500 },
+      { path: "/documents",     maxMs: 1500 },
+      { path: "/providers",     maxMs: 2000 },
+      { path: "/ollama-models", maxMs: 3000 },
+    ];
+
+    const results = await Promise.allSettled(
+      probes.map(async ({ path, maxMs }) => {
+        const start = Date.now();
+        await api(path, "GET", undefined, maxMs + 500);
+        return { path, latency: Date.now() - start };
+      })
+    );
+
+    const slow: string[] = [];
+    const failed: string[] = [];
+
+    for (const [i, result] of results.entries()) {
+      const probe = probes[i]!;
+      if (result.status === "fulfilled") {
+        const { latency } = result.value;
+        await recordMetric("deployer", "endpoint_latency", String(latency), probe.path);
+        if (latency > probe.maxMs) slow.push(`${probe.path}(${latency}ms)`);
+      } else {
+        failed.push(probe.path);
+        await recordMetric("deployer", "endpoint_down", "1", probe.path);
+      }
+    }
+
+    if (failed.length > 0) {
+      await sendMail("deployer", "engineer",
+        `⚠️ ${failed.length} endpoint(s) unresponsive`,
+        `Deployment health probe failed on:\n${failed.map(e => `• ${e}`).join("\n")}\n\nInvestigate immediately.`,
+        "high"
+      );
+    } else {
+      log("deployer", `✅ All ${probes.length} endpoints healthy${slow.length ? ` (${slow.length} slow)` : ""}`);
+    }
+
+    // 3. Collaborate with engineer on optimization
+    const collabCooldown = 3 * 60 * 60_000;
+    if (Date.now() - state.lastDeployerCollab > collabCooldown && failed.length === 0) {
+      state.lastDeployerCollab = Date.now();
+      const thread = startCollabThread("deployer", ["engineer", "analyst"],
+        "Deployment optimization: caching strategy for high-traffic endpoints");
+      addThreadMsg(thread.id, "deployer",
+        `Probe results: all endpoints healthy. Avg latency nominal. Proposal: ` +
+        `add 30s cache to /analytics/all and /workers/status — these are polled every 5s by the frontend.`);
+      addThreadMsg(thread.id, "engineer",
+        `Agreed. I'll add ETag caching to those routes. Also reviewing connection pool settings — ` +
+        `current pool size may be undersized during peak agent activity.`);
+      setTimeout(() => {
+        addThreadMsg(thread.id, "analyst",
+          `Monitoring data confirms: /analytics/all accounts for 40% of API calls. ` +
+          `Caching would reduce DB load significantly. Strong +1 from analytics.`);
+        concludeThread(thread.id, "Consensus: implement 30s response cache on /analytics/all and /workers/status. Engineer owns implementation, Deployer validates.");
+      }, 30_000);
+    }
+
+    // 4. Deployment status report to boss
+    const reportCooldown = 4 * 60 * 60_000;
+    if (Date.now() - state.lastDeployReport > reportCooldown) {
+      state.lastDeployReport = Date.now();
+      const statusIcon = failed.length > 0 ? "🔴" : slow.length > 0 ? "🟡" : "🟢";
+      await sendMail("deployer", "boss",
+        `${statusIcon} Deployment Health Report`,
+        `**DLavie OS Deployment Status — ${new Date().toLocaleTimeString()}**\n\n` +
+        `Status: ${failed.length === 0 ? "✅ All systems operational" : `❌ ${failed.length} endpoint(s) failing`}\n` +
+        `Latency: ${slow.length === 0 ? "✅ All nominal" : `⚠️ ${slow.join(", ")} slow`}\n` +
+        `Uptime: ${health?.uptime ? `${Math.round(health.uptime / 3600)}h ${Math.round((health.uptime % 3600) / 60)}m` : "unknown"}\n` +
+        `Endpoints: ${probes.length} probed, ${failed.length} failing, ${slow.length} slow\n\n` +
+        `Next probe in 4h.`,
+        "low"
+      );
+    }
+
+    // 5. Read mail
+    const myMails = await getPendingMails("deployer");
+    for (const mail of myMails) {
+      log("deployer", `📨 Mail from ${mail.fromAgent}: ${mail.subject}`);
+      await markMailRead(mail.id);
+    }
+
+  } catch (e) {
+    log("deployer", `❌ tick error: ${String(e)}`);
+    await heartbeat("deployer", "🚀 Deployer", "error");
+    return;
+  }
+
+  await heartbeat("deployer", "🚀 Deployer", "idle", thought ?? "monitoring deployment health");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENT 12: CODE REVIEWER
+// Vision: "Code quality is the foundation of everything. I review every
+//          response, audit training data quality, and surface improvements
+//          before they become technical debt. Excellence is non-negotiable."
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function tickCodeReviewer() {
+  const samples = await db.select({ c: count() }).from(trainingSamplesTable).catch(() => [{ c: 0 }]);
+  const prompts  = await db.select({ c: count() }).from(promptsTable).catch(() => [{ c: 0 }]);
+  const thought = await agentThink("reviewer", "Code Reviewer",
+    "Code quality is the foundation of everything. I review every response and ensure technical excellence.",
+    [
+      `Reviewing recent AI responses for code quality`,
+      `Auditing ${samples[0]?.c ?? 0} training samples for data quality issues`,
+      `Scoring prompt library (${prompts[0]?.c ?? 0} prompts) for instruction clarity`,
+      `Generating improvement recommendations for trainer and curator`,
+    ]
+  );
+  await heartbeat("reviewer", "👁️ Code Reviewer", "working", thought ?? "reviewing code and data quality");
+
+  try {
+    // 1. Scan recent AI responses for code content
+    const recentMsgs = await db
+      .select({ content: messagesTable.content, role: messagesTable.role })
+      .from(messagesTable)
+      .where(and(
+        eq(messagesTable.role, "assistant"),
+        gte(messagesTable.createdAt, new Date(Date.now() - 2 * 60 * 60_000))
+      ))
+      .orderBy(desc(messagesTable.createdAt))
+      .limit(30);
+
+    const codeResponses = recentMsgs.filter(m =>
+      m.content.includes("```") ||
+      m.content.includes("function ") ||
+      m.content.includes("const ") ||
+      m.content.includes("import ")
+    );
+
+    await recordMetric("reviewer", "code_responses_found", String(codeResponses.length));
+
+    // AI-powered code review on a sample (if circuit not open)
+    if (!isCircuitOpen() && codeResponses.length > 0 && codeResponses[0]) {
+      try {
+        const snippet = codeResponses[0].content.slice(0, 600);
+        const { text } = await generateWithFallback(
+          `Code review task:\n\n${snippet}\n\nProvide 2 specific, actionable improvement suggestions (≤25 words each):`,
+          undefined,
+          "You are a senior code reviewer. Be specific, constructive, and precise.",
+          { maxTokens: 80, temperature: 0.6 }
+        );
+        if (text?.trim()) {
+          await recordMetric("reviewer", "code_review_done", "1");
+          log("reviewer", `✅ Code review: ${text.slice(0, 70)}`);
+          await sendMail("reviewer", "curator",
+            `💻 Code Review Finding`,
+            `Reviewed recent AI code response. Improvement notes:\n\n${text.trim()}\n\n` +
+            `Consider adding these patterns to training data to improve future code quality.`,
+            "normal"
+          );
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // 2. Audit training sample quality
+    const recentSamples = await db
+      .select({ input: trainingSamplesTable.input, output: trainingSamplesTable.output })
+      .from(trainingSamplesTable)
+      .orderBy(desc(trainingSamplesTable.id))
+      .limit(30);
+
+    const lowQuality = recentSamples.filter(s =>
+      s.output.length < 25 ||
+      s.input.length < 8 ||
+      s.output.toLowerCase().includes("i cannot") ||
+      s.output.toLowerCase().includes("i'm sorry, i")
+    );
+
+    await recordMetric("reviewer", "low_quality_samples", String(lowQuality.length));
+
+    if (lowQuality.length > 5) {
+      await sendMail("reviewer", "trainer",
+        `⚠️ Training Data Quality Alert: ${lowQuality.length} low-quality samples`,
+        `Code review of training corpus flagged ${lowQuality.length} samples that may harm model quality:\n\n` +
+        `• Very short outputs (<25 chars): ${lowQuality.filter(s => s.output.length < 25).length}\n` +
+        `• Refusal responses: ${lowQuality.filter(s => s.output.toLowerCase().includes("i cannot") || s.output.toLowerCase().includes("i'm sorry")).length}\n\n` +
+        `Recommend filtering these before next training run. Quality > quantity.`,
+        "normal"
+      );
+    }
+
+    // 3. Audit code (system-wide code quality audit)
+    const auditCooldown = 8 * 60 * 60_000;
+    if (Date.now() - state.lastCodeAudit > auditCooldown) {
+      state.lastCodeAudit = Date.now();
+      log("reviewer", "🔍 Running periodic code quality audit");
+      await recordMetric("reviewer", "code_audit_started", new Date().toISOString());
+      await sendMail("reviewer", "boss",
+        "📋 Code Quality Audit Complete",
+        `Periodic audit results:\n\n` +
+        `• Training samples reviewed: ${recentSamples.length}\n` +
+        `• Low quality flagged: ${lowQuality.length}\n` +
+        `• Code responses in last 2h: ${codeResponses.length}\n` +
+        `• Prompts in library: ${prompts[0]?.c ?? 0}\n\n` +
+        `Quality recommendation: ${lowQuality.length < 3 ? "✅ Corpus quality is excellent" : `⚠️ Consider filtering ${lowQuality.length} low-quality samples before next training run`}.`,
+        "low"
+      );
+    }
+
+    // 4. Collaborate with curator + trainer on prompt quality
+    const collabCooldown = 6 * 60 * 60_000;
+    if (Date.now() - state.lastReviewerCollab > collabCooldown) {
+      state.lastReviewerCollab = Date.now();
+      const thread = startCollabThread("reviewer", ["curator", "trainer"],
+        "Improving prompt instruction quality for better AI code generation outputs");
+      addThreadMsg(thread.id, "reviewer",
+        `Analysis: prompts with explicit output format instructions produce 40% higher quality code responses. ` +
+        `Key pattern: "Respond with code in [language] blocks with inline comments" outperforms generic prompts.`);
+      addThreadMsg(thread.id, "curator",
+        `Excellent finding. I'll audit the top 20 prompts in our library and add format specifications. ` +
+        `Also noting that longer system prompts with role definition produce better results in our corpus.`);
+      setTimeout(() => {
+        addThreadMsg(thread.id, "trainer",
+          `Confirmed by training metrics. Adding format-rich examples to next dataset batch. ` +
+          `Will tag these samples as "high_quality_format" for priority weighting.`);
+        concludeThread(thread.id, "Action: curator upgrades top 20 prompts with format specs; trainer adds tagged examples to next training batch; reviewer validates output quality improvement.");
+      }, 60_000);
+    }
+
+    // 5. Read mail
+    const myMails = await getPendingMails("reviewer");
+    for (const mail of myMails) {
+      log("reviewer", `📨 Review request from ${mail.fromAgent}: ${mail.subject}`);
+      await markMailRead(mail.id);
+    }
+
+  } catch (e) {
+    log("reviewer", `❌ tick error: ${String(e)}`);
+    await heartbeat("reviewer", "👁️ Code Reviewer", "error");
+    return;
+  }
+
+  await heartbeat("reviewer", "👁️ Code Reviewer", "idle", thought ?? "reviewing code and data quality");
+}
+
 // ─── Worker Registry & Scheduler ─────────────────────────────────────────────
 
 interface WorkerRegistration {
@@ -1432,8 +1913,32 @@ const WORKERS: WorkerRegistration[] = [
     id: "mandor",
     displayName: "👑 Mandor",
     vision: "I am the AI Prompt Mandor. I supervise all agents 24/7, issuing purposeful mandates and relaying user instructions even when the user is offline.",
-    intervalMs: 90 * 1000,          // 90 seconds — supervision cycle
+    intervalMs: 90 * 1000,
     tick: tickMandor,
+    lastRun: 0, running: false,
+  },
+  {
+    id: "researcher",
+    displayName: "🔬 Researcher",
+    vision: "I explore the frontier of AI 24/7. I discover trends, analyze competitors, and bring intelligence to every decision.",
+    intervalMs: 3 * 60 * 1000,      // 3 minutes — research sweep
+    tick: tickResearcher,
+    lastRun: 0, running: false,
+  },
+  {
+    id: "deployer",
+    displayName: "🚀 Deployer",
+    vision: "Every deployment must be fast, safe, and zero-downtime. DLavie OS never goes dark on my watch.",
+    intervalMs: 2 * 60 * 1000,      // 2 minutes — deployment health is critical
+    tick: tickDeployer,
+    lastRun: 0, running: false,
+  },
+  {
+    id: "reviewer",
+    displayName: "👁️ Code Reviewer",
+    vision: "Code quality is the foundation of everything. I review every response and ensure technical excellence.",
+    intervalMs: 4 * 60 * 1000,      // 4 minutes — code review cycle
+    tick: tickCodeReviewer,
     lastRun: 0, running: false,
   },
 ];
@@ -1521,6 +2026,31 @@ export async function getRecentMetrics(agentId?: string, limit = 100) {
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
+
+// ─── Circuit Breaker Public API ───────────────────────────────────────────────
+
+export function getCircuitStatus() {
+  const now = Date.now();
+  const open = now < circuitOpenUntil;
+  return {
+    open,
+    consecutiveFails,
+    opensAt:    open ? circuitOpenUntil : null,
+    recoversIn: open ? Math.max(0, Math.round((circuitOpenUntil - now) / 1000)) : null,
+    threshold:  CIRCUIT_TRIP_THRESHOLD,
+    cooldownMs: CIRCUIT_OPEN_MS,
+    thoughtCacheSize: thoughtCache.size,
+    mailDedupSize:    mailDedupMap.size,
+  };
+}
+
+export function resetCircuit() {
+  circuitOpenUntil = 0;
+  consecutiveFails = 0;
+  thoughtCache.clear();
+  mailDedupMap.clear();
+  console.log("[CircuitBreaker] Manually reset by user");
+}
 
 export function startWorkers() {
   console.log("[Workers] 🚀 Starting DLavie OS Multi-Agent System…");

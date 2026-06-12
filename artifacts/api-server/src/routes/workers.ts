@@ -20,6 +20,9 @@ import {
   getBossInbox,
   getRecentMetrics,
   workerSSEClients,
+  getCircuitStatus,
+  resetCircuit,
+  getActiveThreads,
 } from "../agent-workers.js";
 import { db } from "@workspace/db";
 import { agentMailTable } from "@workspace/db";
@@ -106,6 +109,19 @@ router.get("/workers/metrics", async (req: Request, res: Response) => {
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
+});
+
+router.get("/workers/circuit", (_req: Request, res: Response) => {
+  res.json(getCircuitStatus());
+});
+
+router.post("/workers/circuit/reset", (_req: Request, res: Response) => {
+  resetCircuit();
+  res.json({ ok: true, circuit: getCircuitStatus() });
+});
+
+router.get("/workers/threads", (_req: Request, res: Response) => {
+  res.json({ threads: getActiveThreads() });
 });
 
 router.post("/workers/:id/nudge", async (req: Request, res: Response) => {
