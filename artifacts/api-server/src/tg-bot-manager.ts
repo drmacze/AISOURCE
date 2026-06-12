@@ -185,9 +185,33 @@ class TgBotManager {
   async connect(): Promise<{ username: string; firstName: string }> {
     if (!this.config.token) throw new Error("Token Telegram belum diisi di Konfigurasi");
 
+    // Stop any existing poll loop first
+    this.polling = false;
+    if (this.abortCtrl) { this.abortCtrl.abort(); this.abortCtrl = null; }
+
+    // 1. deleteWebhook — REQUIRED before long-polling.
+    //    Also drops any conflicting session left by a previous server instance (fixes 409).
+    console.log("[TgBot] Clearing webhook / conflicting sessions…");
+    await tgApi(this.config.token, "deleteWebhook", { drop_pending_updates: false })
+      .catch((e) => console.warn("[TgBot] deleteWebhook warning:", String(e)));
+
+    // 2. Verify token and get bot info
     const me = await tgApi(this.config.token, "getMe") as { username: string; first_name: string };
-    this.status = { connected: true, botUsername: me.username, botName: me.first_name, messageCount: 0 };
-    this.startTime = Date.now();
+
+    // 3. Advance the offset to skip stale updates accumulated while the bot was offline.
+    //    getUpdates with offset=-1 returns the latest update without blocking.
+    try {
+      const peek = await tgApi(this.config.token, "getUpdates", {
+        offset: -1, limit: 1, timeout: 0, allowed_updates: ["message"],
+      }) as TgUpdate[];
+      if (peek.length > 0) {
+        this.offset = peek[peek.length - 1].update_id + 1;
+        console.log(`[TgBot] Fast-forwarded offset to ${this.offset} (skipping stale updates)`);
+      }
+    } catch { /* non-fatal */ }
+
+    this.status = { connected: true, botUsername: me.username, botName: me.first_name, messageCount: this.status.messageCount };
+    this.startTime = this.startTime ?? Date.now();
     console.log(`[TgBot] ✅ Connected — @${me.username}`);
     broadcast("tg_status", this.getStatus());
 
@@ -214,39 +238,44 @@ class TgBotManager {
   }
 
   private async pollLoop() {
+    console.log("[TgBot] Poll loop started (offset=" + this.offset + ")");
     while (this.polling) {
       try {
         this.abortCtrl = new AbortController();
-        // Use POST getUpdates so allowed_updates is a proper JSON array body
         const res = await fetch(
           `https://api.telegram.org/bot${this.config.token}/getUpdates`,
           {
-            method: "POST",
+            method:  "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ offset: this.offset, timeout: 25, allowed_updates: ["message"] }),
-            signal: AbortSignal.any([this.abortCtrl.signal, AbortSignal.timeout(35_000)]),
+            body:    JSON.stringify({ offset: this.offset, timeout: 25, allowed_updates: ["message"] }),
+            signal:  AbortSignal.any([this.abortCtrl.signal, AbortSignal.timeout(35_000)]),
           }
         );
         if (!res.ok) {
+          const body = await res.text().catch(() => "");
           if (res.status === 409) {
-            // Another bot instance is polling — wait longer for it to time out
-            console.warn("[TgBot] 409 Conflict — another poller active, waiting 35s for it to expire…");
-            await sleep(35_000);
+            // 409 should never appear after deleteWebhook, but handle gracefully just in case.
+            // Telegram long-poll connections live at most 25 s, so 30 s is enough.
+            console.warn("[TgBot] 409 Conflict — re-calling deleteWebhook to evict stale session…");
+            await tgApi(this.config.token, "deleteWebhook", { drop_pending_updates: false })
+              .catch(() => {});
+            await sleep(5_000);
           } else {
-            console.warn(`[TgBot] getUpdates HTTP error: ${res.status}`);
-            await sleep(5000);
+            console.warn(`[TgBot] getUpdates HTTP ${res.status}: ${body.slice(0, 200)}`);
+            await sleep(5_000);
           }
           continue;
         }
         const data = await res.json() as { ok: boolean; result: TgUpdate[]; description?: string };
         if (!data.ok) {
           console.warn(`[TgBot] getUpdates not ok: ${data.description ?? "unknown"}`);
-          await sleep(5000); continue;
+          await sleep(5_000); continue;
         }
 
         for (const upd of data.result) {
           this.offset = upd.update_id + 1;
           if (upd.message) {
+            console.log(`[TgBot] 📨 Message from ${upd.message.from?.first_name ?? "?"} (${upd.message.chat.id}): ${(upd.message.text ?? "").slice(0, 80)}`);
             await this.handleMessage(upd.message).catch((e) => {
               console.error(`[TgBot] handleMessage error for update ${upd.update_id}:`, String(e));
             });
@@ -255,7 +284,7 @@ class TgBotManager {
       } catch (e) {
         if (!this.polling) break;
         console.warn("[TgBot] pollLoop error:", String(e));
-        await sleep(3000);
+        await sleep(3_000);
       }
     }
     console.log("[TgBot] Polling loop ended");
