@@ -50,10 +50,54 @@ export function hfHeaders(): Record<string, string> {
   return h;
 }
 
-/** Check if HuggingFace token is configured */
+// Token validity cache — set to true when we get a 401 (invalid/expired token)
+let hfTokenInvalid = false;
+let hfTokenInvalidUntil = 0;
+
+/** Check if HuggingFace token is configured AND not known to be invalid */
 export function isHFConfigured(): boolean {
   const token = getHFToken();
-  return !!token && token.startsWith("hf_");
+  if (!token || !token.startsWith("hf_")) return false;
+  if (hfTokenInvalid && Date.now() < hfTokenInvalidUntil) return false;
+  return true;
+}
+
+/** Mark HF token as invalid (e.g. after a 401 response) for the given duration */
+export function markHFTokenInvalid(durationMs = 30 * 60 * 1000): void {
+  hfTokenInvalid = true;
+  hfTokenInvalidUntil = Date.now() + durationMs;
+  console.warn(`[HF] Token marked invalid for ${durationMs / 60000} min — update HF_TOKEN to re-enable`);
+}
+
+/**
+ * Probe HuggingFace to verify the token is valid.
+ * Call once at startup to avoid wasting time on every inference call.
+ * Returns true if the token is valid, false if not.
+ */
+export async function probeHFToken(): Promise<boolean> {
+  if (!getHFToken()) return false;
+  try {
+    // Use a minimal chat completion call to test INFERENCE access (not just hub access).
+    // router.huggingface.co requires a Pro subscription for inference.
+    const res = await fetch(`${HF_ROUTER_BASE}/v1/chat/completions`, {
+      method: "POST",
+      headers: hfHeaders(),
+      body: JSON.stringify({
+        model: "Qwen/Qwen2.5-0.5B-Instruct",
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 1,
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (res.status === 401 || res.status === 403) {
+      markHFTokenInvalid();
+      return false;
+    }
+    return res.ok;
+  } catch {
+    // Network error — don't mark invalid, could be transient
+    return false;
+  }
 }
 
 /**
@@ -353,6 +397,12 @@ export async function chatCompletionHFWithFallback(
       }
     } catch (e) {
       const errMsg = String(e).slice(0, 200);
+      // 401 = token invalid — mark immediately and abort all remaining attempts
+      if (errMsg.includes("401") || errMsg.includes("Invalid username or password")) {
+        markHFTokenInvalid();
+        errors.push(`chat/${model}: 401 invalid token`);
+        throw new Error(`HF token invalid (401) — skipping all HF models: ${errMsg}`);
+      }
       console.warn(`[HF] Chat completions failed (${model}): ${errMsg}`);
       errors.push(`chat/${model}: ${errMsg}`);
     }

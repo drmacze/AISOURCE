@@ -254,12 +254,20 @@ class TgBotManager {
         if (!res.ok) {
           const body = await res.text().catch(() => "");
           if (res.status === 409) {
-            // 409 should never appear after deleteWebhook, but handle gracefully just in case.
-            // Telegram long-poll connections live at most 25 s, so 30 s is enough.
-            console.warn("[TgBot] 409 Conflict — re-calling deleteWebhook to evict stale session…");
+            // 409 = another getUpdates session is still alive on Telegram's side.
+            // Telegram long-poll connections live at most 25 s — wait 32 s for it to die,
+            // then delete the webhook/session again before retrying.
+            console.warn("[TgBot] 409 Conflict — waiting 32 s for stale session to expire…");
             await tgApi(this.config.token, "deleteWebhook", { drop_pending_updates: false })
               .catch(() => {});
-            await sleep(5_000);
+            await sleep(32_000);
+            // After the stale connection is gone, re-fetch current offset to avoid replay
+            try {
+              const peek = await tgApi(this.config.token, "getUpdates", {
+                offset: -1, limit: 1, timeout: 0, allowed_updates: ["message"],
+              }) as TgUpdate[];
+              if (peek.length > 0) this.offset = peek[peek.length - 1].update_id + 1;
+            } catch { /* non-fatal */ }
           } else {
             console.warn(`[TgBot] getUpdates HTTP ${res.status}: ${body.slice(0, 200)}`);
             await sleep(5_000);

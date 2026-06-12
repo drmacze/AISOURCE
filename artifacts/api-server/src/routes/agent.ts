@@ -47,51 +47,150 @@ import {
 import {
   generateGroqResponse,
   isGroqConfigured,
+  GROQ_MODELS,
 } from "../groq";
+import {
+  generateOpenRouterResponse,
+  isOpenRouterConfigured,
+  OPENROUTER_FREE_MODELS,
+  type OpenRouterMessage,
+} from "../openrouter";
 import crypto from "crypto";
 
 const router: IRouter = Router();
 const WORKSPACE = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
+
+// ─── HF availability cache ─────────────────────────────────────────────────
+// If HF returns 401 (invalid token) or persistent errors, skip it for 30 min
+// to avoid wasting 20+ seconds on every call before falling back to Groq.
+let hfUnavailableUntil = 0;
+function isHFAvailable(): boolean {
+  if (!isHFConfigured()) return false;
+  if (Date.now() < hfUnavailableUntil) return false;
+  return true;
+}
+function markHFUnavailable(error: string, durationMs = 30 * 60 * 1000) {
+  hfUnavailableUntil = Date.now() + durationMs;
+  console.warn(`[Agent] HF marked unavailable for ${durationMs / 60000} min — reason: ${error.slice(0, 100)}`);
+}
 
 // ─── Primary LLM ─────────────────────────────────────────────────────────────
 async function agentLLMCall(
   messages: ChatMessage[],
   opts: { maxTokens?: number; temperature?: number } = {}
 ): Promise<{ text: string; model: string }> {
-  // 1. Try HuggingFace (Qwen2.5-Coder-32B)
-  if (isHFConfigured()) {
+  // 1. Try HuggingFace (Qwen2.5-Coder-32B) — skip if token is known bad
+  if (isHFAvailable()) {
     try {
       return await chatCompletionHFWithFallback(messages, {
         maxTokens: opts.maxTokens ?? 3000,
         temperature: opts.temperature ?? 0.15,
       });
     } catch (e) {
-      console.warn("[Agent] HF failed, trying Groq:", String(e).slice(0, 200));
+      const errStr = String(e);
+      // 401 = invalid token — no point retrying until token is updated
+      if (errStr.includes("401") || errStr.includes("Invalid username or password")) {
+        markHFUnavailable(errStr);
+      }
+      console.warn("[Agent] HF failed, trying Groq:", errStr.slice(0, 200));
     }
   }
-  // 2. Try Groq (fast cloud LLM, free tier)
+  // 2. Try Groq — rotate through ALL available models to avoid 429 rate limits
   if (isGroqConfigured()) {
-    for (const model of ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
+    const groqOrder = [
+      "llama-3.3-70b-versatile",
+      "qwen/qwen3-32b",
+      "meta-llama/llama-4-scout-17b-16e-instruct",
+      "groq/compound-mini",
+      "llama-3.1-8b-instant",
+      "openai/gpt-oss-20b",
+      "groq/compound",
+      ...GROQ_MODELS.map((m) => m.id).filter((id) => ![
+        "llama-3.3-70b-versatile", "qwen/qwen3-32b",
+        "meta-llama/llama-4-scout-17b-16e-instruct", "groq/compound-mini",
+        "llama-3.1-8b-instant", "openai/gpt-oss-20b", "groq/compound",
+      ].includes(id)),
+    ];
+    for (const model of groqOrder) {
       try {
         const text = await generateGroqResponse(messages as Parameters<typeof generateGroqResponse>[0], model, {
           maxTokens: opts.maxTokens ?? 3000,
           temperature: opts.temperature ?? 0.15,
         });
-        return { text, model: `groq/${model}` };
+        if (text) return { text, model: `groq/${model}` };
       } catch (e) {
-        console.warn(`[Agent] Groq ${model} failed:`, String(e).slice(0, 100));
+        const errStr = String(e);
+        if (errStr.includes("429")) {
+          // Brief pause before trying next Groq model to spread rate limit pressure
+          await new Promise((r) => setTimeout(r, 1500));
+          console.warn(`[Agent] Groq ${model} rate limited, trying next`);
+        } else {
+          console.warn(`[Agent] Groq ${model} failed:`, errStr.slice(0, 100));
+        }
+      }
+    }
+    // All Groq models 429'd — wait 8s then try OpenRouter
+    await new Promise((r) => setTimeout(r, 8000));
+  }
+  // 3. Try OpenRouter (50+ free models) — good fallback when Groq is rate limited
+  if (isOpenRouterConfigured()) {
+    const orModels = [
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "qwen/qwen3-coder:free",
+      "openai/gpt-oss-120b:free",
+      "nousresearch/hermes-3-llama-3.1-405b:free",
+      "google/gemma-4-31b-it:free",
+      "meta-llama/llama-3.2-3b-instruct:free",
+      "openrouter/free",
+    ];
+    for (const model of orModels) {
+      try {
+        const text = await generateOpenRouterResponse(messages as OpenRouterMessage[], model, {
+          maxTokens: opts.maxTokens ?? 3000,
+          temperature: opts.temperature ?? 0.15,
+        });
+        if (text) return { text, model: `openrouter/${model}` };
+      } catch (e) {
+        console.warn(`[Agent] OpenRouter ${model} failed:`, String(e).slice(0, 100));
       }
     }
   }
-  // 3. Try local Ollama
+  // 4. Try local Ollama
   const prompt = messages
     .map((m) => `${m.role === "system" ? "SYSTEM" : m.role === "user" ? "USER" : "ASSISTANT"}: ${m.content}`)
     .join("\n\n");
-  for (const m of ["qwen2.5:3b", "gemma3:4b", "tinyllama"]) {
-    try { return { text: await generateOllamaResponse(prompt, m), model: `${m} (local)` }; }
-    catch { continue; }
+  for (const m of ["tinyllama", "qwen2.5:3b", "gemma3:4b"]) {
+    try {
+      const text = await generateOllamaResponse(prompt, m);
+      if (text) return { text, model: `${m} (local)` };
+    } catch { continue; }
   }
-  throw new Error("No LLM available — HF, Groq, and local Ollama all failed");
+  // 5. All providers failed — wait 45s and retry ONCE (handles burst rate limits)
+  console.warn("[Agent] All LLM providers failed — waiting 45s before retry…");
+  await new Promise((r) => setTimeout(r, 45000));
+  // Retry Groq with a single fast model
+  if (isGroqConfigured()) {
+    for (const model of ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]) {
+      try {
+        const text = await generateGroqResponse(messages as Parameters<typeof generateGroqResponse>[0], model, {
+          maxTokens: opts.maxTokens ?? 2000,
+          temperature: opts.temperature ?? 0.15,
+        });
+        if (text) return { text, model: `groq/${model} (retry)` };
+      } catch { continue; }
+    }
+  }
+  // Retry OpenRouter with the smallest/fastest free model
+  if (isOpenRouterConfigured()) {
+    try {
+      const text = await generateOpenRouterResponse(messages as OpenRouterMessage[], "meta-llama/llama-3.2-3b-instruct:free", {
+        maxTokens: opts.maxTokens ?? 2000,
+        temperature: opts.temperature ?? 0.15,
+      });
+      if (text) return { text, model: "openrouter/llama-3.2-3b (retry)" };
+    } catch { /* fall through */ }
+  }
+  throw new Error("No LLM available — HF, Groq, OpenRouter, and local Ollama all failed");
 }
 
 // ─── Python execution ─────────────────────────────────────────────────────────
@@ -1099,7 +1198,7 @@ async function executeSession(session: AgentSession): Promise<void> {
 // ─── Autonomous CO-Developer ──────────────────────────────────────────────────
 let autonomousInterval: ReturnType<typeof setInterval> | null = null;
 export let autonomousEnabled = false;
-const AUTONOMOUS_INTERVAL_MS = 10 * 60 * 1000;
+const AUTONOMOUS_INTERVAL_MS = Number(process.env.AGENT_INTERVAL_MS) || 3 * 60 * 1000;
 
 async function generateAutonomousTask(): Promise<string | null> {
   try {
@@ -1144,17 +1243,22 @@ async function generateAutonomousTask(): Promise<string | null> {
 export function startAutonomousMode(): void {
   if (autonomousInterval) return;
   autonomousEnabled = true;
-  console.log(`[Agent] Autonomous CO-Developer ACTIVE — ${HF_AGENT_MODELS[0]} — every 10 min`);
+  const intervalMinutes = (AUTONOMOUS_INTERVAL_MS / 60000).toFixed(1);
+  console.log(`[Agent] Autonomous CO-Developer ACTIVE — every ${intervalMinutes} min`);
   const run = async () => {
     if (!autonomousEnabled) return;
+    // Don't start a new session if one is already running to avoid overload
+    const running = [...sessions.values()].filter((s) => s.status === "running" && s.autonomous).length;
+    if (running >= 2) { console.log(`[Agent] Skipping cycle — ${running} autonomous sessions already running`); return; }
     console.log("[Agent] Autonomous cycle...");
     const task = await generateAutonomousTask();
-    if (!task) { console.log("[Agent] No task this cycle"); return; }
+    if (!task) { console.log("[Agent] No task generated this cycle"); return; }
     console.log("[Agent] Autonomous task:", task.slice(0, 120));
     const s = newSession(task, true);
     executeSession(s).catch((e) => { console.error("[Agent] Autonomous error:", e); s.status = "error"; });
   };
-  setTimeout(run, 60_000);
+  // Start after 5 seconds to let server fully initialise
+  setTimeout(run, 5_000);
   autonomousInterval = setInterval(run, AUTONOMOUS_INTERVAL_MS);
 }
 
@@ -1220,7 +1324,7 @@ router.get("/agent/sessions/:id/stream", (req, res) => {
 });
 
 router.get("/agent/autonomous", (_req, res) => {
-  res.json({ enabled: autonomousEnabled, intervalMinutes: 10, primaryModel: HF_AGENT_MODELS[0], fallbackModels: HF_AGENT_MODELS.slice(1), hfConfigured: isHFConfigured(), totalTools: TOOLS.length, note: "LLM-driven task selection every cycle" });
+  res.json({ enabled: autonomousEnabled, intervalMinutes: AUTONOMOUS_INTERVAL_MS / 60000, primaryModel: HF_AGENT_MODELS[0], fallbackModels: HF_AGENT_MODELS.slice(1), hfConfigured: isHFConfigured(), totalTools: TOOLS.length, note: "LLM-driven task selection every cycle" });
 });
 
 router.post("/agent/autonomous", (req, res) => {
@@ -1257,7 +1361,7 @@ router.get("/agent/status", async (_req, res) => {
   let installedModels: unknown[] = [];
   try { installedModels = await listOllamaModels(); } catch {}
   const activeCount = [...sessions.values()].filter((s) => s.status === "running").length;
-  res.json({ hf: { configured: isHFConfigured(), primaryModel: HF_AGENT_MODELS[0], endpoint: "router.huggingface.co" }, autonomous: { enabled: autonomousEnabled, intervalMinutes: 10, activeSessions: activeCount }, memory: { totalMemories: Number(memCnt[0]?.c || 0) }, db: { datasets, models, recentJobs: jobs }, ollama: { installed: installedModels }, tools: { total: TOOLS.length } });
+  res.json({ hf: { configured: isHFConfigured(), primaryModel: HF_AGENT_MODELS[0], endpoint: "router.huggingface.co" }, autonomous: { enabled: autonomousEnabled, intervalMinutes: AUTONOMOUS_INTERVAL_MS / 60000, activeSessions: activeCount }, memory: { totalMemories: Number(memCnt[0]?.c || 0) }, db: { datasets, models, recentJobs: jobs }, ollama: { installed: installedModels }, tools: { total: TOOLS.length } });
 });
 
 // ─── Agent Chat — conversational mode with persistent multilingual memory ─────

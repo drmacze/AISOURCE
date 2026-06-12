@@ -6,7 +6,8 @@ import { logger } from "./lib/logger";
 import { startOllamaServer } from "./ollama";
 import { startAutoTraining, startMicroTraining } from "./autotraining";
 import { startGateway as startOpenClaw } from "./openclaw-manager";
-import { isHFConfigured, HF_STATUS } from "./huggingface";
+import { isHFConfigured, HF_STATUS, probeHFToken } from "./huggingface";
+import { startAutonomousMode } from "./routes/agent";
 
 // ─── Load saved secrets from config file on startup ──────────────────────────
 // (The settings route module applies them too, but we need them before routes load)
@@ -69,9 +70,19 @@ startOllamaServer().catch((err) => {
   logger.warn({ err }, "Ollama server failed to start — HuggingFace fallback active");
 });
 
-// ─── HuggingFace status ───────────────────────────────────────────────────────
+// ─── HuggingFace status + token probe ─────────────────────────────────────────
 if (isHFConfigured()) {
-  logger.info({ token: HF_STATUS.tokenPrefix() }, "HuggingFace connected — offline fallback enabled");
+  logger.info({ token: HF_STATUS.tokenPrefix() }, "HuggingFace connected — probing token validity…");
+  // Probe in background — no need to await startup on this
+  probeHFToken().then((ok) => {
+    if (ok) {
+      logger.info("HuggingFace token valid ✅ — using HF GPU inference");
+    } else {
+      logger.warn("HuggingFace token invalid/expired ⚠️ — skipping HF, using Groq+OpenRouter");
+    }
+  }).catch(() => {
+    logger.warn("HuggingFace probe timed out — will retry on first use");
+  });
 } else {
   logger.warn("HF_TOKEN not set — HuggingFace offline fallback disabled");
 }
@@ -131,6 +142,16 @@ app.listen(port, "0.0.0.0", (err?: Error) => {
     },
     "DLavie OS API Server ready"
   );
+
+  // ─── Autonomous Agent (auto-start on every boot) ──────────────────────────
+  // Starts 5 s after server is ready so DB connections are fully settled.
+  // Disable by setting AGENT_AUTONOMOUS=false in env.
+  if (process.env.AGENT_AUTONOMOUS !== "false") {
+    startAutonomousMode();
+    logger.info({ intervalMs: Number(process.env.AGENT_INTERVAL_MS) || 3 * 60 * 1000 }, "Autonomous agent started");
+  } else {
+    logger.info("Autonomous agent DISABLED (AGENT_AUTONOMOUS=false)");
+  }
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────

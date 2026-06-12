@@ -1,9 +1,11 @@
 - [DLavie OS project](aisource-project.md) — AI Command Center: Qwen2.5-Coder-32B on HF GPU, 34 real tools, persistent memory, autonomous mode
 - [HF_TOKEN priority fix](aisource-project.md#hf-token) — Config file (`.dlavie-config.json`) ALWAYS overrides Replit workflow env; updated index.ts to remove `!process.env.HF_TOKEN` guard
+- [HF inference unavailable](hf-inference.md) — HF token valid for hub but NOT for router.huggingface.co inference (needs Pro). Probe via chat/completions, NOT /v1/models (that endpoint is public). Mark invalid for 30 min on 401.
+- [Agent LLM resilience](agent-llm.md) — Groq 429: 1.5s pause between models, 5s wait before OpenRouter. Autonomous cycle runs every 3 min. Sessions error when ALL providers 429 simultaneously — by design.
 - [Agent memory system](aisource-project.md#agent-memory) — `agent_memories` DB table; `recall_memories` on session start; auto-store at max-steps; finish tool stores insight
 - [Agent system prompt](aisource-project.md#agent-prompt) — Rule 3 must say "call finish when done, don't waste steps" — NOT "don't stop early" (caused 30-step exhaustion)
 - [Database schema push](aisource-project.md#db-push) — `pnpm --filter @workspace/db run push` needed after fresh import or schema changes
-- [Workflow config](aisource-project.md#workflows) — Use `artifacts/api-server: API Server` workflow only; `Start API Server` is duplicate/conflicting
+- [Workflow config](aisource-project.md#workflows) — Only restart `Start API Server`; `artifacts/api-server: API Server` will conflict (EADDRINUSE). Both are configured but only one can run at a time.
 - [Artifact router port fix](artifact-router.md) — REPLIT_ARTIFACT_ROUTER needs port 8080 exclusively; API must run on 3000, web on 5000; configure in .replit-artifact/artifact.toml
 - [API Key Auth Bootstrap](api-key-auth.md) — DB-backed dlv_ keys; bootstrap mode lets first admin key be created without auth when DB empty + no DLAVIE_API_KEY
 - [Provider Fallback Chain](provider-chain.md) — `src/lib/provider-chain.ts`; order: Groq→OpenRouter→HF→Ollama; generateUnified() returns `{text, provider, modelUsed}` not plain string

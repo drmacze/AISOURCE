@@ -607,7 +607,7 @@ export default function AgentPage() {
                 ? "bg-violet-500/10 text-violet-400 border-violet-500/30 hover:bg-violet-500/20"
                 : "bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-400"
             )}
-            title={autonomousEnabled ? "Autonomous mode ON — LLM picks tasks every 10 min using system state + memories" : "Enable autonomous mode"}
+            title={autonomousEnabled ? "Autonomous mode ON — LLM picks tasks every 3 min using system state + memories" : "Enable autonomous mode"}
           >
             {autonomousEnabled
               ? <ToggleRight className="w-3.5 h-3.5" />
@@ -746,8 +746,8 @@ export default function AgentPage() {
                 <div className="mt-5 flex flex-col items-center gap-1.5 text-xs text-slate-600">
                   <div className="flex items-center gap-2">
                     {autonomousEnabled
-                      ? <><span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" /><span className="text-violet-400">Autonomous mode active — LLM picks tasks every 10 min</span></>
-                      : <><ToggleLeft className="w-3.5 h-3.5" /><span>Enable Auto mode — LLM drives itself every 10 min</span></>
+                      ? <><span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" /><span className="text-violet-400">Autonomous mode active — LLM picks tasks every 3 min</span></>
+                      : <><ToggleLeft className="w-3.5 h-3.5" /><span>Enable Auto mode — LLM drives itself every 3 min</span></>
                     }
                   </div>
                 </div>
@@ -898,7 +898,7 @@ export default function AgentPage() {
                 className="mt-2 flex items-center gap-1.5 text-[10px] text-violet-400/70 bg-violet-500/5 border border-violet-500/10 rounded-lg px-2.5 py-1.5"
               >
                 <Brain className="w-3 h-3" />
-                Autonomous mode active — Qwen2.5-Coder-32B picks &amp; runs tasks every 10 min using persistent memory
+                Autonomous mode active — Qwen2.5-Coder-32B picks &amp; runs tasks every 3 min using persistent memory
               </motion.div>
             )}
           </div>
