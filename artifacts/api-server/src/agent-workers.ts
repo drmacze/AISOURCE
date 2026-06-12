@@ -41,6 +41,48 @@ const BASE_URL   = "http://127.0.0.1:3000";
 const OPENCLAW   = "http://127.0.0.1:18789";
 const WORKSPACE  = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
 
+// ─── Circuit Breaker ──────────────────────────────────────────────────────────
+// When all providers fail, we open the circuit for CIRCUIT_OPEN_MS to stop
+// hammering the APIs with agentThink() calls that will all fail anyway.
+
+const CIRCUIT_OPEN_MS = 5 * 60_000; // 5 minutes
+let circuitOpenUntil  = 0;
+let consecutiveFails  = 0;
+const CIRCUIT_TRIP_THRESHOLD = 3; // open after 3 consecutive all-fail cycles
+
+export function notifyProviderAllFailed() {
+  consecutiveFails++;
+  if (consecutiveFails >= CIRCUIT_TRIP_THRESHOLD) {
+    circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
+    console.warn(`[CircuitBreaker] All providers failed ${consecutiveFails}× — pausing agentThink() for 5 min`);
+    consecutiveFails = 0;
+  }
+}
+
+export function notifyProviderSuccess() {
+  consecutiveFails = 0;
+  circuitOpenUntil = 0;
+}
+
+function isCircuitOpen(): boolean {
+  return Date.now() < circuitOpenUntil;
+}
+
+// ─── Thought Cache ────────────────────────────────────────────────────────────
+// Each agent's "thought" is cached for THOUGHT_TTL_MS so we don't call the LLM
+// on every tick. Agents get a fresh thought at most once per 5 minutes.
+
+const THOUGHT_TTL_MS = 5 * 60_000; // 5 minutes
+const thoughtCache = new Map<string, { text: string; expiresAt: number }>();
+
+// ─── Mail Dedup ───────────────────────────────────────────────────────────────
+// Prevent flooding identical critical/high-priority mails to the same recipient.
+// If the same fromAgent→toAgent with the same subject prefix was sent recently,
+// it's silently dropped.
+
+const MAIL_DEDUP_MS = 30 * 60_000; // 30 minutes
+const mailDedupMap  = new Map<string, number>(); // key → lastSentAt timestamp
+
 // ─── Internal API caller ─────────────────────────────────────────────────────
 
 async function api<T = unknown>(
@@ -123,6 +165,17 @@ async function sendMail(
   priority: "low" | "normal" | "high" | "critical" = "normal",
   metadata?: Record<string, unknown>
 ) {
+  // Dedup: skip if the same critical/high alert was already sent within MAIL_DEDUP_MS
+  if (priority === "critical" || priority === "high") {
+    const subjectKey = subject.slice(0, 50); // use first 50 chars as fingerprint
+    const dedupKey   = `${fromAgent}|${toAgent}|${subjectKey}`;
+    const lastSent   = mailDedupMap.get(dedupKey) ?? 0;
+    if (Date.now() - lastSent < MAIL_DEDUP_MS) {
+      // silently drop duplicate alert
+      return;
+    }
+    mailDedupMap.set(dedupKey, Date.now());
+  }
   try {
     await db.insert(agentMailTable).values({ fromAgent, toAgent, subject, body, priority, metadata: metadata ?? null });
     log(fromAgent, `📨 mail → ${toAgent}: ${subject}`);
@@ -184,8 +237,12 @@ const state: WorkerState = {
 
 /**
  * Each agent calls this to get an AI-generated description of what they are doing.
- * Uses Groq llama-3.1-8b-instant (fastest) so it doesn't slow down the tick loop.
- * Falls back gracefully — never blocks the agent from running.
+ *
+ * Improvements vs original:
+ *  - Thought cache: reuses the last thought for up to THOUGHT_TTL_MS (5 min) per agent.
+ *    This means each agent calls the LLM at most once per 5 min, not once per tick.
+ *  - Circuit breaker: if all providers have been failing, skips the LLM call entirely
+ *    and returns the cached thought (or null). This stops rate-limit spirals.
  */
 async function agentThink(
   agentId: string,
@@ -193,6 +250,17 @@ async function agentThink(
   vision: string,
   contextLines: string[]
 ): Promise<string | null> {
+  // Return cached thought if still fresh
+  const cached = thoughtCache.get(agentId);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.text;
+  }
+
+  // Circuit open → skip LLM call to avoid hammering failing providers
+  if (isCircuitOpen()) {
+    return cached?.text ?? null;
+  }
+
   try {
     const context = contextLines.slice(0, 6).join("\n");
     const { text } = await generateWithFallback(
@@ -203,9 +271,18 @@ async function agentThink(
       { maxTokens: 50, temperature: 0.8 }
     );
     const clean = text.trim().replace(/^["']|["']$/g, "").split("\n")[0] ?? "";
-    return clean.slice(0, 100) || null;
+    const result = clean.slice(0, 100) || null;
+
+    // Cache the fresh thought and reset the circuit
+    if (result) {
+      thoughtCache.set(agentId, { text: result, expiresAt: Date.now() + THOUGHT_TTL_MS });
+      notifyProviderSuccess();
+    }
+    return result;
   } catch {
-    return null;
+    // Count this failure toward tripping the circuit breaker
+    notifyProviderAllFailed();
+    return cached?.text ?? null;
   }
 }
 
@@ -1115,7 +1192,7 @@ async function tickEngineer() {
       if (models.length === 0) {
         log("engineer", "📥 No models found — pulling tinyllama as baseline");
         try {
-          await api("/ollama-models/pull", "POST", { name: "tinyllama" });
+          await api("/ollama-models/pull", "POST", { model: "tinyllama" });
           await recordMetric("engineer", "model_auto_pulled", "tinyllama");
           await sendMail("engineer", "trainer", "📥 tinyllama pulled",
             "No models were found. Auto-pulled tinyllama as baseline. Consider pulling a larger model.", "normal");
@@ -1225,39 +1302,47 @@ async function tickMandor() {
     .sort(() => Math.random() - 0.5)
     .slice(0, 2);
 
-  for (const agent of candidates) {
-    const workerDef = WORKERS.find(w => w.id === agent.agentId);
-    if (!workerDef) continue;
-    try {
-      const userCtx = userInstructions[0]
-        ? `User's latest directive: "${userInstructions[0].body.slice(0, 80)}".\n`
-        : "";
-      const mandatePrompt =
-        `You are the AI Prompt Mandor of DLavie OS.\n` +
-        `Issue a specific mandate to the ${agent.agentId} agent.\n` +
-        `Agent vision: "${workerDef.vision.slice(0, 80)}"\n` +
-        `Current state: ${agent.status} — ${(agent.currentTask ?? "idle").slice(0, 40)}\n` +
-        userCtx +
-        `Write ONE specific actionable task (≤15 words). Start with an action verb. No preamble.`;
+  // Skip mandate generation entirely if circuit is open — no point burning quota
+  if (!isCircuitOpen()) {
+    for (const agent of candidates) {
+      const workerDef = WORKERS.find(w => w.id === agent.agentId);
+      if (!workerDef) continue;
+      try {
+        const userCtx = userInstructions[0]
+          ? `User's latest directive: "${userInstructions[0].body.slice(0, 80)}".\n`
+          : "";
+        const mandatePrompt =
+          `You are the AI Prompt Mandor of DLavie OS.\n` +
+          `Issue a specific mandate to the ${agent.agentId} agent.\n` +
+          `Agent vision: "${workerDef.vision.slice(0, 80)}"\n` +
+          `Current state: ${agent.status} — ${(agent.currentTask ?? "idle").slice(0, 40)}\n` +
+          userCtx +
+          `Write ONE specific actionable task (≤15 words). Start with an action verb. No preamble.`;
 
-      const { text } = await generateWithFallback(
-        [{ role: "user", content: mandatePrompt }],
-        { maxTokens: 40, temperature: 0.9 }
-      );
-      if (text?.trim()) {
-        const mandate = text.trim().replace(/^["']|["']$/g, "").split("\n")[0] ?? "";
-        if (mandate.length > 5) {
-          await sendMail("mandor", agent.agentId,
-            `📋 Mandate: ${mandate.slice(0, 70)}`,
-            `Mandate from Prompt Mandor:\n\n"${mandate}"\n\nExecute in your next operational cycle.`,
-            "high"
-          );
-          log("mandor", `Mandate → ${agent.agentId}: ${mandate.slice(0, 50)}`);
+        const { text } = await generateWithFallback(
+          mandatePrompt,
+          undefined,
+          "You are the AI Prompt Mandor of DLavie OS. Be concise and direct.",
+          { maxTokens: 40, temperature: 0.9 }
+        );
+        if (text?.trim()) {
+          const mandate = text.trim().replace(/^["']|["']$/g, "").split("\n")[0] ?? "";
+          if (mandate.length > 5) {
+            await sendMail("mandor", agent.agentId,
+              `📋 Mandate: ${mandate.slice(0, 70)}`,
+              `Mandate from Prompt Mandor:\n\n"${mandate}"\n\nExecute in your next operational cycle.`,
+              "high"
+            );
+            log("mandor", `Mandate → ${agent.agentId}: ${mandate.slice(0, 50)}`);
+          }
         }
+      } catch (e) {
+        notifyProviderAllFailed();
+        log("mandor", `Mandate failed for ${agent.agentId}: ${String(e).slice(0, 60)}`);
       }
-    } catch (e) {
-      log("mandor", `Mandate failed for ${agent.agentId}: ${String(e).slice(0, 60)}`);
     }
+  } else {
+    log("mandor", "⏸️ Circuit open — skipping mandate generation to rest providers");
   }
 
   await recordMetric("mandor", "mandate_cycle", String(candidates.length), "agents mandated");
