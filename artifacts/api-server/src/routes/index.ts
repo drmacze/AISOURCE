@@ -27,6 +27,7 @@ import onedriveRouter from "./onedrive";
 import spotifyRouter from "./spotify";
 import whatsappRouter from "./whatsapp";
 import waBotRouter from "./wa-bot";
+import brandKitRouter from "./brand-kit";
 
 const router: IRouter = Router();
 
@@ -102,5 +103,8 @@ router.use(spotifyRouter);
 // WhatsApp Cloud API webhook + bot management
 router.use(whatsappRouter);
 router.use(waBotRouter);
+
+// Brand Kit — AI-generated visual assets (FLUX)
+router.use(brandKitRouter);
 
 export default router;
