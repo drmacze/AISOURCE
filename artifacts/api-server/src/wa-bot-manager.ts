@@ -41,53 +41,82 @@ if (!existsSync(SESSION_DIR)) mkdirSync(SESSION_DIR, { recursive: true });
 
 const logger = pino({ level: "silent" });
 
-// ─── HuggingFace image generation ────────────────────────────────────────────
+// ─── Thumbnail image generation (Pollinations → HF router → SVG fallback) ────
 
-const HF_IMAGE_MODEL = "black-forest-labs/FLUX.1-schnell";
-const HF_API_BASE    = "https://api-inference.huggingface.co";
+const THUMB_PROMPT = [
+  "Professional AI software company logo, circular emblem design,",
+  "deep slate blue background, subtle hexagonal grid pattern,",
+  "bold clean typography 'DLavie OS' centered in white,",
+  "small tagline 'AI ENGINE' below in light gray,",
+  "electric green (#00ff88) thin accent ring border,",
+  "minimalist corporate tech aesthetic, flat vector style,",
+  "no gradients except background, elegant clean professional,",
+  "high quality 512x512",
+].join(" ");
 
+/** Generate thumbnail JPEG — tries Pollinations → HF router → SVG fallback */
 async function generateThumbnailImage(seed: number): Promise<Buffer> {
-  const token = process.env.HF_TOKEN || "";
-  if (!token.startsWith("hf_")) throw new Error("HF_TOKEN not configured");
-
-  // Unique elegant AI-tech prompt — no cyberpunk, no gaming
-  const prompt = [
-    "Professional AI software company logo, circular emblem design,",
-    "deep slate blue background, subtle hexagonal grid pattern,",
-    "bold clean typography 'DLavie OS' centered in white,",
-    "small tagline 'AI ENGINE' below in light gray,",
-    "electric green (#00ff88) thin accent ring border,",
-    "minimalist corporate tech aesthetic, flat vector style,",
-    "no gradients except background, elegant clean professional,",
-    `seed ${seed}, high quality 512x512`,
-  ].join(" ");
-
-  const res = await fetch(`${HF_API_BASE}/models/${HF_IMAGE_MODEL}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "X-Wait-For-Model": "true",
-    },
-    body: JSON.stringify({
-      inputs: prompt,
-      parameters: {
-        seed,
-        num_inference_steps: 4,
-        width: 512,
-        height: 512,
-      },
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
-
-  if (!res.ok) {
-    const msg = await res.text().catch(() => res.statusText);
-    throw new Error(`HF image API error ${res.status}: ${msg}`);
+  // ── 1. Pollinations.ai (free, no auth, works from Replit) ──────────────────
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(THUMB_PROMPT)}?width=512&height=512&seed=${seed}&nologo=true&model=flux`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(90_000) });
+      if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) {
+        return Buffer.from(await res.arrayBuffer());
+      }
+      const msg = await res.text().catch(() => res.statusText);
+      console.warn(`[WaBot] Pollinations attempt ${attempt}: ${res.status} ${msg.slice(0, 80)}`);
+      if (res.status === 402 && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 15_000));
+      } else break;
+    } catch (e) {
+      console.warn(`[WaBot] Pollinations error: ${String(e).slice(0, 80)}`);
+    }
   }
 
-  const buf = Buffer.from(await res.arrayBuffer());
-  return buf;
+  // ── 2. HuggingFace router (requires token with inference credits) ──────────
+  const token = process.env.HF_TOKEN || "";
+  if (token.startsWith("hf_")) {
+    try {
+      // router.huggingface.co works from Replit; api-inference.huggingface.co is blocked
+      const res = await fetch(
+        "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Wait-For-Model": "true" },
+          body: JSON.stringify({ inputs: THUMB_PROMPT, parameters: { seed, num_inference_steps: 4, width: 512, height: 512 } }),
+          signal: AbortSignal.timeout(90_000),
+        }
+      );
+      if (res.ok) return Buffer.from(await res.arrayBuffer());
+      const msg = await res.text().catch(() => res.statusText);
+      console.warn(`[WaBot] HF router error: ${res.status} ${msg.slice(0, 80)}`);
+    } catch (e) {
+      console.warn(`[WaBot] HF router error: ${String(e).slice(0, 80)}`);
+    }
+  }
+
+  // ── 3. Local SVG fallback (always works, no dependencies) ─────────────────
+  console.warn("[WaBot] Using local SVG fallback for thumbnail");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#22c55e" stroke-width="3" opacity="0.6"/>
+  <circle cx="256" cy="256" r="145" fill="#020617" opacity="0.8"/>
+  <polygon points="256,96 406,181 406,331 256,416 106,331 106,181" fill="none" stroke="#22c55e" stroke-width="1" opacity="0.2"/>
+  <text x="256" y="240" text-anchor="middle" dominant-baseline="middle"
+        font-family="sans-serif" font-weight="700" font-size="64" fill="#ffffff">DL</text>
+  <text x="256" y="295" text-anchor="middle" dominant-baseline="middle"
+        font-family="sans-serif" font-weight="600" font-size="18" fill="#22c55e" letter-spacing="6">OS</text>
+  <text x="256" y="340" text-anchor="middle" dominant-baseline="middle"
+        font-family="sans-serif" font-size="12" fill="#94a3b8" letter-spacing="3">AI ENGINE</text>
+</svg>`;
+  return Buffer.from(svg, "utf8");
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -170,7 +199,7 @@ function getBrowser(type: DeviceType): [string, string, string] {
     case "business": return Browsers.appropriate("Chrome");
     case "mac":      return Browsers.macOS("Desktop");
     case "windows":  return Browsers.windows();
-    default:         return ["DLavie OS", "Chrome", "131.0.0"];
+    default:         return Browsers.ubuntu("Chrome");
   }
 }
 
@@ -282,16 +311,21 @@ class WaBotManager {
   // ── Connect ───────────────────────────────────────────────────────────────
 
   async connect(phoneNumber: string): Promise<string> {
+    // Tear down any existing socket
     if (this.sock) {
       try { this.sock.end(new Error("reconnect")); } catch { /* ignore */ }
       this.sock = null;
     }
+    this.reconnecting = false;
 
     const cleaned = phoneNumber.replace(/[^0-9]/g, "");
     this.config.phoneNumber = cleaned;
     saveConfig(this.config);
 
     this.status = { connected: false, pairingStep: "waiting_code", messageCount: 0, phoneNumber: cleaned, hasThumb: existsSync(THUMB_PATH) };
+
+    // Always wipe stale session so WhatsApp doesn't see a half-registered device
+    this.clearSession();
 
     const { version }          = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -303,37 +337,65 @@ class WaBotManager {
         creds: state.creds,
         keys:  makeCacheableSignalKeyStore(state.keys, logger),
       },
-      browser:                       getBrowser(this.config.deviceType),
-      printQRInTerminal:             false,
-      syncFullHistory:               false,
+      browser:                        getBrowser(this.config.deviceType),
+      printQRInTerminal:              false,
+      syncFullHistory:                false,
       generateHighQualityLinkPreview: false,
-      getMessage:                    async () => undefined,
+      getMessage:                     async () => undefined,
     });
 
     this.sock = sock;
     sock.ev.on("creds.update", saveCreds);
 
-    // ── Pairing code ──────────────────────────────────────────────────────
+    // ── Pairing code — requested inside connection.update once WS is ready ──
 
     let pairingCode = "";
+
     if (!state.creds.registered) {
-      await new Promise((r) => setTimeout(r, 3000));
-      try {
-        pairingCode = await sock.requestPairingCode(cleaned);
-        if (pairingCode && !pairingCode.includes("-") && pairingCode.length === 8)
-          pairingCode = `${pairingCode.slice(0, 4)}-${pairingCode.slice(4)}`;
-        this.status.pairingCode = pairingCode;
-        this.status.pairingStep = "waiting_scan";
-        console.log(`[WaBot] Pairing code issued: ${pairingCode}`);
-      } catch (e) {
-        this.status = { connected: false, pairingStep: "error", error: String(e), messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
-        throw e;
-      }
+      // Wait for the socket to signal it's ready for pairing (or timeout after 30s)
+      pairingCode = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Timeout menunggu koneksi WhatsApp (30s)")), 30_000);
+
+        let pairingRequested = false;
+
+        const handler = async (update: { connection?: string; lastDisconnect?: unknown }) => {
+          if (pairingRequested) return;
+          try {
+            if (update.connection === "connecting") {
+              // WS handshake started — wait briefly for the channel to stabilise
+              pairingRequested = true;
+              clearTimeout(timer);
+              sock.ev.off("connection.update", handler as never);
+              await new Promise((r) => setTimeout(r, 1500));
+              try {
+                let code = await sock.requestPairingCode(cleaned);
+                if (code && !code.includes("-") && code.length === 8)
+                  code = `${code.slice(0, 4)}-${code.slice(4)}`;
+                console.log(`[WaBot] Pairing code issued: ${code}`);
+                this.status.pairingCode = code;
+                this.status.pairingStep = "waiting_scan";
+                resolve(code);
+              } catch (e) {
+                this.status = { connected: false, pairingStep: "error", error: String(e), messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
+                reject(e);
+              }
+            } else if (update.connection === "close") {
+              clearTimeout(timer);
+              sock.ev.off("connection.update", handler as never);
+              const err = new Error("Connection Closed — coba lagi");
+              this.status = { connected: false, pairingStep: "error", error: String(err), messageCount: 0, hasThumb: existsSync(THUMB_PATH) };
+              reject(err);
+            }
+          } catch (e) { reject(e as Error); }
+        };
+
+        sock.ev.on("connection.update", handler as never);
+      });
     } else {
       this.status.pairingStep = "waiting_scan";
     }
 
-    // ── Connection events ─────────────────────────────────────────────────
+    // ── Persistent connection events (after pairing code is issued) ───────────
 
     sock.ev.on("connection.update", (update) => {
       try {
