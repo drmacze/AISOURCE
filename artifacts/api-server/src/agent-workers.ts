@@ -1175,6 +1175,96 @@ async function tickEngineer() {
   await heartbeat("engineer", "⚙️ Engineer", "idle", thought ?? "checking infrastructure health");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENT 9: MANDOR (AI PROMPT SUPERVISOR)
+// Vision: "I am the Prompt Mandor. I supervise all 8 agents 24/7, issuing
+//          AI-generated mandates and relaying user instructions even while
+//          the user is completely offline."
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function tickMandor() {
+  const userInstructions = await getPendingMails("mandor").catch(() => []);
+  const agentStatuses    = await getAgentStatuses().catch(() => []);
+
+  const statusSummary = agentStatuses
+    .filter(a => a.agentId !== "mandor")
+    .map(a => `${a.agentId}: ${a.status} (${a.tickCount}x) — ${(a.currentTask ?? "idle").slice(0, 38)}`)
+    .join("\n");
+
+  const userInstrText = userInstructions.length > 0
+    ? `USER DIRECTIVES:\n${userInstructions.map(m => `• ${m.body}`).join("\n")}`
+    : "No pending user instructions — operating autonomously.";
+
+  const thought = await agentThink("mandor", "Prompt Mandor",
+    "I am the AI Prompt Mandor. I supervise all agents 24/7, issuing purposeful mandates and acting as the user's proxy even when they are offline.",
+    [
+      `Agent states:\n${statusSummary}`,
+      userInstrText,
+      `Analyzing workloads and generating targeted mandates`,
+      `Ensuring every agent has a clear, purposeful task`,
+    ]
+  );
+
+  await heartbeat("mandor", "👑 Mandor", "working", thought ?? "analyzing system and issuing mandates");
+
+  for (const instr of userInstructions) {
+    await markMailRead(instr.id).catch(() => {});
+  }
+
+  if (userInstructions.length > 0) {
+    await sendMail("mandor", "orchestrator",
+      `📢 User Directive (${userInstructions.length} instruction${userInstructions.length > 1 ? "s" : ""})`,
+      `The user has sent new directives:\n\n${userInstructions.map(m => `• ${m.body}`).join("\n")}\n\nPlease distribute to all relevant agents immediately.`,
+      "critical"
+    );
+    log("mandor", `Relayed ${userInstructions.length} user directive(s) to orchestrator`);
+  }
+
+  const candidates = agentStatuses
+    .filter(a => a.agentId !== "mandor" && a.agentId !== "orchestrator")
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 2);
+
+  for (const agent of candidates) {
+    const workerDef = WORKERS.find(w => w.id === agent.agentId);
+    if (!workerDef) continue;
+    try {
+      const userCtx = userInstructions[0]
+        ? `User's latest directive: "${userInstructions[0].body.slice(0, 80)}".\n`
+        : "";
+      const mandatePrompt =
+        `You are the AI Prompt Mandor of DLavie OS.\n` +
+        `Issue a specific mandate to the ${agent.agentId} agent.\n` +
+        `Agent vision: "${workerDef.vision.slice(0, 80)}"\n` +
+        `Current state: ${agent.status} — ${(agent.currentTask ?? "idle").slice(0, 40)}\n` +
+        userCtx +
+        `Write ONE specific actionable task (≤15 words). Start with an action verb. No preamble.`;
+
+      const { text } = await generateWithFallback(
+        [{ role: "user", content: mandatePrompt }],
+        { maxTokens: 40, temperature: 0.9 }
+      );
+      if (text?.trim()) {
+        const mandate = text.trim().replace(/^["']|["']$/g, "").split("\n")[0] ?? "";
+        if (mandate.length > 5) {
+          await sendMail("mandor", agent.agentId,
+            `📋 Mandate: ${mandate.slice(0, 70)}`,
+            `Mandate from Prompt Mandor:\n\n"${mandate}"\n\nExecute in your next operational cycle.`,
+            "high"
+          );
+          log("mandor", `Mandate → ${agent.agentId}: ${mandate.slice(0, 50)}`);
+        }
+      }
+    } catch (e) {
+      log("mandor", `Mandate failed for ${agent.agentId}: ${String(e).slice(0, 60)}`);
+    }
+  }
+
+  await recordMetric("mandor", "mandate_cycle", String(candidates.length), "agents mandated");
+  log("mandor", `Supervision cycle: ${agentStatuses.length} agents monitored, ${candidates.length} mandated`);
+  await heartbeat("mandor", "👑 Mandor", "idle", thought ?? "supervising all agents 24/7");
+}
+
 // ─── Worker Registry & Scheduler ─────────────────────────────────────────────
 
 interface WorkerRegistration {
@@ -1251,6 +1341,14 @@ const WORKERS: WorkerRegistration[] = [
     vision: "DLavie OS infrastructure must always be optimal. If something breaks, I fix it before anyone notices.",
     intervalMs: 90 * 1000,          // 90 seconds — infra health is critical
     tick: tickEngineer,
+    lastRun: 0, running: false,
+  },
+  {
+    id: "mandor",
+    displayName: "👑 Mandor",
+    vision: "I am the AI Prompt Mandor. I supervise all agents 24/7, issuing purposeful mandates and relaying user instructions even when the user is offline.",
+    intervalMs: 90 * 1000,          // 90 seconds — supervision cycle
+    tick: tickMandor,
     lastRun: 0, running: false,
   },
 ];

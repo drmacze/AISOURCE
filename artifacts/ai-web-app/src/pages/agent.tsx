@@ -25,6 +25,7 @@ const AGENT_DEFS = [
   { id: "botmaster",    name: "Botmaster",    emoji: "🤖", colorHex: "#14b8a6", deskHex: "#134e4a", role: "Bot operations"      },
   { id: "curator",      name: "Curator",      emoji: "✨", colorHex: "#ec4899", deskHex: "#831843", role: "Prompt curation"     },
   { id: "engineer",     name: "Engineer",     emoji: "⚙️", colorHex: "#f97316", deskHex: "#7c2d12", role: "Infrastructure"      },
+  { id: "mandor",       name: "Mandor",       emoji: "👑", colorHex: "#eab308", deskHex: "#713f12", role: "AI Prompt Supervisor" },
 ] as const;
 
 type AgentId = typeof AGENT_DEFS[number]["id"];
@@ -40,6 +41,20 @@ const DESK_POS: Record<string, [number, number]> = {
   botmaster:    [258, 326],
   curator:      [368, 322],
   engineer:     [488, 292],
+  mandor:       [530, 162],  // upper-right supervisor position
+};
+
+// Break room slot positions — where agents stand when idle/resting
+const BREAK_SLOTS: Record<string, [number, number]> = {
+  orchestrator: [606, 160],
+  trainer:      [617, 154],
+  librarian:    [630, 160],
+  guardian:     [641, 169],
+  analyst:      [630, 180],
+  botmaster:    [617, 185],
+  curator:      [604, 180],
+  engineer:     [593, 169],
+  mandor:       [617, 148],   // top spot — boss gets best chair
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -97,6 +112,61 @@ function OfficeFloor() {
   return <g>{tiles}</g>;
 }
 
+// ─── SVG: Break Room ──────────────────────────────────────────────────────────
+
+function BreakRoom() {
+  const cx = 618, cy = 173;
+  // Isometric table
+  const tw = 22, th = 11;
+  const topPts  = `${cx},${cy - th} ${cx + tw},${cy} ${cx},${cy + th} ${cx - tw},${cy}`;
+  const leftPts = `${cx - tw},${cy} ${cx},${cy + th} ${cx},${cy + th + 7} ${cx - tw},${cy + 7}`;
+  const rightPts= `${cx + tw},${cy} ${cx},${cy + th} ${cx},${cy + th + 7} ${cx + tw},${cy + 7}`;
+
+  return (
+    <g>
+      {/* Area rug */}
+      <ellipse cx={cx} cy={cy + 10} rx={52} ry={27}
+        fill="#0e1e2e" stroke="#1a3048" strokeWidth={0.7} opacity={0.75} />
+      {/* Rug border pattern */}
+      <ellipse cx={cx} cy={cy + 10} rx={46} ry={22}
+        fill="none" stroke="#1e3a50" strokeWidth={0.4} opacity={0.5} />
+
+      {/* Break room label */}
+      <text x={cx} y={cy - 29} textAnchor="middle" fontSize={6.5}
+        fill="#334155" fontFamily="monospace" letterSpacing="0.8">☕ BREAK ROOM</text>
+
+      {/* Table */}
+      <polygon points={rightPts} fill="#0a1928" />
+      <polygon points={leftPts}  fill="#0c1e30" />
+      <polygon points={topPts}   fill="#1e3a4f" stroke="#2a5068" strokeWidth={0.7} />
+      {/* Coffee cups on table */}
+      <text x={cx - 6} y={cy + 4} textAnchor="middle" fontSize={7}>☕</text>
+      <text x={cx + 7} y={cy + 7} textAnchor="middle" fontSize={6}>🍵</text>
+
+      {/* Chairs (3 sides of table) */}
+      {[{ ox: -30, oy: 4 }, { ox: 30, oy: 4 }, { ox: 0, oy: 21 }].map((c, i) => {
+        const chx = cx + c.ox, chy = cy + c.oy;
+        return (
+          <polygon key={i}
+            points={`${chx},${chy - 5} ${chx + 10},${chy} ${chx},${chy + 5} ${chx - 10},${chy}`}
+            fill="#112030" stroke="#1a3246" strokeWidth={0.5}
+          />
+        );
+      })}
+
+      {/* Plants in corners */}
+      <text x={cx + 46} y={cy - 4}  fontSize={11}>🌿</text>
+      <text x={cx - 50} y={cy + 10} fontSize={9}>🪴</text>
+
+      {/* Couch (small isometric block at top) */}
+      <polygon points={`${cx - 14},${cy - 24} ${cx + 14},${cy - 15} ${cx + 14},${cy - 9} ${cx - 14},${cy - 18}`}
+        fill="#1a2f42" stroke="#253f55" strokeWidth={0.5} />
+      <polygon points={`${cx - 14},${cy - 24} ${cx + 14},${cy - 15} ${cx + 14},${cy - 9} ${cx - 14},${cy - 18}`}
+        fill="#162a3a" />
+    </g>
+  );
+}
+
 // ─── SVG: Isometric desk ──────────────────────────────────────────────────────
 
 const DESK_HW = 36, DESK_HH = 13, DESK_D = 11;
@@ -110,21 +180,62 @@ function IsoDesk({ cx, cy, colorHex, deskHex, isWorking }: {
 
   return (
     <g>
-      {isWorking && (
-        <ellipse cx={cx} cy={cy + DESK_HH + DESK_D * 0.5} rx={DESK_HW + 10} ry={DESK_D}
-          fill={colorHex} opacity={0.07} />
+      {/* Ambient glow — pulses when working */}
+      {isWorking ? (
+        <motion.ellipse cx={cx} cy={cy + DESK_HH + DESK_D * 0.5}
+          rx={DESK_HW + 14} ry={DESK_D + 5} fill={colorHex} opacity={0.06}
+          animate={{ opacity: [0.04, 0.18, 0.04], rx: [DESK_HW + 12, DESK_HW + 20, DESK_HW + 12] }}
+          transition={{ repeat: Infinity, duration: 2.2 }}
+        />
+      ) : (
+        <ellipse cx={cx} cy={cy + DESK_HH + DESK_D * 0.5} rx={DESK_HW + 8} ry={DESK_D}
+          fill={colorHex} opacity={0.025} />
       )}
+
       <polygon points={right} fill="#09111d" />
       <polygon points={left}  fill="#0d1929" />
       <polygon points={top}   fill={isWorking ? deskHex : "#1a2738"} stroke="#253447" strokeWidth={0.8} />
-      {/* Monitor dot on desk */}
-      <circle cx={cx + 14} cy={cy - 6} r={3}
-        fill={isWorking ? colorHex : "#1e293b"} opacity={isWorking ? 0.85 : 0.3} />
-      {/* Keyboard dots */}
-      {[0, 5, 10, -5, -10].map(dx => (
-        <rect key={dx} x={cx + dx - 1} y={cy + 4} width={2.5} height={1.5}
-          fill="#1e293b" rx={0.5} />
+
+      {/* Monitor screen glow */}
+      {isWorking && (
+        <motion.rect x={cx + 8} y={cy - 16} width={13} height={9} rx={1}
+          fill={colorHex} opacity={0.1}
+          animate={{ opacity: [0.06, 0.22, 0.06] }}
+          transition={{ repeat: Infinity, duration: 1.3 }}
+        />
+      )}
+      {/* Monitor screen (always visible) */}
+      <rect x={cx + 9} y={cy - 15} width={11} height={7} rx={0.6}
+        fill={isWorking ? `${colorHex}22` : "#080f1a"}
+        stroke={isWorking ? `${colorHex}70` : "#1a2535"} strokeWidth={0.5} />
+      {/* Screen scanlines when active */}
+      {isWorking && [0, 2.5].map(i => (
+        <line key={i} x1={cx + 10} y1={cy - 14 + i} x2={cx + 19} y2={cy - 14 + i}
+          stroke={colorHex} strokeWidth={0.3} opacity={0.35} />
       ))}
+
+      {/* Power indicator dot */}
+      <motion.circle cx={cx + 14} cy={cy - 5} r={2.5}
+        fill={isWorking ? colorHex : "#1e293b"}
+        opacity={isWorking ? 1 : 0.3}
+        animate={isWorking ? { r: [2, 3.2, 2] } : {}}
+        transition={{ repeat: Infinity, duration: 1 }}
+      />
+
+      {/* Keyboard */}
+      {[0, 5, 10, -5, -10].map(kdx => (
+        <rect key={kdx} x={cx + kdx - 1} y={cy + 4} width={2.5} height={1.5}
+          fill={isWorking ? `${colorHex}40` : "#1a2535"} rx={0.5} />
+      ))}
+
+      {/* Active work indicator (blinking LED on left side) */}
+      {isWorking && (
+        <motion.circle cx={cx - DESK_HW + 5} cy={cy - 1} r={1.5}
+          fill={colorHex}
+          animate={{ opacity: [1, 0.15, 1] }}
+          transition={{ repeat: Infinity, duration: 0.75 }}
+        />
+      )}
     </g>
   );
 }
@@ -133,12 +244,13 @@ function IsoDesk({ cx, cy, colorHex, deskHex, isWorking }: {
 
 const CHAR_R = 13;
 
-function AgentCharacter({ cx, cy, def, isWorking, isSelected, task, lastTask }: {
+function AgentCharacter({ cx, cy, def, isWorking, isSelected, task, lastTask, isAtBreak }: {
   cx: number; cy: number;
   def: typeof AGENT_DEFS[number];
   isWorking: boolean; isSelected: boolean;
   task?: string | null;
   lastTask?: string;
+  isAtBreak?: boolean;
 }) {
   const charY = cy - 38;
   const truncated = task && task.length > 25 ? task.slice(0, 25) + "…" : task;
@@ -146,8 +258,8 @@ function AgentCharacter({ cx, cy, def, isWorking, isSelected, task, lastTask }: 
 
   return (
     <motion.g
-      animate={isWorking ? { y: [-1.5, 1.5, -1.5] } : { y: 0 }}
-      transition={{ repeat: Infinity, duration: 1.3, ease: "easeInOut" }}
+      animate={isWorking && !isAtBreak ? { y: [-1.5, 1.5, -1.5] } : isAtBreak ? { y: [-0.6, 0.6, -0.6] } : { y: 0 }}
+      transition={{ repeat: Infinity, duration: isAtBreak ? 3.2 : 1.3, ease: "easeInOut" }}
     >
       {/* Selection ring */}
       {isSelected && (
@@ -160,11 +272,11 @@ function AgentCharacter({ cx, cy, def, isWorking, isSelected, task, lastTask }: 
         />
       )}
 
-      {/* Glow pulse when working */}
-      {isWorking && (
+      {/* Glow pulse when working at desk */}
+      {isWorking && !isAtBreak && (
         <motion.circle cx={cx} cy={charY} r={CHAR_R + 5}
           fill={def.colorHex} opacity={0}
-          animate={{ opacity: [0, 0.15, 0], r: [CHAR_R + 3, CHAR_R + 9, CHAR_R + 3] }}
+          animate={{ opacity: [0, 0.18, 0], r: [CHAR_R + 3, CHAR_R + 11, CHAR_R + 3] }}
           transition={{ repeat: Infinity, duration: 1.8 }} />
       )}
 
@@ -172,8 +284,8 @@ function AgentCharacter({ cx, cy, def, isWorking, isSelected, task, lastTask }: 
       <circle cx={cx} cy={charY} r={CHAR_R}
         fill={`${def.colorHex}1a`}
         stroke={def.colorHex}
-        strokeWidth={isWorking ? 2 : 1}
-        opacity={isWorking ? 1 : 0.55}
+        strokeWidth={isWorking && !isAtBreak ? 2 : 1}
+        opacity={isAtBreak ? 0.42 : isWorking ? 1 : 0.55}
       />
 
       {/* Emoji */}
@@ -190,14 +302,21 @@ function AgentCharacter({ cx, cy, def, isWorking, isSelected, task, lastTask }: 
 
       {/* Name tag */}
       <rect x={cx - 22} y={charY - 30} width={44} height={14} rx={3}
-        fill="#0f172a" stroke={`${def.colorHex}44`} strokeWidth={0.5} />
-      <text x={cx} y={charY - 19} textAnchor="middle" fontSize={7.5} fill="#94a3b8"
+        fill="#0f172a" stroke={`${def.colorHex}44`} strokeWidth={0.5}
+        opacity={isAtBreak ? 0.5 : 1} />
+      <text x={cx} y={charY - 19} textAnchor="middle" fontSize={7.5}
+        fill={isAtBreak ? "#4b5563" : "#94a3b8"}
         fontFamily="monospace">
         {def.name}
       </text>
 
-      {/* Speech bubble — active task (bright) */}
-      {isWorking && truncated && (
+      {/* Break room indicator */}
+      {isAtBreak && (
+        <text x={cx} y={charY - 44} textAnchor="middle" fontSize={10} opacity={0.8}>☕</text>
+      )}
+
+      {/* Speech bubble — active task (bright, at desk only) */}
+      {isWorking && !isAtBreak && truncated && (
         <g>
           <rect x={cx - 58} y={charY - 70} width={116} height={24} rx={6}
             fill="#0f172a" stroke={`${def.colorHex}99`} strokeWidth={1} opacity={0.97} />
@@ -210,8 +329,8 @@ function AgentCharacter({ cx, cy, def, isWorking, isSelected, task, lastTask }: 
         </g>
       )}
 
-      {/* Speech bubble — last task (dim, shown when idle) */}
-      {!isWorking && lastTrunc && (
+      {/* Speech bubble — last task (dim, at desk only) */}
+      {!isWorking && !isAtBreak && lastTrunc && (
         <g opacity={0.35}>
           <rect x={cx - 54} y={charY - 68} width={108} height={22} rx={5}
             fill="#0a1120" stroke={`${def.colorHex}44`} strokeWidth={0.6} />
@@ -275,6 +394,7 @@ function OfficeScene({
     botmaster:    "monitoring WhatsApp bots",
     curator:      "curating conversation quality",
     engineer:     "checking infrastructure health",
+    mandor:       "supervising all agents 24/7",
   };
 
   // Track last known task per agent (shown dimly when idle)
@@ -285,6 +405,29 @@ function OfficeScene({
       statuses.forEach(s => { if (s.currentTask) next[s.agentId] = s.currentTask; });
       return next;
     });
+  }, [statuses]);
+
+  // Track which agents are at break room vs at desk
+  const [agentPositions, setAgentPositions] = useState<Record<string, "desk" | "break">>({});
+  useEffect(() => {
+    const update = () => {
+      const now = Date.now();
+      setAgentPositions(prev => {
+        const next = { ...prev };
+        statuses.forEach(s => {
+          const msIdle = now - new Date(s.lastSeen).getTime();
+          if (s.status === "working") {
+            next[s.agentId] = "desk";
+          } else if (msIdle > 16000) {
+            next[s.agentId] = "break";
+          }
+        });
+        return next;
+      });
+    };
+    update();
+    const t = setInterval(update, 3500);
+    return () => clearInterval(t);
   }, [statuses]);
 
   // Show particles for mails sent in the last 8 seconds
@@ -318,6 +461,9 @@ function OfficeScene({
       {/* Floor */}
       <OfficeFloor />
 
+      {/* Break room (upper right area) */}
+      <BreakRoom />
+
       {/* Faint connection lines (orchestrator → all) */}
       <g opacity={0.08}>
         {AGENT_DEFS.slice(1).map(def => {
@@ -343,29 +489,46 @@ function OfficeScene({
 
       {/* Agent stations — back to front order */}
       {sortedDefs.map(def => {
-        const [cx, cy] = DESK_POS[def.id];
+        const [deskX, deskY] = DESK_POS[def.id] ?? [350, 250];
         const status    = statusMap[def.id];
         const isWorking = status?.status === "working";
         const isSelected = selectedAgent === def.id;
+        const isAtBreak = agentPositions[def.id] === "break";
+        const [breakX, breakY] = BREAK_SLOTS[def.id] ?? [deskX, deskY];
+        const dx = isAtBreak ? breakX - deskX : 0;
+        const dy = isAtBreak ? breakY - deskY : 0;
 
         return (
-          <g key={def.id} onClick={() => onSelect(def.id as AgentId)} style={{ cursor: "pointer" }}>
-            <IsoDesk cx={cx} cy={cy}
-              colorHex={def.colorHex} deskHex={def.deskHex}
-              isWorking={isWorking} />
+          <g key={def.id}>
+            {/* Desk — always static at desk position */}
+            <g onClick={() => onSelect(def.id as AgentId)} style={{ cursor: "pointer" }}>
+              <IsoDesk cx={deskX} cy={deskY}
+                colorHex={def.colorHex} deskHex={def.deskHex}
+                isWorking={isWorking && !isAtBreak} />
+              {isSelected && (
+                <motion.ellipse cx={deskX} cy={deskY + DESK_HH + DESK_D * 0.4}
+                  rx={DESK_HW + 14} ry={DESK_D + 2}
+                  fill="none" stroke={def.colorHex} strokeWidth={1.5}
+                  animate={{ opacity: [0.4, 1, 0.4] }}
+                  transition={{ repeat: Infinity, duration: 1 }} />
+              )}
+            </g>
 
-            {isSelected && (
-              <motion.ellipse cx={cx} cy={cy + DESK_HH + DESK_D * 0.4}
-                rx={DESK_HW + 14} ry={DESK_D + 2}
-                fill="none" stroke={def.colorHex} strokeWidth={1.5}
-                animate={{ opacity: [0.4, 1, 0.4] }}
-                transition={{ repeat: Infinity, duration: 1 }} />
-            )}
-
-            <AgentCharacter cx={cx} cy={cy} def={def}
-              isWorking={isWorking} isSelected={isSelected}
-              task={status?.currentTask}
-              lastTask={lastTaskMap[def.id]} />
+            {/* Character — smoothly walks to/from break room */}
+            <motion.g
+              animate={{ x: dx, y: dy }}
+              transition={{ duration: 1.9, ease: "easeInOut", type: "tween" }}
+              onClick={() => onSelect(def.id as AgentId)}
+              style={{ cursor: "pointer" }}
+            >
+              <AgentCharacter cx={deskX} cy={deskY}
+                def={def}
+                isWorking={isWorking}
+                isSelected={isSelected}
+                isAtBreak={isAtBreak}
+                task={status?.currentTask}
+                lastTask={lastTaskMap[def.id]} />
+            </motion.g>
           </g>
         );
       })}
@@ -502,6 +665,97 @@ function AgentDetailPanel({
         )}
       </div>
     </motion.div>
+  );
+}
+
+// ─── Mandor Panel ─────────────────────────────────────────────────────────────
+
+function MandorPanel({ isVisible, onToggle }: { isVisible: boolean; onToggle: () => void }) {
+  const [instruction, setInstruction] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState<string[]>([]);
+
+  const sendInstruction = async () => {
+    const text = instruction.trim();
+    if (!text) return;
+    setSending(true);
+    try {
+      const r = await fetch("/api/workers/mail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: "mandor",
+          from: "dlavie",
+          subject: `👤 User Directive: ${text.slice(0, 55)}`,
+          body: text,
+          priority: "high",
+        }),
+      });
+      if (r.ok) {
+        setSent(p => [text, ...p].slice(0, 3));
+        setInstruction("");
+      }
+    } catch {}
+    setSending(false);
+  };
+
+  return (
+    <AnimatePresence>
+      {isVisible && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          className="flex-none border-t border-yellow-900/30 bg-gradient-to-r from-yellow-950/25 via-amber-950/15 to-transparent px-4 py-2.5"
+        >
+          <div className="max-w-7xl mx-auto flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-none">
+              <motion.span
+                animate={{ scale: [1, 1.15, 1] }}
+                transition={{ repeat: Infinity, duration: 2.5 }}
+                className="text-base"
+              >👑</motion.span>
+              <div>
+                <div className="text-xs font-bold text-yellow-400 font-mono leading-tight">MANDOR</div>
+                <div className="text-xs text-yellow-700 leading-tight">AI Supervisor · 24/7</div>
+              </div>
+            </div>
+
+            <div className="flex-1 flex gap-2">
+              <input
+                value={instruction}
+                onChange={e => setInstruction(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && !sending && sendInstruction()}
+                placeholder="Send a directive to Mandor — works even when you're offline…"
+                className="flex-1 bg-slate-900/70 border border-yellow-800/25 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-yellow-600/40 font-mono"
+              />
+              <button
+                onClick={sendInstruction}
+                disabled={sending || !instruction.trim()}
+                className="px-3 py-1.5 bg-yellow-600/15 border border-yellow-600/35 rounded-lg text-yellow-400 text-xs hover:bg-yellow-600/25 disabled:opacity-40 transition-colors flex items-center gap-1.5 font-mono"
+              >
+                {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                Send
+              </button>
+            </div>
+
+            {sent.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-none overflow-hidden max-w-xs">
+                {sent.slice(0, 2).map((s, i) => (
+                  <span key={i} className="text-xs text-yellow-500/55 bg-yellow-900/10 border border-yellow-800/20 px-2 py-0.5 rounded-md truncate max-w-[120px]">
+                    ✓ {s}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <button onClick={onToggle} className="text-slate-600 hover:text-slate-400 transition-colors flex-none text-xs px-1.5">
+              ✕
+            </button>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -742,6 +996,7 @@ export default function AgentCommandCenter() {
   const [sseConnected, setSseConnected] = useState(false);
   const [nudging, setNudging] = useState<string | null>(null);
   const [mailUnread, setMailUnread] = useState(0);
+  const [showMandorPanel, setShowMandorPanel] = useState(true);
   const esRef = useRef<EventSource | null>(null);
   const lastMailIdRef = useRef<number>(0);
 
@@ -848,11 +1103,23 @@ export default function AgentCommandCenter() {
               <div className="font-bold text-white tracking-wide" style={{ fontFamily: "Syne, sans-serif" }}>
                 Agent Command Center
               </div>
-              <div className="text-xs text-slate-400 font-mono">DLavie OS · 8 Autonomous Agents</div>
+              <div className="text-xs text-slate-400 font-mono">DLavie OS · 9 Autonomous Agents</div>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Mandor toggle */}
+            <button
+              onClick={() => setShowMandorPanel(v => !v)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono transition-all",
+                showMandorPanel
+                  ? "border-yellow-600/50 bg-yellow-600/12 text-yellow-400"
+                  : "border-slate-700/50 bg-slate-800/30 text-slate-500 hover:border-yellow-700/35 hover:text-yellow-600",
+              )}
+            >
+              <span>👑</span> Mandor
+            </button>
             {/* SSE status */}
             <div className="flex items-center gap-1.5 text-xs font-mono">
               <motion.div
@@ -1029,6 +1296,12 @@ export default function AgentCommandCenter() {
           {tab === "dev" && <DevAgentTab />}
         </div>
       </div>
+
+      {/* ── Mandor instruction bar (persistent bottom bar) ── */}
+      <MandorPanel
+        isVisible={showMandorPanel}
+        onToggle={() => setShowMandorPanel(v => !v)}
+      />
     </div>
   );
 }
