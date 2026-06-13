@@ -35,6 +35,9 @@ import {
   getActiveThreads,
   getAgentEmotions,
   getAgentPositions,
+  startCollabThread,
+  addThreadMsg,
+  concludeThread,
 } from "../agent-workers.js";
 import { db } from "@workspace/db";
 import { agentMailTable, agentStatusTable } from "@workspace/db";
@@ -303,12 +306,59 @@ router.delete("/workers/missions/:id", (req: Request, res: Response) => {
 
 /** GET /workers/emotions — current emotion state for all agents */
 router.get("/workers/emotions", (_req: Request, res: Response) => {
-  res.json({ emotions: getAgentEmotions(), ts: Date.now() });
+  const arr = getAgentEmotions();
+  const emotions: Record<string, { emoji: string; reason: string }> = {};
+  arr.forEach(e => { emotions[e.agentId] = { emoji: e.emoji, reason: e.reason }; });
+  res.json({ emotions, ts: Date.now() });
 });
 
 /** GET /workers/positions — current spatial position state for all agents */
 router.get("/workers/positions", (_req: Request, res: Response) => {
-  res.json({ positions: getAgentPositions(), ts: Date.now() });
+  const arr = getAgentPositions();
+  const positions: Record<string, { state: string; target?: string }> = {};
+  arr.forEach(p => { positions[p.agentId] = { state: p.state, target: p.target }; });
+  res.json({ positions, ts: Date.now() });
+});
+
+/**
+ * POST /workers/test-collab
+ * Immediately start a demo collaboration thread with given participants.
+ * Body: { initiator?: string, participants?: string[], topic?: string, durationMs?: number }
+ */
+router.post("/workers/test-collab", (req: Request, res: Response) => {
+  const initiator    = (req.body?.initiator    as string | undefined) ?? "researcher";
+  const participants = (req.body?.participants as string[] | undefined) ?? ["trainer", "analyst"];
+  const topic        = (req.body?.topic        as string | undefined)  ?? "Live demo: AI capability planning session";
+  const durationMs   = Number(req.body?.durationMs ?? 120_000);
+
+  const thread = startCollabThread(initiator, participants, topic);
+  addThreadMsg(thread.id, initiator,
+    `Opening the floor: ${topic}. Let's align on priorities and next steps for this cycle.`);
+
+  setTimeout(() => {
+    addThreadMsg(thread.id, participants[0] ?? "trainer",
+      `Great initiative. I have updated task queues ready and standing by for direction from this session.`);
+  }, 5_000);
+
+  if (participants[1]) {
+    const p1 = participants[1];
+    setTimeout(() => {
+      addThreadMsg(thread.id, p1,
+        `Metrics look solid. No blockers on my end — let's finalize the action items quickly.`);
+    }, 12_000);
+  }
+
+  // Auto-conclude after durationMs
+  const wrapAt = Math.max(durationMs - 10_000, durationMs * 0.8);
+  setTimeout(() => {
+    addThreadMsg(thread.id, initiator,
+      `Wrapping up — consensus reached. Assigning action items and closing this session.`);
+  }, wrapAt);
+  setTimeout(() => {
+    concludeThread(thread.id, `Demo session concluded after ${Math.round(durationMs / 1000)}s. All agents returning to desks.`);
+  }, durationMs);
+
+  res.json({ ok: true, threadId: thread.id, topic, participants: thread.participants, durationMs });
 });
 
 export default router;

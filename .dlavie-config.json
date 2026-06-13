@@ -1,13 +1,13 @@
 {
-  "updatedAt": "2026-06-12T22:46:51.051Z",
+  "updatedAt": "2026-06-13T09:21:06.764Z",
   "secrets": {
     "SPOTIFY_REFRESH_TOKEN": "AQDhmbTu8UedSZ1JBcdgpwVeXxLyBKMqwGekwtDc9KmsntJ0f5rGlB50EZbdYBqpJPN86E5wBLALnh6UtoOwBFB421fl5uY4NTm-P1v4scmTy_D-wQgTZ92Q3SG2bATXqE8",
-    "ONEDRIVE_REFRESH_TOKEN": "M.C524_SN1.0.U.MsaArtifacts.-CkBdfQ!lQEslhY6nro9jel6K6VatwJQLuooO0!j9BtJWtOZ8WVwP3zYWIiXR4G0B*xhQr2DglJ7dmaDq0eQqAn6s!uPj!G!Zzx3UPah4M87Mrdt6t8sKSAoywpd*55QYflbY06TxyorqAlwf7cwed3xks1imubMgDdbhi0ghRmvd5OABEKpXi2wEPM6iO3nefzwpP3Myuzft!Ylr6CszHNECbF8ie*xwpS2jEYflybEmfLn3BIAbPU0N53FHsCOY3VTH15P0i8CHswClkVT!miXIHzfaCtcKn6Xlm0X1pRx35JCNsHPgCpfflV8gGq1VUpJOC8ehGPN6x4n4WMxI4UtsIOk*58VG7CkGvaDR600GdGxTZMnRMvQ5PJnJzOB*fw$$",
+    "ONEDRIVE_REFRESH_TOKEN": "M.C524_SN1.0.U.MsaArtifacts.-Cif!Cg!*J1071l7iG4KvckcOBarfBdD7qNqA26d!fYd4GK01WWAgb3ko!YhJVdEbt17b*KOlaEpWD7SJxCsn5FlapvykbkRUm!kb3*VByiXSazNr!aHWontKF2bNqmicbacuMZGB4z93uWmbVv1IR6CZ*BNACgHsPmzNhy9LYeIiaThSWeop9!ovxTQNsVi3Y19HUc4Shzo7bUHUP08es*QfqWhHYUp5vdvG4dbs!XJbPtt8Vqegn*YeEPlvpMT5M9Wjo6v8b3UIVpEnpnpt9EU3EuOHouL5ux5oRYsZQJs0IwpaBwvI5lIaHFA!iF9!u0t*CQIBT4v8rHWFqJh*fC5LpZ8moYFNs*FDDkqX8tcFbt0qzeS3uyqkCZbXPXrMeQ$$",
     "ONEDRIVE_CLIENT_ID": "ff601f06-698c-4f2c-b355-0fb7af20470c",
     "GITHUB_TOKEN": "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",
     "OPENROUTER_API_KEY": "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",
-    "GROQ_API_KEY": "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",
-    "HF_TOKEN": "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"
+    "HF_TOKEN": "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",
+    "GROQ_API_KEY": "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"
   },
   "spotify": {
     "pinnedTrackId": "4wCiTliB8X4GioUQW0nupW",

@@ -53,8 +53,21 @@ const DESK_POS: Record<string, [number, number]> = {
   botmaster:    [444, 408],
 };
 
-// Dedicated collaboration room position (SVG coordinates)
-const COLLAB_ROOM_POS: [number, number] = [800, 388];
+// Collab room individual seat positions (SVG [vx, vy] — agent head appears at vy-26)
+// Room boundary: x 728-896, y 335-453  |  Table center: (812, 389)
+const COLLAB_SEATS: [number, number][] = [
+  [812, 422],  // seat 0 — bottom-center (initiator)
+  [774, 408],  // seat 1 — bottom-left
+  [850, 408],  // seat 2 — bottom-right
+  [774, 388],  // seat 3 — top-left
+  [850, 388],  // seat 4 — top-right
+  [812, 376],  // seat 5 — top-center
+];
+
+function getCollabSeat(participants: string[], agentId: string): [number, number] {
+  const idx = participants.indexOf(agentId);
+  return COLLAB_SEATS[idx >= 0 ? idx % COLLAB_SEATS.length : 0]!;
+}
 
 const ZONE_GLOWS = [
   { cx: 232, cy: 218, rx: 148, ry: 78,  fill: "#a855f7" },
@@ -683,21 +696,58 @@ function OfficeScene({ agentStatuses, selectedAgent, onSelectAgent, particles, a
         return <MailParticleAnim key={p.id} from={fromPos} to={toPos}/>;
       })}
 
-      {/* Collaboration beams */}
-      {hasMeeting && activeThreads.filter(t => t.active).flatMap(t => {
-        const beams: React.ReactNode[] = [];
-        for (let i = 0; i < t.participants.length - 1; i++) {
-          const a = DESK_POS[t.participants[i]!]; const b = DESK_POS[t.participants[i + 1]!];
-          if (!a || !b) continue;
-          beams.push(
-            <line key={`beam_${i}`} x1={a[0]} y1={a[1] - 20} x2={b[0]} y2={b[1] - 20}
-              stroke="#6366f1" strokeWidth={0.8} strokeDasharray="4 3" opacity={0.5}>
-              <animate attributeName="opacity" values="0.5;0.9;0.5" dur="2s" repeatCount="indefinite"/>
+      {/* Collaboration beams — from each desk toward collab room */}
+      {hasMeeting && activeThreads.filter(t => t.active).flatMap(t =>
+        t.participants.map((p, i) => {
+          const desk = DESK_POS[p];
+          const seat = getCollabSeat(t.participants, p);
+          if (!desk) return null;
+          return (
+            <line key={`beam_${t.id}_${i}`}
+              x1={desk[0]} y1={desk[1] - 15}
+              x2={seat[0]} y2={seat[1] - 15}
+              stroke="#6366f1" strokeWidth={0.8} strokeDasharray="4 3" opacity={0.35}>
+              <animate attributeName="opacity" values="0.35;0.7;0.35" dur="2s" repeatCount="indefinite"/>
             </line>
           );
-        }
-        return beams;
-      })}
+        })
+      )}
+
+      {/* Collab room speech bubbles — latest message per seated agent */}
+      {hasMeeting && activeThreads.filter(t => t.active).flatMap(t =>
+        t.participants.map((p, seatIdx) => {
+          const def = AGENT_DEFS.find(a => a.id === p);
+          const lastMsg = [...t.messages].reverse().find(m => m.agentId === p);
+          if (!lastMsg || !def) return null;
+          const [bx, by] = getCollabSeat(t.participants, p);
+          const words = lastMsg.content.replace(/\s+/g, " ").slice(0, 48);
+          const line1 = words.slice(0, 24);
+          const line2 = words.length > 24 ? words.slice(24, 48) + (lastMsg.content.length > 48 ? "…" : "") : null;
+          const bubbleW = 72; const bubbleH = line2 ? 22 : 14;
+          return (
+            <g key={`speech_${t.id}_${p}_${seatIdx}`}>
+              <rect x={bx - bubbleW / 2} y={by - 64} width={bubbleW} height={bubbleH}
+                rx={4} fill="#0f172a" stroke={def.colorHex} strokeWidth={0.8} opacity={0.95}>
+                <animate attributeName="opacity" values="0.95;1;0.95" dur="3s" repeatCount="indefinite"/>
+              </rect>
+              <text x={bx} y={by - 55} textAnchor="middle" fontSize={5.2}
+                fill={def.colorHex} fontFamily="monospace" style={{ userSelect: "none" }}>
+                {line1}
+              </text>
+              {line2 && (
+                <text x={bx} y={by - 47} textAnchor="middle" fontSize={5.2}
+                  fill="#94a3b8" fontFamily="monospace" style={{ userSelect: "none" }}>
+                  {line2}
+                </text>
+              )}
+              {/* Bubble pointer */}
+              <polygon
+                points={`${bx - 4},${by - 42} ${bx + 4},${by - 42} ${bx},${by - 37}`}
+                fill="#0f172a" stroke={def.colorHex} strokeWidth={0.5}/>
+            </g>
+          );
+        })
+      )}
 
       {/* Desks + Agents (desks fixed, characters animate to target position) */}
       {AGENT_DEFS.map(def => {
@@ -712,13 +762,17 @@ function OfficeScene({ agentStatuses, selectedAgent, onSelectAgent, particles, a
 
         // Compute visual target position for walking animation
         const posState   = agentPositions.get(def.id);
+        const activeThread = activeThreads.find(t => t.active && t.participants.includes(def.id));
         let vx = cx; let vy = cy;
         if (posState?.state === "collab_room") {
-          [vx, vy] = COLLAB_ROOM_POS;
+          [vx, vy] = activeThread
+            ? getCollabSeat(activeThread.participants, def.id)
+            : (COLLAB_SEATS[0]!);
         } else if (posState?.state === "visiting" && posState.target) {
           const td = DESK_POS[posState.target];
           if (td) { vx = Math.round((cx + td[0]) / 2); vy = Math.round((cy + td[1]) / 2) - 8; }
         }
+        const isWalking = vx !== cx || vy !== cy;
 
         return (
           <g key={def.id} style={{ cursor: "pointer" }}
@@ -734,10 +788,32 @@ function OfficeScene({ agentStatuses, selectedAgent, onSelectAgent, particles, a
             {/* Desk is always fixed */}
             <IsoDesk cx={cx} cy={cy} deskColor={def.deskHex} active={isActive} collaborating={isCollab}/>
 
+            {/* Walking path dotted line: desk → collab room when agent is in transit */}
+            {isWalking && posState?.state === "collab_room" && (
+              <line x1={cx} y1={cy - 10} x2={vx} y2={vy - 10}
+                stroke={def.colorHex} strokeWidth={0.7} strokeDasharray="3 4" opacity={0.3}/>
+            )}
+
             {/* Agent character + name label animate smoothly to target */}
             <motion.g
               animate={{ x: vx - cx, y: vy - cy }}
-              transition={{ duration: 1.8, ease: "easeInOut" }}>
+              transition={{ duration: 2.2, ease: [0.25, 0.46, 0.45, 0.94] }}>
+
+              {/* Walking bounce indicator — footstep dots appear while moving to collab */}
+              {isWalking && posState?.state === "collab_room" && (
+                <g>
+                  {[0, 1, 2].map(i => (
+                    <circle key={i} cx={cx + 6 + i * 5} cy={cy + 6} r={1.8}
+                      fill={def.colorHex} opacity={0.7}>
+                      <animate attributeName="opacity" values="0.7;0.1;0.7"
+                        dur="0.6s" begin={`${i * 0.2}s`} repeatCount="indefinite"/>
+                      <animate attributeName="cy" values={`${cy + 6};${cy + 3};${cy + 6}`}
+                        dur="0.6s" begin={`${i * 0.2}s`} repeatCount="indefinite"/>
+                    </circle>
+                  ))}
+                </g>
+              )}
+
               <AgentChar cx={cx} cy={cy - 26} def={def} status={status} collaborating={isCollab}
                 hovered={isHovered} thoughtText={status?.currentTask ?? undefined}
                 emotion={emotion?.emoji}/>
