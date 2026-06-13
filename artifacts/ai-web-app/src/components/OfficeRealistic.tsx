@@ -959,6 +959,9 @@ export function OfficeRealistic({
   // Camera state
   const cam = useRef({ zoom:1, panX:0, panY:0, drag:false, lx:0, ly:0, pinchDist:0 });
 
+  // Minimap bounds (updated each frame, used for hit-test)
+  const mmBounds = useRef({ x:0, y:0, w:0, h:0, floorSplit:0, tileW:0, tileH:0 });
+
   // Simulation tick
   useEffect(() => {
     const id = setInterval(() => {
@@ -1091,6 +1094,123 @@ export function OfficeRealistic({
         c.fillText("📋 "+topic.slice(0,38), W-142, 23);
       }
 
+      // ─ MINIMAP ────────────────────────────────────────────────────────
+      // Top-down flat view: Floor 2 (upper half) / Floor 1 (lower half)
+      // World spans wx 0-23, wz 0-15
+      const MM_W=152, MM_H=114;
+      const MM_X=W-MM_W-12, MM_Y=H-MM_H-52;
+      const FLOOR_SPLIT=MM_H*0.5; // y-split inside minimap
+      const T_W=MM_W/24, T_H=FLOOR_SPLIT/16; // pixels per tile
+
+      // Save for hit-test
+      mmBounds.current={x:MM_X,y:MM_Y,w:MM_W,h:MM_H,floorSplit:FLOOR_SPLIT,tileW:T_W,tileH:T_H};
+
+      // Outer frame
+      c.fillStyle="rgba(6,10,16,0.92)"; c.strokeStyle="#2c3d50"; c.lineWidth=1.2;
+      c.beginPath(); c.roundRect(MM_X-4,MM_Y-16,MM_W+8,MM_H+24,7); c.fill(); c.stroke();
+
+      // Title bar
+      c.fillStyle="#304050"; c.font="bold 7px 'Space Mono',monospace"; c.textAlign="center"; c.textBaseline="middle";
+      c.fillText("◉ MINIMAP", MM_X+MM_W/2, MM_Y-8);
+
+      // Floor 2 background
+      c.fillStyle="#18222e";
+      c.beginPath(); c.roundRect(MM_X,MM_Y,MM_W,FLOOR_SPLIT-1,3); c.fill();
+      // Floor 1 background
+      c.fillStyle="#121c26";
+      c.beginPath(); c.roundRect(MM_X,MM_Y+FLOOR_SPLIT+1,MM_W,FLOOR_SPLIT-1,3); c.fill();
+
+      // Floor divider line
+      c.strokeStyle="#2c3d50"; c.lineWidth=0.8;
+      c.beginPath(); c.moveTo(MM_X,MM_Y+FLOOR_SPLIT); c.lineTo(MM_X+MM_W,MM_Y+FLOOR_SPLIT); c.stroke();
+
+      // Zone patches — Floor 2
+      for(const z of ZONES_F1){
+        const [zr,zg,zb]=hexToRGB(z.color);
+        c.fillStyle=`rgba(${zr},${zg},${zb},0.28)`;
+        c.fillRect(MM_X+z.x*T_W, MM_Y+z.z*T_H, z.w*T_W, z.d*T_H);
+      }
+      // Zone patches — Floor 1
+      for(const z of ZONES_F0){
+        const [zr,zg,zb]=hexToRGB(z.color);
+        c.fillStyle=`rgba(${zr},${zg},${zb},0.28)`;
+        c.fillRect(MM_X+z.x*T_W, MM_Y+FLOOR_SPLIT+z.z*T_H, z.w*T_W, z.d*T_H);
+      }
+
+      // Elevator marker (both floors)
+      c.fillStyle="#5a7a9a";
+      c.beginPath(); c.arc(MM_X+ELV_X*T_W, MM_Y+ELV_Z*T_H, 3.5, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(MM_X+ELV_X*T_W, MM_Y+FLOOR_SPLIT+ELV_Z*T_H, 3.5, 0, Math.PI*2); c.fill();
+      // Elevator car position
+      const elvCarMY=MM_Y+ELV_Z*T_H + (FLOOR_SPLIT*0.8)*(1-elvRef.current.carY);
+      c.strokeStyle="#8ab0d0"; c.lineWidth=1;
+      c.beginPath(); c.arc(MM_X+ELV_X*T_W, elvCarMY, 4.5, 0, Math.PI*2); c.stroke();
+
+      // Meeting table outline on Floor 1 section
+      c.strokeStyle="#5a4030"; c.lineWidth=1;
+      c.beginPath(); c.roundRect(
+        MM_X+(MEET_CX-1.6)*T_W, MM_Y+FLOOR_SPLIT+(MEET_CZ-1.8)*T_H,
+        3.2*T_W, 3.6*T_H, 2); c.stroke();
+
+      // Agent dots
+      for(const ag of agentsRef.current.values()){
+        const dotX=MM_X+ag.x*T_W;
+        const dotY=ag.floor===1
+          ? MM_Y+ag.z*T_H
+          : MM_Y+FLOOR_SPLIT+ag.z*T_H;
+        const isSel=ag.id===propsRef.current.selectedAgent;
+        // Dot
+        c.beginPath(); c.arc(dotX, dotY, isSel?4:2.6, 0, Math.PI*2);
+        c.fillStyle=ag.color; c.fill();
+        c.strokeStyle=isSel?"#fff":"rgba(0,0,0,0.5)"; c.lineWidth=isSel?1.2:0.5; c.stroke();
+        // Pulse ring for selected
+        if(isSel){
+          const pulse=0.4+Math.abs(Math.sin(time*3))*0.6;
+          c.beginPath(); c.arc(dotX, dotY, 7, 0, Math.PI*2);
+          c.strokeStyle=ag.color+Math.floor(pulse*255).toString(16).padStart(2,"0");
+          c.lineWidth=1; c.stroke();
+        }
+        // Movement trail arrow for walking agents
+        if(ag.activity==="walking"&&Math.hypot(ag.tx-ag.x,ag.tz-ag.z)>0.5){
+          const tdx=ag.tx-ag.x, tdz=ag.tz-ag.z;
+          const tlen=Math.hypot(tdx,tdz);
+          const arrX=dotX+(tdx/tlen)*5, arrY=dotY+(tdz/tlen)*5;
+          c.strokeStyle=ag.color+"80"; c.lineWidth=0.8;
+          c.beginPath(); c.moveTo(dotX,dotY); c.lineTo(arrX,arrY); c.stroke();
+        }
+      }
+
+      // Floor labels
+      c.font="6px 'Space Mono',monospace"; c.textBaseline="top"; c.textAlign="right";
+      c.fillStyle="#486070"; c.fillText("F2",MM_X+MM_W-2,MM_Y+2);
+      c.fillStyle="#406058"; c.fillText("F1",MM_X+MM_W-2,MM_Y+FLOOR_SPLIT+2);
+
+      // Viewport rectangle (shows what portion of the world is visible)
+      // Invert: the canvas centre in world-isometric coords
+      // We draw the rect on the F2 layer (most action there)
+      {
+        const CX_=CX0, CY_=CY0;
+        // Visible world region at current zoom:
+        // screenX = (wx-wz)*TW2 + CX_ → wx-wz = (screenX - CX_)/TW2
+        // For screen edges (after pan/zoom):
+        const left  = ((0 - W/2 - cam.current.panX)/cam.current.zoom + W/2 - CX_)/TW2;
+        const right = ((W - W/2 - cam.current.panX)/cam.current.zoom + W/2 - CX_)/TW2;
+        const top_  = ((0 - H/2 - cam.current.panY)/cam.current.zoom + H/2 - CY_)/TH2;
+        const bot   = ((H - H/2 - cam.current.panY)/cam.current.zoom + H/2 - CY_)/TH2;
+        // Map (wx-wz) and (wx+wz) extremes to minimap pixel coords
+        // Approximate by using (wx+wz)/2 and (wx-wz)/2
+        const mmLeft  =MM_X+Math.max(0,(left+top_)/2*T_W);
+        const mmRight =MM_X+Math.min(MM_W,(right+bot)/2*T_W);
+        const mmTop2  =MM_Y+Math.max(0,(top_-right)/2*T_H);  // approx
+        const mmBot2  =MM_Y+Math.min(FLOOR_SPLIT,(bot-left)/2*T_H);
+        if(mmRight>mmLeft&&mmBot2>mmTop2){
+          c.strokeStyle="rgba(200,220,255,0.55)"; c.lineWidth=1.2;
+          c.setLineDash([3,2]);
+          c.strokeRect(mmLeft, mmTop2, mmRight-mmLeft, mmBot2-mmTop2);
+          c.setLineDash([]);
+        }
+      }
+
       requestAnimationFrame(render);
     }
     requestAnimationFrame(render);
@@ -1110,7 +1230,32 @@ export function OfficeRealistic({
     return()=>obs.disconnect();
   }, []);
 
-  // ── Interaction handlers ────────────────────────────────────────────
+  // ── Interaction helpers (must be declared before handlers that use them) ──
+
+  // Navigate camera to a world position
+  const navigateTo = useCallback((wx: number, wz: number, floor: 0|1) => {
+    const canvas=canvasRef.current; if(!canvas) return;
+    const W=canvas.width, H=canvas.height;
+    const CX0=W*0.5-TW2*3.5;
+    const CY0=H*0.5-(37*TH2+2*TH2-FLOOR_H)/2;
+    const sp=iso(wx, wz, floor, CX0, CY0);
+    cam.current.panX=W/2-sp.x;
+    cam.current.panY=H/2-sp.y;
+  }, []);
+
+  // Hit-test minimap; if hit, navigate and return true
+  const tryMinimapNav = useCallback((px: number, py: number): boolean => {
+    const mm=mmBounds.current;
+    if(px<mm.x||px>mm.x+mm.w||py<mm.y||py>mm.y+mm.h) return false;
+    const lx=px-mm.x, ly=py-mm.y;
+    const wx=lx/mm.tileW;
+    const isF1=ly<mm.floorSplit;
+    const wz=isF1?(ly/mm.tileH):((ly-mm.floorSplit)/mm.tileH);
+    navigateTo(wx, wz, isF1?1:0);
+    return true;
+  }, [navigateTo]);
+
+  // ── Interaction handlers ─────────────────────────────────────────────
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     cam.current.drag=true; cam.current.lx=e.clientX; cam.current.ly=e.clientY;
@@ -1129,14 +1274,22 @@ export function OfficeRealistic({
   // Touch
   const handleTouchStart = useCallback((e: React.TouchEvent)=>{
     e.preventDefault();
-    if(e.touches.length===1){ cam.current.drag=true; cam.current.lx=e.touches[0]!.clientX; cam.current.ly=e.touches[0]!.clientY; }
-    else if(e.touches.length===2){
+    if(e.touches.length===1){
+      const canvas=canvasRef.current; if(!canvas) return;
+      const rect=canvas.getBoundingClientRect();
+      const px=e.touches[0]!.clientX-rect.left;
+      const py=e.touches[0]!.clientY-rect.top;
+      if(tryMinimapNav(px, py)) return; // minimap tap → navigate, don't drag
+      cam.current.drag=true;
+      cam.current.lx=e.touches[0]!.clientX;
+      cam.current.ly=e.touches[0]!.clientY;
+    } else if(e.touches.length===2){
       cam.current.drag=false;
       const dx=e.touches[0]!.clientX-e.touches[1]!.clientX;
       const dy=e.touches[0]!.clientY-e.touches[1]!.clientY;
       cam.current.pinchDist=Math.hypot(dx,dy);
     }
-  }, []);
+  }, [tryMinimapNav]);
   const handleTouchMove = useCallback((e: React.TouchEvent)=>{
     e.preventDefault();
     if(e.touches.length===1&&cam.current.drag){
@@ -1152,16 +1305,17 @@ export function OfficeRealistic({
   }, []);
   const handleTouchEnd = useCallback(()=>{ cam.current.drag=false; cam.current.pinchDist=0; }, []);
 
-  // Click to select agent
+  // Click → minimap nav or agent select
   const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>)=>{
     const canvas=canvasRef.current; if(!canvas) return;
-    if(Math.hypot(e.movementX,e.movementY)>4) return; // was a drag
+    if(Math.hypot(e.movementX,e.movementY)>4) return;
     const rect=canvas.getBoundingClientRect();
-    // Invert camera transform
+    const px=e.clientX-rect.left, py=e.clientY-rect.top;
+    if(tryMinimapNav(px, py)) return;
     const cx0=canvas.width*0.5-TW2*3.5;
     const cy0=canvas.height*0.5-(37*TH2+2*TH2-FLOOR_H)/2;
-    const mx=(e.clientX-rect.left-canvas.width/2-cam.current.panX)/cam.current.zoom+canvas.width/2;
-    const my=(e.clientY-rect.top-canvas.height/2-cam.current.panY)/cam.current.zoom+canvas.height/2;
+    const mx=(px-canvas.width/2-cam.current.panX)/cam.current.zoom+canvas.width/2;
+    const my=(py-canvas.height/2-cam.current.panY)/cam.current.zoom+canvas.height/2;
     let best:string|null=null, bestD=40;
     for(const ag of agentsRef.current.values()){
       const sp=iso(ag.x,ag.z,ag.floor,cx0,cy0);
@@ -1169,7 +1323,7 @@ export function OfficeRealistic({
       if(d<bestD){ bestD=d; best=ag.id; }
     }
     if(best) onSelectAgent(best);
-  }, [onSelectAgent]);
+  }, [onSelectAgent, tryMinimapNav]);
 
   return (
     <canvas
