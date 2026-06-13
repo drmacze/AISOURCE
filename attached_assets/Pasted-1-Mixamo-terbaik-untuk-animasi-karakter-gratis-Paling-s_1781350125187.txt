@@ -1,0 +1,107 @@
+1. Mixamo — terbaik untuk animasi karakter gratis
+
+Paling saya rekomendasikan untuk animasi. Mixamo menyediakan karakter 3D, auto-rigging, dan banyak animasi siap pakai untuk game, film, interactive experience, dan ilustrasi.  
+
+Kelebihan:
+
+* Gratis dengan akun Adobe.
+* Banyak animasi: walk, run, idle, fight, dance, jump, gesture.
+* Bisa download FBX.
+* Cocok untuk Blender, Unity, Unreal, dan bisa dikonversi ke GLB untuk web.
+
+Kekurangan:
+Asset karakternya tidak sebanyak marketplace besar. Mixamo lebih kuat di animasi, bukan koleksi model 3D super lengkap.
+
+⸻
+
+2. Sketchfab Free — terbaik untuk asset 3D gratis yang variatif
+
+Sketchfab punya banyak model gratis dengan lisensi Creative Commons, termasuk model animated, rigged, scan realistis, karakter, kendaraan, creature, objek, dan environment.  
+
+Kelebihan:
+
+* Banyak model gratis.
+* Bisa filter: Downloadable, Animated, Rigged, PBR, Creative Commons.
+* Banyak format cocok web: GLB/GLTF, FBX, OBJ.
+* Bagus untuk website 3D karena preview langsung di browser.
+
+Kekurangan:
+Kualitas tidak selalu konsisten karena asset berasal dari banyak kreator. Wajib cek lisensi tiap model.
+
+⸻
+
+3. Fab Free — terbaik untuk asset game realistis gratis
+
+Fab punya banyak asset gratis, termasuk game asset, environment, material, karakter, animasi, dan Megascans. Epic juga menyediakan free content berkala serta library free yang terus tersedia.  
+
+Kelebihan:
+
+* Kualitas banyak yang profesional.
+* Cocok untuk Unreal Engine, Unity, game, cinematic, dan 3D website.
+* Ada free asset dari Epic seperti karakter dan environment.
+* Banyak asset realistis.
+
+Kekurangan:
+Beberapa asset lebih cocok untuk Unreal/Unity, jadi kadang perlu dikonversi/dioptimasi untuk web.
+
+⸻
+
+4. Poly Haven — terbaik untuk realistis, CC0, tanpa ribet lisensi
+
+Poly Haven menyediakan asset 100% gratis dan CC0, artinya bisa dipakai untuk personal maupun komersial tanpa batasan besar. Tidak perlu login.  
+
+Kelebihan:
+
+* Gratis total.
+* Lisensi paling aman: CC0.
+* Bagus untuk HDRI, texture, material, dan model realistis.
+* Cocok untuk render realistis di Blender/Three.js.
+
+Kekurangan:
+Tidak fokus ke animasi. Lebih bagus untuk texture, material, HDRI, dan model statis.
+
+⸻
+
+5. ambientCG — terbaik untuk material PBR realistis gratis
+
+ambientCG adalah salah satu sumber besar untuk PBR materials, HDRI, dan model gratis. Asset-nya menggunakan lisensi CC0, cocok untuk game, VFX, archviz, dan 3D art.  
+
+Kelebihan:
+
+* Banyak material realistis: wood, metal, concrete, fabric, ground, wall, dll.
+* CC0.
+* Bagus untuk membuat asset 3D terlihat lebih realistis.
+* Cocok untuk Blender, Unreal, Unity, Three.js.
+
+Kekurangan:
+Bukan tempat utama untuk animasi.
+
+⸻
+
+6. ActorCore Free — bagus untuk mocap animasi realistis
+
+ActorCore punya library motion capture untuk karakter 3D, termasuk free mocap motions untuk business, training, archviz, game, dan film.  
+
+Kelebihan:
+
+* Animasi manusia lebih realistis karena berbasis mocap.
+* Cocok untuk karakter profesional.
+* Bagus untuk game, film, dan virtual avatar.
+
+Kekurangan:
+Tidak semuanya gratis. Free section-nya bagus, tapi koleksi penuh tetap berbayar.
+
+⸻
+
+7. CMU Motion Capture Database — gratis untuk animasi mocap
+
+CMU Motion Capture Database menyediakan data motion capture yang gratis untuk semua penggunaan.  
+
+Kelebihan:
+
+* Banyak animasi manusia.
+* Cocok untuk eksperimen, AI, game, riset, dan animasi karakter.
+* Gratis.
+
+Kekurangan:
+Lebih teknis. Biasanya perlu proses retargeting ke karakter di Blender/Unity/Unreal.
