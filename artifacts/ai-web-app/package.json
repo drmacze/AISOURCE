@@ -75,6 +75,8 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
     "@types/three": "^0.184.1",
     "@uppy/aws-s3": "^5.1.0",
     "@uppy/core": "^5.2.0",

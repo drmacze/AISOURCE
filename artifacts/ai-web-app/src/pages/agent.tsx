@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Office3D } from "@/components/Office3D";
+import { OfficeWebGL } from "@/components/OfficeWebGL";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, Toaster } from "sonner";
 import {
@@ -2564,6 +2565,7 @@ export default function AgentPage() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [chatAgent, setChatAgent]         = useState<string | null>(null);
   const [activeTab, setActiveTab]         = useState<Tab>("office");
+  const [office3DMode, setOffice3DMode]   = useState<boolean>(true);
   const [particles, setParticles]         = useState<MailParticle[]>([]);
   const [sseStatus, setSseStatus]         = useState<"connecting" | "connected" | "error">("connecting");
   const [lastRefresh, setLastRefresh]     = useState<Date | null>(null);
@@ -2843,17 +2845,49 @@ export default function AgentPage() {
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === "office" && (
           <div className="flex h-full">
-            {/* 3D Office Scene */}
-            <div className="flex-1 min-w-0 h-full">
-              <Office3D
-                agentStatuses={agentStatuses}
-                selectedAgent={selectedAgent}
-                onSelectAgent={id => setSelectedAgent((s: string | null) => s === id ? null : id)}
-                particles={particles}
-                activeThreads={threads}
-                agentEmotions={agentEmotions}
-                agentPositions={agentPositions}
-              />
+            {/* Office viewport */}
+            <div className="flex-1 min-w-0 h-full relative">
+              {/* 3D/2D toggle */}
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-slate-900/80 border border-slate-700/50 rounded-full px-1 py-1 backdrop-blur-sm">
+                <button
+                  onClick={() => setOffice3DMode(true)}
+                  className={cn("text-[10px] font-mono px-3 py-1 rounded-full transition-all", office3DMode
+                    ? "bg-violet-600/40 border border-violet-500/50 text-violet-200"
+                    : "text-slate-500 hover:text-slate-300")}
+                >
+                  ✦ 3D
+                </button>
+                <button
+                  onClick={() => setOffice3DMode(false)}
+                  className={cn("text-[10px] font-mono px-3 py-1 rounded-full transition-all", !office3DMode
+                    ? "bg-slate-700/60 border border-slate-600/50 text-slate-200"
+                    : "text-slate-500 hover:text-slate-300")}
+                >
+                  ◫ ISO
+                </button>
+              </div>
+
+              {office3DMode ? (
+                <OfficeWebGL
+                  agentStatuses={agentStatuses}
+                  selectedAgent={selectedAgent}
+                  onSelectAgent={id => setSelectedAgent((s: string | null) => s === id ? null : id)}
+                  particles={particles}
+                  activeThreads={threads}
+                  agentEmotions={agentEmotions}
+                  agentPositions={agentPositions}
+                />
+              ) : (
+                <Office3D
+                  agentStatuses={agentStatuses}
+                  selectedAgent={selectedAgent}
+                  onSelectAgent={id => setSelectedAgent((s: string | null) => s === id ? null : id)}
+                  particles={particles}
+                  activeThreads={threads}
+                  agentEmotions={agentEmotions}
+                  agentPositions={agentPositions}
+                />
+              )}
             </div>
             {/* Detail panel */}
             <div className="w-72 flex-shrink-0 border-l border-slate-800/60 bg-slate-900/20 backdrop-blur-sm h-full overflow-hidden">
