@@ -125,6 +125,137 @@ export function getAgentPositions() {
   return Array.from(positionStateMap.entries()).map(([agentId, p]) => ({ agentId, ...p }));
 }
 
+// ─── Skill Pools — varied task types per agent to eliminate idle time ─────────
+
+const SKILL_POOLS: Record<string, string[]> = {
+  orchestrator: [
+    "Routing cross-agent task queue",
+    "Synthesising system status report",
+    "Detecting idle agents & nudging",
+    "Assigning missions from board",
+    "Analysing mail backlog priority",
+    "Rebalancing workload distribution",
+    "Running 5-min heartbeat check",
+    "Generating KPI snapshot",
+  ],
+  trainer: [
+    "Curating dataset quality scores",
+    "Running benchmark comparison",
+    "Designing hyperparameter sweep",
+    "Importing HuggingFace dataset",
+    "Writing training curriculum doc",
+    "Evaluating model perplexity drift",
+    "Scheduling RLHF feedback loop",
+    "Reviewing low-quality samples",
+  ],
+  librarian: [
+    "Scanning for duplicate documents",
+    "Re-indexing knowledge chunks",
+    "Building cross-reference graph",
+    "Generating topic FAQ entries",
+    "Scraping new knowledge sources",
+    "Verifying citation accuracy",
+    "Archiving stale documents",
+    "Optimising vector embeddings",
+  ],
+  guardian: [
+    "Reviewing open ticket queue",
+    "Running automated QA checks",
+    "Scanning for anomalous patterns",
+    "Validating test coverage gaps",
+    "Auditing recent deployments",
+    "Checking security scan results",
+    "Writing quality gate report",
+    "Escalating critical issues",
+  ],
+  analyst: [
+    "Running anomaly detection sweep",
+    "Computing 7-day trend analysis",
+    "Profiling agent performance scores",
+    "Generating mail volume heatmap",
+    "Analysing conversation patterns",
+    "Detecting token usage spikes",
+    "Writing intelligence brief",
+    "Cross-correlating metric signals",
+  ],
+  botmaster: [
+    "Checking bot health & uptime",
+    "Analysing message response rates",
+    "Optimising reply templates",
+    "Scanning webhook delivery logs",
+    "Monitoring queue depth",
+    "Testing command parse coverage",
+    "Updating bot personality config",
+    "Reviewing error fallback routes",
+  ],
+  curator: [
+    "Mining high-quality prompts",
+    "Scoring prompt effectiveness",
+    "Running A/B prompt variants",
+    "Deduplicating prompt library",
+    "Generating prompt variations",
+    "Analysing user intent patterns",
+    "Curating few-shot examples",
+    "Tagging prompts by domain",
+  ],
+  engineer: [
+    "Monitoring server resource usage",
+    "Checking dependency freshness",
+    "Profiling API response latency",
+    "Verifying database connections",
+    "Scanning build artefacts",
+    "Running integration health checks",
+    "Optimising build pipeline",
+    "Rotating Ollama model cache",
+  ],
+  mandor: [
+    "Reviewing team performance KPIs",
+    "Writing agent scorecard report",
+    "Planning next training sprint",
+    "Auditing mission completion rate",
+    "Coaching underperforming agents",
+    "Setting quality benchmarks",
+    "Composing weekly progress report",
+    "Allocating research priorities",
+  ],
+  researcher: [
+    "Scanning arXiv for new AI papers",
+    "Summarising latest LLM techniques",
+    "Designing experiment hypothesis",
+    "Analysing RLHF research trends",
+    "Comparing RAG retrieval methods",
+    "Evaluating new embedding models",
+    "Synthesising competitive analysis",
+    "Proposing model improvement plan",
+  ],
+  deployer: [
+    "Validating staging environment",
+    "Running canary deployment check",
+    "Verifying rollback procedures",
+    "Monitoring deployment health",
+    "Checking CI/CD pipeline status",
+    "Analysing error rate post-deploy",
+    "Testing blue-green switchover",
+    "Writing deployment runbook",
+  ],
+  reviewer: [
+    "Reviewing agent code quality",
+    "Detecting bug patterns in logs",
+    "Running static analysis sweep",
+    "Checking test coverage gaps",
+    "Auditing dependency security",
+    "Reviewing API contract changes",
+    "Scoring code complexity metrics",
+    "Generating improvement suggestions",
+  ],
+};
+
+/** Pick a random skill from an agent's pool — eliminates idle time */
+function pickTask(agentId: string): string {
+  const pool = SKILL_POOLS[agentId] ?? ["processing tasks"];
+  return pool[Math.floor(Math.random() * pool.length)]!;
+}
+
 // ─── Internal API caller ─────────────────────────────────────────────────────
 
 async function api<T = unknown>(
@@ -434,7 +565,7 @@ async function tickOrchestrator() {
     } catch { /* non-fatal */ }
   }
 
-  await heartbeat("orchestrator", "🎯 Orchestrator", "idle", thought ?? "coordinating agents");
+  await heartbeat("orchestrator", "🎯 Orchestrator", "working", pickTask("orchestrator"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -591,7 +722,7 @@ async function tickTrainer() {
     return;
   }
 
-  await heartbeat("trainer", "🧠 Trainer", "idle", "waiting for next cycle");
+  await heartbeat("trainer", "🧠 Trainer", "working", pickTask("trainer"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -680,7 +811,7 @@ async function tickLibrarian() {
     return;
   }
 
-  await heartbeat("librarian", "📚 Librarian", "idle", thought ?? "auditing knowledge base");
+  await heartbeat("librarian", "📚 Librarian", "working", pickTask("librarian"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -843,7 +974,7 @@ async function tickGuardian() {
     return;
   }
 
-  await heartbeat("guardian", "🛡️ Guardian", "idle", thought ?? "processing support tickets");
+  await heartbeat("guardian", "🛡️ Guardian", "working", pickTask("guardian"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -960,7 +1091,7 @@ async function tickAnalyst() {
     return;
   }
 
-  await heartbeat("analyst", "📊 Analyst", "idle", thought ?? "aggregating system metrics");
+  await heartbeat("analyst", "📊 Analyst", "working", pickTask("analyst"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1066,7 +1197,7 @@ async function tickBotmaster() {
     return;
   }
 
-  await heartbeat("botmaster", "🤖 Botmaster", "idle", thought ?? "monitoring WhatsApp bots");
+  await heartbeat("botmaster", "🤖 Botmaster", "working", pickTask("botmaster"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1205,7 +1336,7 @@ async function tickCurator() {
     return;
   }
 
-  await heartbeat("curator", "✨ Curator", "idle", thought ?? "curating conversations");
+  await heartbeat("curator", "✨ Curator", "working", pickTask("curator"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1324,7 +1455,7 @@ async function tickEngineer() {
     return;
   }
 
-  await heartbeat("engineer", "⚙️ Engineer", "idle", thought ?? "checking infrastructure health");
+  await heartbeat("engineer", "⚙️ Engineer", "working", pickTask("engineer"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1422,7 +1553,7 @@ async function tickMandor() {
 
   await recordMetric("mandor", "mandate_cycle", String(candidates.length), "agents mandated");
   log("mandor", `Supervision cycle: ${agentStatuses.length} agents monitored, ${candidates.length} mandated`);
-  await heartbeat("mandor", "👑 Mandor", "idle", thought ?? "supervising all agents 24/7");
+  await heartbeat("mandor", "👑 Mandor", "working", pickTask("mandor"));
 }
 
 // ─── Agent Collaboration Thread System ───────────────────────────────────────
@@ -1621,7 +1752,7 @@ async function tickResearcher() {
     return;
   }
 
-  await heartbeat("researcher", "🔬 Researcher", "idle", thought ?? "researching AI trends");
+  await heartbeat("researcher", "🔬 Researcher", "working", pickTask("researcher"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1757,7 +1888,7 @@ async function tickDeployer() {
     return;
   }
 
-  await heartbeat("deployer", "🚀 Deployer", "idle", thought ?? "monitoring deployment health");
+  await heartbeat("deployer", "🚀 Deployer", "working", pickTask("deployer"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1903,7 +2034,7 @@ async function tickCodeReviewer() {
     return;
   }
 
-  await heartbeat("reviewer", "👁️ Code Reviewer", "idle", thought ?? "reviewing code and data quality");
+  await heartbeat("reviewer", "👁️ Code Reviewer", "working", pickTask("reviewer"));
 }
 
 // ─── Worker Registry & Scheduler ─────────────────────────────────────────────

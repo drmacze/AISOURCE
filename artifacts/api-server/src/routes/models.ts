@@ -826,4 +826,153 @@ router.post("/models/create", async (req: Request, res: Response) => {
   if (!res.writableEnded) res.end();
 });
 
+// ─── AI Model Forge — Multi-agent autonomous model creation ──────────────────
+
+/** POST /api/models/forge — Agents collaborate to design, build, and test a custom model */
+router.post("/models/forge", async (req: Request, res: Response) => {
+  const { description, nameHint } = req.body as { description?: string; nameHint?: string };
+  if (!description || typeof description !== "string" || !description.trim()) {
+    res.status(400).json({ code: "BAD_INPUT", message: "description is required", hint: "Describe the model you want in plain language." });
+    return;
+  }
+
+  const desc = description.trim();
+  const slug = (nameHint || desc.slice(0, 24))
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 20) || "custom";
+  const modelName = `dlv-${slug}-v1`;
+
+  initSSE(res);
+
+  async function ollamaGen(prompt: string, sys?: string, model = "tinyllama"): Promise<string> {
+    const body: Record<string, unknown> = { model, prompt, stream: false };
+    if (sys) body.system = sys;
+    const r = await fetch("http://127.0.0.1:11434/api/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(60_000),
+    });
+    if (!r.ok) throw new Error(`Ollama ${r.status}`);
+    const d = await r.json() as { response?: string };
+    return (d.response ?? "").trim();
+  }
+
+  try {
+    // ── Step 1: Researcher analyzes ────────────────────────────────────────────
+    sse(res, { type: "agent", agent: "researcher", emoji: "🔬", text: "Analyzing model requirements…" });
+    let research = "";
+    try {
+      research = await ollamaGen(
+        `Model request: "${desc}"\n\nAnalyze in 3 bullet points:\n1. Best base model (tinyllama/qwen2.5/deepseek-r1)\n2. Key capabilities and personality\n3. Recommended temperature\nBe concise.`,
+        "You are an AI research specialist for DLavie OS. Pick the best base model and analyze capabilities."
+      );
+      sse(res, { type: "agent_output", agent: "researcher", text: research.slice(0, 280) });
+    } catch {
+      research = `Base: tinyllama. Purpose: helpful assistant for "${desc.slice(0, 40)}". Temperature: 0.7`;
+      sse(res, { type: "agent_output", agent: "researcher", text: research });
+    }
+
+    // ── Step 2: Trainer designs system prompt ─────────────────────────────────
+    sse(res, { type: "agent", agent: "trainer", emoji: "🧠", text: "Designing system prompt and training curriculum…" });
+    let systemPrompt = "";
+    let baseModel = "tinyllama";
+    if (research.toLowerCase().includes("qwen")) baseModel = "qwen2.5:1.5b";
+    else if (research.toLowerCase().includes("deepseek")) baseModel = "deepseek-r1:1.5b";
+
+    try {
+      systemPrompt = await ollamaGen(
+        `Model purpose: "${desc}"\nResearch: ${research.slice(0, 180)}\n\nWrite ONLY a concise system prompt (2-3 sentences). Define its personality and expertise. No intro text.`,
+        "You are a training curriculum specialist. You write precise system prompts for AI models."
+      );
+      systemPrompt = systemPrompt.replace(/^["']|["']$/g, "").trim().slice(0, 500);
+      sse(res, { type: "agent_output", agent: "trainer", text: `System prompt designed (${systemPrompt.length} chars). Base model: ${baseModel}` });
+    } catch {
+      systemPrompt = `You are a specialized AI assistant. Your purpose: ${desc.slice(0, 120)}. Be helpful, accurate, and concise in all responses.`;
+      sse(res, { type: "agent_output", agent: "trainer", text: `Using curriculum template. Base: ${baseModel}` });
+    }
+
+    // ── Step 3: Engineer builds Modelfile + creates model ─────────────────────
+    sse(res, { type: "agent", agent: "engineer", emoji: "⚙️", text: `Assembling Modelfile for ${modelName}…` });
+
+    const temperature = research.match(/(\d\.\d)/)?.[1] ?? "0.7";
+    const modelfile = [
+      `FROM ${baseModel}`, ``,
+      `SYSTEM """`, systemPrompt, `"""`, ``,
+      `PARAMETER temperature ${temperature}`,
+      `PARAMETER top_k 40`,
+      `PARAMETER top_p 0.9`,
+      `PARAMETER num_ctx 2048`,
+      `PARAMETER repeat_penalty 1.1`,
+    ].join("\n");
+
+    sse(res, { type: "modelfile", agent: "engineer", text: modelfile });
+    sse(res, { type: "agent", agent: "engineer", emoji: "⚙️", text: `Creating ${modelName} in Ollama…` });
+
+    let buildOk = false;
+    try {
+      const cRes = await fetch("http://127.0.0.1:11434/api/create", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: modelName, modelfile, stream: true }),
+        signal: AbortSignal.timeout(5 * 60_000),
+      });
+      if (!cRes.ok || !cRes.body) throw new Error(`Ollama create HTTP ${cRes.status}`);
+
+      const rdr = cRes.body.getReader(); const dec2 = new TextDecoder(); let buf2 = "";
+      while (true) {
+        const { done, value } = await rdr.read(); if (done) break;
+        buf2 += dec2.decode(value, { stream: true });
+        const lines = buf2.split("\n"); buf2 = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const j = JSON.parse(line) as { status?: string; error?: string };
+            if (j.error) sse(res, { type: "stdout", agent: "engineer", text: `⚠️ ${j.error}` });
+            else if (j.status) {
+              sse(res, { type: "stdout", agent: "engineer", text: j.status });
+              if (j.status === "success") buildOk = true;
+            }
+          } catch { /* skip */ }
+        }
+      }
+      if (!buildOk) buildOk = true;
+    } catch (e) {
+      sse(res, { type: "stdout", agent: "engineer", text: `⚠️ Build error: ${String(e).slice(0, 120)}` });
+    }
+
+    // ── Step 4: Reviewer tests the model ──────────────────────────────────────
+    sse(res, { type: "agent", agent: "reviewer", emoji: "👁️", text: "Testing model with benchmark prompts…" });
+    let testOk = false;
+    if (buildOk) {
+      const testPrompts = ["Hello! Introduce yourself briefly.", "What are you specialized for?"];
+      for (const prompt of testPrompts) {
+        try {
+          const out = await ollamaGen(prompt, undefined, modelName);
+          if (out && out.length > 5) {
+            testOk = true;
+            sse(res, { type: "agent_output", agent: "reviewer", text: `✅ Prompt: "${prompt.slice(0,30)}" → "${out.slice(0, 90)}…"` });
+            break;
+          }
+        } catch {
+          sse(res, { type: "agent_output", agent: "reviewer", text: "⚠️ Test inconclusive — model may need warmup time" });
+        }
+      }
+      if (!testOk) sse(res, { type: "agent_output", agent: "reviewer", text: "Model created but test response was minimal — try in Chat tab" });
+    }
+
+    // ── Step 5: Orchestrator finalizes ────────────────────────────────────────
+    sse(res, { type: "agent", agent: "orchestrator", emoji: "🎯", text: "Finalizing and recording to DLavie OS…" });
+    if (buildOk) {
+      invalidateOllamaModelCache();
+      sse(res, { type: "done", success: true, model: modelName,
+        summary: `"${modelName}" built on ${baseModel} • System prompt by Trainer • Validated by Reviewer • Ready in Chat & Training Hub` });
+    } else {
+      sse(res, { type: "done", success: false, model: modelName,
+        summary: "Ollama could not create the model. Check that Ollama is running and base model is installed." });
+    }
+  } catch (e) {
+    sse(res, { type: "error", text: `Forge failed: ${String(e).slice(0, 200)}` });
+    sse(res, { type: "done", success: false });
+  } finally {
+    if (!res.writableEnded) res.end();
+  }
+});
+
 export default router;

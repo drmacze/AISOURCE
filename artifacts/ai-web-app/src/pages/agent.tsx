@@ -313,20 +313,41 @@ function IsoDesk({ cx, cy, deskColor, active, collaborating }: {
   const right = `${cx + hw},${cy} ${cx},${cy + hh} ${cx},${cy + hh + th} ${cx + hw},${cy + th}`;
   return (
     <>
+      {/* Neon floor glow when active — desk radiates on the ground */}
+      {active && (
+        <ellipse cx={cx} cy={cy + hh + 6} rx={hw + 16} ry={9} fill={deskColor} opacity={0.10} filter="url(#neonDesk)">
+          <animate attributeName="opacity" values="0.10;0.22;0.10" dur="1.6s" repeatCount="indefinite"/>
+          <animate attributeName="rx" values={`${hw+14};${hw+20};${hw+14}`} dur="1.6s" repeatCount="indefinite"/>
+        </ellipse>
+      )}
       {collaborating && (
         <ellipse cx={cx} cy={cy + 4} rx={hw + 8} ry={hh + 4}
           fill="none" stroke="#a78bfa" strokeWidth={1.5} opacity={0.6}>
           <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" repeatCount="indefinite"/>
         </ellipse>
       )}
-      <polygon points={top}   fill={topF}          />
-      <polygon points={left}  fill="#00000055"      />
-      <polygon points={right} fill="#00000033"      />
+      <polygon points={top} fill={topF} filter={active ? "url(#neonDesk)" : undefined}/>
+      <polygon points={left}  fill="#00000055"/>
+      <polygon points={right} fill="#00000033"/>
+      {/* Neon desk top edge highlight when active */}
+      {active && (
+        <line x1={cx - hw} y1={cy} x2={cx} y2={cy - hh} stroke={deskColor} strokeWidth={1} opacity={0.7} filter="url(#neonDesk)">
+          <animate attributeName="opacity" values="0.7;1;0.7" dur="1s" repeatCount="indefinite"/>
+        </line>
+      )}
       {/* Monitor */}
       <rect x={cx - 8} y={cy - hh - 12} width={16} height={10} rx={1} fill="#0f172a"/>
-      <rect x={cx - 7} y={cy - hh - 11} width={14} height={8}  rx={0.5} fill={active ? "#1e3a5f" : "#111827"}/>
-      {active && <rect x={cx - 6} y={cy - hh - 10} width={4} height={1} fill={deskColor} opacity={0.8}/>}
-      {active && <rect x={cx - 6} y={cy - hh - 8}  width={7} height={1} fill={deskColor} opacity={0.5}/>}
+      <rect x={cx - 7} y={cy - hh - 11} width={14} height={8} rx={0.5}
+        fill={active ? "#1e4070" : "#111827"} filter={active ? "url(#neonDesk)" : undefined}/>
+      {/* Neon monitor glow overlay */}
+      {active && <rect x={cx - 7} y={cy - hh - 11} width={14} height={8} rx={0.5} fill={deskColor} opacity={0.12} filter="url(#neonDesk)"/>}
+      {active && <rect x={cx - 6} y={cy - hh - 10} width={4}  height={1} fill={deskColor} opacity={0.95}/>}
+      {active && <rect x={cx - 6} y={cy - hh - 8}  width={7}  height={1} fill={deskColor} opacity={0.65}/>}
+      {active && (
+        <rect x={cx - 6} y={cy - hh - 6} width={5} height={1} fill={deskColor} opacity={0.45}>
+          <animate attributeName="width" values="2;9;4;7;3;8;5" dur="2.2s" repeatCount="indefinite"/>
+        </rect>
+      )}
       {/* Keyboard */}
       <rect x={cx - 7} y={cy - hh + 2} width={14} height={4} rx={0.5} fill="#0f172a" opacity={0.7}/>
       {/* Coffee cup */}
@@ -349,10 +370,27 @@ function AgentChar({ cx, cy, def, status, collaborating, hovered, thoughtText, e
 
   return (
     <motion.g initial={{ opacity: 0, y: -4 }} animate={{ opacity: isOffline ? 0.35 : 1, y: 0 }} transition={{ duration: 0.4 }}>
+      {/* ── NEON WORKING RINGS — dramatic bloom effect ───────────────────────── */}
       {isWorking && (
-        <ellipse cx={cx} cy={cy + 2} rx={14} ry={7} fill={color} opacity={0.18}>
-          <animate attributeName="opacity" values="0.18;0.38;0.18" dur="2s" repeatCount="indefinite"/>
-        </ellipse>
+        <>
+          {/* Outermost slow pulse */}
+          <ellipse cx={cx} cy={cy + 2} rx={30} ry={13} fill={color} opacity={0.05} filter="url(#neonGlow)">
+            <animate attributeName="opacity" values="0.05;0.14;0.05" dur="2s" repeatCount="indefinite"/>
+            <animate attributeName="rx" values="28;33;28" dur="2s" repeatCount="indefinite"/>
+          </ellipse>
+          {/* Middle ring — stroke glow */}
+          <ellipse cx={cx} cy={cy + 2} rx={22} ry={10} fill="none" stroke={color} strokeWidth={1.8} opacity={0.55} filter="url(#neonGlow)">
+            <animate attributeName="opacity" values="0.55;1;0.55" dur="1s" repeatCount="indefinite"/>
+            <animate attributeName="rx" values="22;24;22" dur="1s" repeatCount="indefinite"/>
+          </ellipse>
+          {/* Inner bright fill */}
+          <ellipse cx={cx} cy={cy + 2} rx={15} ry={7} fill={color} opacity={0.28} filter="url(#neonGlow)">
+            <animate attributeName="opacity" values="0.28;0.52;0.28" dur="0.75s" repeatCount="indefinite"/>
+          </ellipse>
+        </>
+      )}
+      {!isWorking && (
+        <ellipse cx={cx} cy={cy + 2} rx={14} ry={7} fill={color} opacity={0.08}/>
       )}
       {collaborating && (
         <ellipse cx={cx} cy={cy + 2} rx={16} ry={8} fill="none" stroke="#a78bfa" strokeWidth={1.2} opacity={0.7}>
@@ -360,12 +398,14 @@ function AgentChar({ cx, cy, def, status, collaborating, hovered, thoughtText, e
         </ellipse>
       )}
       <ellipse cx={cx} cy={cy + 4} rx={9} ry={5} fill={`${color}55`}/>
-      <circle cx={cx} cy={cy - 2} r={8} fill={color}/>
+      <circle cx={cx} cy={cy - 2} r={8} fill={color} filter={isWorking ? "url(#neonGlow)" : undefined}/>
       <circle cx={cx} cy={cy - 2} r={6.5} fill={`${color}cc`}/>
       <text x={cx} y={cy + 2} textAnchor="middle" fontSize={8} style={{ userSelect: "none" }}>{def.emoji}</text>
-      <circle cx={cx + 7} cy={cy - 8} r={2.5}
-        fill={isError ? "#ef4444" : isOffline ? "#475569" : isWorking ? "#22c55e" : "#eab308"}>
-        {isWorking && <animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite"/>}
+      {/* Status dot — bigger + neon when working */}
+      <circle cx={cx + 7} cy={cy - 8} r={isWorking ? 3.5 : 2.5}
+        fill={isError ? "#ef4444" : isOffline ? "#475569" : isWorking ? "#22c55e" : "#eab308"}
+        filter={isWorking ? "url(#neonGlow)" : undefined}>
+        {isWorking && <animate attributeName="opacity" values="1;0.25;1" dur="0.7s" repeatCount="indefinite"/>}
       </circle>
       {/* Thought bubble when hovered */}
       {hovered && thoughtText && (
@@ -462,6 +502,21 @@ function OfficeScene({ agentStatuses, selectedAgent, onSelectAgent, particles, a
         </filter>
         <filter id="softglow">
           <feGaussianBlur stdDeviation="5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        {/* Neon bloom filter — applied to working agent rings + status dot */}
+        <filter id="neonGlow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur1"/>
+          <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur2"/>
+          <feMerge>
+            <feMergeNode in="blur1"/>
+            <feMergeNode in="blur2"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        {/* Soft desk glow */}
+        <filter id="neonDesk" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
           <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
       </defs>
@@ -1712,45 +1767,31 @@ function DevAgentTab({ recentMail }: { recentMail: MailItem[] }) {
 
 // ─── Model Create Tab ─────────────────────────────────────────────────────────
 
-function ModelCreateTab() {
-  const [form, setForm] = useState({
-    modelName: "", baseModel: "tinyllama", systemPrompt: "",
-    temperature: "0.7", topK: "", topP: "", numCtx: "", stopSequence: "",
-  });
-  const [log, setLog] = useState<Array<{ type: string; text: string }>>([]);
+function AIForgeTab() {
+  const [description, setDescription] = useState("");
+  const [nameHint, setNameHint] = useState("");
+  const [steps, setSteps] = useState<Array<{
+    agent: string; emoji: string; text: string; output?: string; type: string;
+  }>>([]);
+  const [modelfile, setModelfile] = useState("");
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; model?: string } | null>(null);
-  const [models, setModels] = useState<string[]>(["tinyllama"]);
-  const logRef = useRef<HTMLDivElement>(null);
+  const [result, setResult] = useState<{ success: boolean; model?: string; summary?: string } | null>(null);
+  const stepsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/models").then(r => r.json()).then((d: { models?: Array<{ name: string }> }) => {
-      if (d.models?.length) setModels(d.models.map(m => m.name));
-    }).catch(() => {});
-  }, []);
+    stepsRef.current?.scrollTo({ top: stepsRef.current.scrollHeight, behavior: "smooth" });
+  }, [steps]);
 
-  useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [log]);
-
-  async function handleCreate() {
-    if (!form.modelName.trim() || running) return;
-    setRunning(true); setLog([]); setResult(null);
-    const resp = await fetch("/api/models/create", {
+  async function handleForge() {
+    if (!description.trim() || running) return;
+    setRunning(true); setSteps([]); setModelfile(""); setResult(null);
+    const resp = await fetch("/api/models/forge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        modelName: form.modelName, baseModel: form.baseModel,
-        systemPrompt: form.systemPrompt,
-        temperature: parseFloat(form.temperature) || 0.7,
-        topK: form.topK ? parseInt(form.topK) : undefined,
-        topP: form.topP ? parseFloat(form.topP) : undefined,
-        numCtx: form.numCtx ? parseInt(form.numCtx) : undefined,
-        stopSequence: form.stopSequence || undefined,
-      }),
+      body: JSON.stringify({ description, nameHint: nameHint || undefined }),
     });
     if (!resp.ok || !resp.body) {
-      setLog([{ type: "error", text: `Request failed: HTTP ${resp.status}` }]);
+      setSteps([{ agent: "system", emoji: "❌", text: `Request failed: HTTP ${resp.status}`, type: "error" }]);
       setRunning(false); return;
     }
     const reader = resp.body.getReader();
@@ -1766,115 +1807,173 @@ function ModelCreateTab() {
         const dataLine = part.split("\n").find(l => l.startsWith("data:"));
         if (!dataLine) continue;
         try {
-          const obj = JSON.parse(dataLine.slice(5)) as { type: string; text?: string; success?: boolean; model?: string };
-          if (obj.type === "done") { setResult({ success: obj.success ?? false, model: obj.model }); }
-          else { setLog(l => [...l, { type: obj.type, text: obj.text ?? "" }]); }
+          const obj = JSON.parse(dataLine.slice(5)) as {
+            type: string; agent?: string; emoji?: string; text?: string;
+            success?: boolean; model?: string; summary?: string;
+          };
+          if (obj.type === "done") {
+            setResult({ success: obj.success ?? false, model: obj.model, summary: obj.summary });
+          } else if (obj.type === "modelfile") {
+            setModelfile(obj.text ?? "");
+            setSteps(s => [...s, { agent: obj.agent ?? "engineer", emoji: "📄", text: "Modelfile generated", type: "modelfile" }]);
+          } else if (obj.type === "agent") {
+            setSteps(s => [...s, { agent: obj.agent ?? "system", emoji: obj.emoji ?? "🤖", text: obj.text ?? "", type: "agent" }]);
+          } else if (obj.type === "agent_output") {
+            setSteps(s => {
+              const copy = [...s];
+              const idx = [...copy].reverse().findIndex(st => st.agent === obj.agent && st.type === "agent");
+              if (idx >= 0) {
+                const ri = copy.length - 1 - idx;
+                copy[ri] = { ...copy[ri]!, output: obj.text };
+                return copy;
+              }
+              return [...copy, { agent: obj.agent ?? "system", emoji: "💬", text: obj.text ?? "", type: "output" }];
+            });
+          } else if (obj.type === "stdout") {
+            setSteps(s => [...s, { agent: obj.agent ?? "system", emoji: "⚡", text: obj.text ?? "", type: "stdout" }]);
+          } else if (obj.type === "error") {
+            setSteps(s => [...s, { agent: "system", emoji: "❌", text: obj.text ?? "", type: "error" }]);
+          }
         } catch { /* skip */ }
       }
     }
     setRunning(false);
   }
 
-  const logColor = (t: string) =>
-    t === "error" ? "text-red-400" : t === "info" ? "text-blue-400" :
-    t === "modelfile" ? "text-violet-300" : "text-emerald-300";
+  const AGENT_COLORS: Record<string, string> = {
+    researcher: "text-violet-400", trainer: "text-emerald-400",
+    engineer: "text-blue-400", reviewer: "text-amber-400", orchestrator: "text-rose-400",
+  };
 
   return (
     <div className="flex h-full gap-4 overflow-hidden">
-      {/* Left — Config form */}
+      {/* Left panel */}
       <div className="w-80 flex-shrink-0 flex flex-col gap-3 overflow-y-auto pb-2">
         <div className="flex items-center gap-2 flex-shrink-0">
           <Cpu className="w-4 h-4 text-violet-400"/>
-          <span className="text-sm font-semibold text-slate-200">Create AI Model</span>
-          <span className="text-[10px] text-slate-500">Ollama Modelfile</span>
+          <span className="text-sm font-semibold text-slate-200">AI Model Forge</span>
+          <span className="text-[10px] text-slate-500 bg-violet-900/30 border border-violet-700/30 px-1.5 py-0.5 rounded">Agent-Driven</span>
         </div>
         <div className="bg-slate-900/60 border border-slate-700/40 rounded-xl p-3 space-y-3">
-          <div>
-            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">Model Name *</label>
-            <input value={form.modelName} onChange={e => setForm(f => ({ ...f, modelName: e.target.value }))}
-              placeholder="e.g. my-coder-v1"
-              className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500/50"/>
+          <div className="text-[10px] text-slate-400 leading-relaxed border-b border-slate-700/30 pb-2">
+            Describe what you want. Agents will autonomously{" "}
+            <span className="text-violet-400 font-medium">research</span>,{" "}
+            <span className="text-emerald-400 font-medium">design</span>,{" "}
+            <span className="text-blue-400 font-medium">build</span>, and{" "}
+            <span className="text-amber-400 font-medium">test</span>{" "}your custom model.
           </div>
           <div>
-            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">Base Model</label>
-            <select value={form.baseModel} onChange={e => setForm(f => ({ ...f, baseModel: e.target.value }))}
-              className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none">
-              {models.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">System Prompt</label>
-            <textarea value={form.systemPrompt} onChange={e => setForm(f => ({ ...f, systemPrompt: e.target.value }))}
-              rows={5} placeholder="You are a helpful assistant specialized in..."
+            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">Describe Your Model *</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={5}
+              placeholder={"e.g. A coding assistant specialized in TypeScript and React that explains code clearly and suggests best practices..."}
               className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 placeholder:text-slate-600 resize-none focus:outline-none focus:border-violet-500/50"/>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">Model Name Hint (optional)</label>
+            <input value={nameHint} onChange={e => setNameHint(e.target.value)}
+              placeholder="e.g. ts-expert  (auto-generated if empty)"
+              className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500/50"/>
+          </div>
+          <button onClick={handleForge} disabled={running || !description.trim()}
+            className="w-full flex items-center justify-center gap-2 text-xs py-2.5 rounded-lg bg-violet-600/30 border border-violet-500/40 text-violet-300 hover:bg-violet-600/50 transition-colors disabled:opacity-40">
+            {running ? <><Loader2 className="w-3.5 h-3.5 animate-spin"/> Agents working…</> : <><Cpu className="w-3.5 h-3.5"/> Engage Agent Team</>}
+          </button>
+
+          {/* Agent team legend */}
+          <div className="border-t border-slate-700/30 pt-2.5 space-y-1.5">
+            <div className="text-[9px] text-slate-500 uppercase tracking-wide">Agent Team</div>
             {[
-              { label: "Temperature", key: "temperature", placeholder: "0.7", type: "number", step: "0.1" },
-              { label: "Top-K",       key: "topK",        placeholder: "40",  type: "number", step: "1"   },
-              { label: "Top-P",       key: "topP",        placeholder: "0.95",type: "number", step: "0.05"},
-              { label: "Context",     key: "numCtx",      placeholder: "2048",type: "number", step: "1"   },
-            ].map(f => (
-              <div key={f.key}>
-                <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">{f.label}</label>
-                <input value={(form as Record<string, string>)[f.key]} type={f.type} step={f.step}
-                  onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                  placeholder={f.placeholder}
-                  className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1.5 text-slate-200 focus:outline-none focus:border-violet-500/50"/>
+              { emoji: "🔬", name: "Researcher", role: "Selects base model & analyzes needs", color: "text-violet-400" },
+              { emoji: "🧠", name: "Trainer",    role: "Designs system prompt & curriculum",  color: "text-emerald-400" },
+              { emoji: "⚙️", name: "Engineer",   role: "Builds Modelfile & creates in Ollama", color: "text-blue-400" },
+              { emoji: "👁️", name: "Reviewer",   role: "Tests & validates model output",       color: "text-amber-400" },
+              { emoji: "🎯", name: "Orchestrator", role: "Finalizes & records to system",      color: "text-rose-400" },
+            ].map(a => (
+              <div key={a.name} className="flex items-start gap-1.5 text-[9px] leading-tight">
+                <span className="mt-0.5">{a.emoji}</span>
+                <div><span className={`font-semibold ${a.color}`}>{a.name}</span>
+                  <span className="text-slate-500"> — {a.role}</span></div>
               </div>
             ))}
           </div>
-          <div>
-            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">Stop Sequence</label>
-            <input value={form.stopSequence} onChange={e => setForm(f => ({ ...f, stopSequence: e.target.value }))}
-              placeholder='e.g. "###"'
-              className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500/50"/>
-          </div>
-          <button onClick={handleCreate} disabled={running || !form.modelName.trim()}
-            className="w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg bg-violet-600/30 border border-violet-500/40 text-violet-300 hover:bg-violet-600/50 transition-colors disabled:opacity-40">
-            {running ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Sparkles className="w-3.5 h-3.5"/>}
-            {running ? "Building model…" : "Create Model"}
-          </button>
         </div>
       </div>
 
-      {/* Right — Build log */}
-      <div className="flex-1 min-w-0 flex flex-col gap-2">
+      {/* Right — Agent collaboration feed */}
+      <div className="flex-1 min-w-0 flex flex-col gap-3 overflow-hidden">
         <div className="flex items-center gap-2 flex-shrink-0">
-          <TerminalSquare className="w-4 h-4 text-emerald-400"/>
-          <span className="text-xs font-semibold text-slate-200">Build Log</span>
-          {running && <Loader2 className="w-3 h-3 animate-spin text-violet-400"/>}
+          <Bot className="w-4 h-4 text-emerald-400"/>
+          <span className="text-sm font-semibold text-slate-200">Agent Collaboration</span>
+          {running && <span className="text-[10px] text-violet-400 animate-pulse font-mono">● LIVE</span>}
           {result && (
-            <span className={cn("text-xs px-2 py-0.5 rounded-full border",
-              result.success ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-red-500/10 border-red-500/30 text-red-400")}>
-              {result.success ? `✅ ${result.model ?? "Created"}` : "❌ Failed"}
+            <span className={cn("text-[10px] px-2 py-0.5 rounded-full border font-medium",
+              result.success
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                : "bg-red-500/10 border-red-500/30 text-red-400")}>
+              {result.success ? `✅ ${result.model}` : "❌ Failed"}
             </span>
           )}
         </div>
-        <div ref={logRef}
-          className="flex-1 min-h-0 overflow-y-auto bg-[#020810] border border-slate-800/60 rounded-xl p-3 font-mono text-[11px] space-y-0.5">
-          {log.length === 0 && !running && (
-            <div className="text-center text-slate-600 mt-8">
-              <Cpu className="w-8 h-8 mx-auto mb-2 opacity-20"/>
-              <p>Configure a model on the left and click Create</p>
-              <p className="opacity-50 mt-1 text-[10px]">Ollama streams build progress here in real time</p>
+
+        {/* Live steps feed */}
+        <div ref={stepsRef} className="flex-1 min-h-0 overflow-y-auto space-y-1.5 bg-[#020810] rounded-xl p-3 border border-slate-800/60 font-mono text-xs">
+          {steps.length === 0 && !running && (
+            <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-3 py-8">
+              <Cpu className="w-10 h-10 opacity-20"/>
+              <div className="text-center text-[11px]">
+                <div className="text-slate-400 mb-1 font-sans font-medium">AI Model Forge</div>
+                <span className="font-sans text-slate-500">Describe what you want → agents will autonomously<br/>
+                research, design, build, and test your custom AI model.</span>
+              </div>
             </div>
           )}
-          {log.map((l, i) => (
-            <div key={i} className={cn("leading-relaxed whitespace-pre-wrap break-all", logColor(l.type))}>
-              <span className="text-slate-700 select-none mr-1">{String(i).padStart(3, "0")}</span>
-              {l.text}
+          {steps.map((step, i) => (
+            <div key={i} className={cn("flex gap-2 leading-relaxed", step.type === "stdout" ? "opacity-50" : "")}>
+              <span className="flex-shrink-0 w-5 text-center">{step.emoji}</span>
+              <div className="flex-1 min-w-0">
+                {step.type !== "stdout" && step.agent !== "system" && (
+                  <span className={cn("font-bold mr-1.5", AGENT_COLORS[step.agent] ?? "text-slate-400")}>
+                    [{step.agent}]
+                  </span>
+                )}
+                <span className={cn(
+                  step.type === "error"    ? "text-red-400" :
+                  step.type === "modelfile"? "text-violet-300" :
+                  step.type === "stdout"  ? "text-slate-500" :
+                  step.type === "agent"   ? "text-slate-200 font-medium" : "text-slate-300"
+                )}>{step.text}</span>
+                {step.output && (
+                  <div className="mt-1 pl-2 border-l border-slate-700/50 text-slate-400 text-[10px] leading-relaxed whitespace-pre-wrap break-all">
+                    {step.output.slice(0, 220)}{step.output.length > 220 ? "…" : ""}
+                  </div>
+                )}
+              </div>
             </div>
           ))}
-          {running && <div className="text-violet-400 animate-pulse">▊</div>}
+          {running && <div className="text-violet-400 animate-pulse pl-7">▊</div>}
         </div>
-        {result?.success && (
-          <div className="flex-shrink-0 bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 text-xs">
-            <div className="flex items-center gap-2 mb-1">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400"/>
-              <span className="font-semibold text-emerald-300">Model created: {result.model}</span>
+
+        {/* Modelfile preview */}
+        {modelfile && (
+          <div className="flex-shrink-0 bg-slate-900/60 rounded-xl border border-slate-700/30 p-3 max-h-36 overflow-y-auto">
+            <div className="text-[9px] text-violet-400 uppercase tracking-wide mb-1.5 font-semibold">Generated Modelfile</div>
+            <pre className="text-[10px] text-violet-300 font-mono whitespace-pre-wrap">{modelfile}</pre>
+          </div>
+        )}
+
+        {/* Result banner */}
+        {result && (
+          <div className={cn("flex-shrink-0 rounded-xl p-3 border text-xs flex items-start gap-3",
+            result.success
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+              : "bg-red-500/10 border-red-500/30 text-red-300")}>
+            <span className="text-xl mt-0.5">{result.success ? "✅" : "❌"}</span>
+            <div>
+              {result.success
+                ? <><strong className="text-emerald-200">{result.model}</strong> created — available in Chat &amp; Training Hub</>
+                : "Creation failed. Check Ollama status and try again."}
+              {result.summary && <div className="text-[10px] opacity-70 mt-1 leading-relaxed">{result.summary}</div>}
             </div>
-            <p className="text-emerald-400/70">Available in Ollama now. Use it in Chat tab or via the API.</p>
           </div>
         )}
       </div>
@@ -2235,7 +2334,7 @@ export default function AgentPage() {
 
         {activeTab === "modelcreate" && (
           <div className="h-full p-4">
-            <ModelCreateTab/>
+            <AIForgeTab/>
           </div>
         )}
       </div>
