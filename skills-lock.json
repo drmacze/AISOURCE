@@ -85,6 +85,18 @@
       "skillPath": "plugins/developer-essentials/skills/code-review-excellence/SKILL.md",
       "computedHash": "0f585a4ad2f6d8353069ca9051c6f0e8865abb9d3a6a268d423784c3c3852962"
     },
+    "code-review-expert": {
+      "source": "sanyuan0704/code-review-expert",
+      "sourceType": "github",
+      "skillPath": "skills/code-review-expert/SKILL.md",
+      "computedHash": "6c2fe31851a34e63e033257527eab04eea835ca1cf4c4276d1392a323e36e377"
+    },
+    "codex": {
+      "source": "softaworks/agent-toolkit",
+      "sourceType": "github",
+      "skillPath": "skills/codex/SKILL.md",
+      "computedHash": "4b7e8695807b567a7a7d467ab15b3da330aa0a847827067d79c654c540a72fe9"
+    },
     "command-creator": {
       "source": "softaworks/agent-toolkit",
       "sourceType": "github",
@@ -120,6 +132,12 @@
       "sourceType": "github",
       "skillPath": "skills/database-schema-designer/SKILL.md",
       "computedHash": "6a26ca15216bb4bfee66ebf813edcb1e31a8002f3f641f16f550df814b522217"
+    },
+    "dbt-transformation-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/data-engineering/skills/dbt-transformation-patterns/SKILL.md",
+      "computedHash": "7c726cca289a2319729a64d6ab31c6f193602f225c43b8ace6c8b5cc45837f69"
     },
     "debugging-strategies": {
       "source": "wshobson/agents",
@@ -325,6 +343,12 @@
       "skillPath": "plugins/frontend-mobile-development/skills/nextjs-app-router-patterns/SKILL.md",
       "computedHash": "b4fea42eecf1f803155ef7fa133d5286ee8f2dbba3e616954e9e43c6f0ffc144"
     },
+    "nft-standards": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/blockchain-web3/skills/nft-standards/SKILL.md",
+      "computedHash": "815b2aa27103dac4673053e891c4c82738369bb4b7e30c884ca08d3699265d8f"
+    },
     "nodejs-backend-patterns": {
       "source": "wshobson/agents",
       "sourceType": "github",
@@ -367,6 +391,18 @@
       "skillPath": "plugins/observability-monitoring/skills/prometheus-configuration/SKILL.md",
       "computedHash": "afeed1538c349e46d0e047c0cf5089dcdf0c0e6d450598bba1f86634a15d37dd"
     },
+    "prompt-engineering-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/llm-application-dev/skills/prompt-engineering-patterns/SKILL.md",
+      "computedHash": "de45b8066301dda62d6912dfe54c4062bad1f4259a7231a9e98c55b10c49fa2e"
+    },
+    "protocol-reverse-engineering": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/reverse-engineering/skills/protocol-reverse-engineering/SKILL.md",
+      "computedHash": "9937cd621efd79a150ee15df6b6532fd08688b09484989466845b692271dd7ac"
+    },
     "python-packaging": {
       "source": "wshobson/agents",
       "sourceType": "github",
@@ -384,6 +420,12 @@
       "sourceType": "github",
       "skillPath": "plugins/python-development/skills/python-testing-patterns/SKILL.md",
       "computedHash": "1306eea409e7eff2288d7658806cb508f18339a0ee9a686d324a0fd2570eae55"
+    },
+    "qa-test-planner": {
+      "source": "softaworks/agent-toolkit",
+      "sourceType": "github",
+      "skillPath": "skills/qa-test-planner/SKILL.md",
+      "computedHash": "c7a27e535b0a21a9ed22578ca0e37a00a00f43b775efe791a2d4be849ce8ffa9"
     },
     "rag-implementation": {
       "source": "wshobson/agents",
@@ -511,6 +553,12 @@
       "skillPath": "plugins/frontend-mobile-development/skills/tailwind-design-system/SKILL.md",
       "computedHash": "cd61afd28f594e8b6712b61749209cbb4466e3eec4e4223793bbd97fc85c1b63"
     },
+    "technical-blog-writing": {
+      "source": "skill-zero/s",
+      "sourceType": "github",
+      "skillPath": "guides/writing/technical-blog-writing/SKILL.md",
+      "computedHash": "8f2edaf29395597a5ff7d81f7945ec275f38aa609be54ccddf9b175e130adbaf"
+    },
     "temporal-python-testing": {
       "source": "wshobson/agents",
       "sourceType": "github",
@@ -522,6 +570,30 @@
       "sourceType": "github",
       "skillPath": "skills/test-driven-development/SKILL.md",
       "computedHash": "126f1ebf6ccd414f42544f6e83d8cc5adb089e1108eaffb7c400701e37eecd9f"
+    },
+    "threejs-fundamentals": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-fundamentals/SKILL.md",
+      "computedHash": "e08d49571071f0f54ef2a76fdfcb96c16673e4fda478067727def4659feb80ca"
+    },
+    "threejs-geometry": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-geometry/SKILL.md",
+      "computedHash": "4e5757bf80a329810545c237e557e362fa14fd3a3e6a567ec1d75435be6b2dda"
+    },
+    "threejs-interaction": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-interaction/SKILL.md",
+      "computedHash": "988d235b7ebd85276a584c6f81ce7c801280ebc45b401017b334136dc8a7ec82"
+    },
+    "threejs-loaders": {
+      "source": "cloudai-x/threejs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/threejs-loaders/SKILL.md",
+      "computedHash": "f2cceed635fd7a2119acf6e5b1a2fcba63a0e52cf2514c1830a69e4744554fcc"
     },
     "threejs-materials": {
       "source": "cloudai-x/threejs-skills",
@@ -564,6 +636,12 @@
       "sourceType": "github",
       "skillPath": "plugins/game-development/skills/unity-ecs-patterns/SKILL.md",
       "computedHash": "e54a4f529fada156d3d82e42dcfc76674913eea9fb0bb292ca0323f8866c6ce9"
+    },
+    "unocss": {
+      "source": "antfu/skills",
+      "sourceType": "github",
+      "skillPath": "skills/unocss/SKILL.md",
+      "computedHash": "4b7a9f7b89994d5aef70b9d55cb7f65d6e80cea437d5786cd33bb5cf7231c7c4"
     },
     "uv-package-manager": {
       "source": "wshobson/agents",
