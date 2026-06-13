@@ -33,6 +33,8 @@ import {
   getCircuitStatus,
   resetCircuit,
   getActiveThreads,
+  getAgentEmotions,
+  getAgentPositions,
 } from "../agent-workers.js";
 import { db } from "@workspace/db";
 import { agentMailTable, agentStatusTable } from "@workspace/db";
@@ -295,6 +297,18 @@ router.patch("/workers/missions/:id", (req: Request, res: Response) => {
 router.delete("/workers/missions/:id", (req: Request, res: Response) => {
   MISSIONS.delete(req.params.id!);
   res.json({ ok: true });
+});
+
+// ─── Real-time Emotions & Positions ───────────────────────────────────────────
+
+/** GET /workers/emotions — current emotion state for all agents */
+router.get("/workers/emotions", (_req: Request, res: Response) => {
+  res.json({ emotions: getAgentEmotions(), ts: Date.now() });
+});
+
+/** GET /workers/positions — current spatial position state for all agents */
+router.get("/workers/positions", (_req: Request, res: Response) => {
+  res.json({ positions: getAgentPositions(), ts: Date.now() });
 });
 
 export default router;

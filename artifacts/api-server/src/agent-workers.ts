@@ -83,6 +83,48 @@ const thoughtCache = new Map<string, { text: string; expiresAt: number }>();
 const MAIL_DEDUP_MS = 30 * 60_000; // 30 minutes
 const mailDedupMap  = new Map<string, number>(); // key → lastSentAt timestamp
 
+// ─── Agent Emotion & Position System ─────────────────────────────────────────
+// Real-time emotions + spatial positions broadcast via SSE → walking animation.
+// Uses function declarations (hoisted) so heartbeat/sendMail can call them even
+// though broadcastWorkerEvent is defined later in this module.
+
+const emotionStateMap  = new Map<string, { emoji: string; reason: string; ts: number }>();
+const positionStateMap = new Map<string, { state: string; target?: string; since: number }>();
+const positionTimers   = new Map<string, ReturnType<typeof setTimeout>>();
+
+function setEmotion(agentId: string, emoji: string, reason: string) {
+  const prev = emotionStateMap.get(agentId);
+  if (prev?.emoji === emoji && Date.now() - prev.ts < 10_000) return; // 10s debounce
+  emotionStateMap.set(agentId, { emoji, reason, ts: Date.now() });
+  broadcastWorkerEvent("agent_emotion", { agentId, emoji, reason, ts: Date.now() });
+}
+
+function setPosition(agentId: string, state: string, target?: string, autoReturnMs = 0) {
+  // Clear any existing auto-return timer
+  const existing = positionTimers.get(agentId);
+  if (existing) { clearTimeout(existing); positionTimers.delete(agentId); }
+
+  positionStateMap.set(agentId, { state, target, since: Date.now() });
+  broadcastWorkerEvent("agent_position", { agentId, state, target, ts: Date.now() });
+
+  if (autoReturnMs > 0) {
+    const t = setTimeout(() => {
+      positionStateMap.set(agentId, { state: "desk", since: Date.now() });
+      broadcastWorkerEvent("agent_position", { agentId, state: "desk", ts: Date.now() });
+      positionTimers.delete(agentId);
+    }, autoReturnMs);
+    positionTimers.set(agentId, t);
+  }
+}
+
+export function getAgentEmotions() {
+  return Array.from(emotionStateMap.entries()).map(([agentId, e]) => ({ agentId, ...e }));
+}
+
+export function getAgentPositions() {
+  return Array.from(positionStateMap.entries()).map(([agentId, p]) => ({ agentId, ...p }));
+}
+
 // ─── Internal API caller ─────────────────────────────────────────────────────
 
 async function api<T = unknown>(
@@ -155,6 +197,16 @@ async function heartbeat(
         },
       });
   } catch { /* non-fatal */ }
+
+  // Broadcast real-time emotion based on status
+  const statusEmoji: Record<string, [string, string]> = {
+    working:  ["💪", currentTask?.slice(0, 30) ?? "working hard"],
+    error:    ["😰", "encountered an error"],
+    idle:     ["😴", "waiting for next cycle"],
+    sleeping: ["💤", "sleeping"],
+  };
+  const [emoji, reason] = statusEmoji[status] ?? ["😊", status];
+  setEmotion(agentId, emoji, reason);
 }
 
 async function sendMail(
@@ -171,7 +223,6 @@ async function sendMail(
     const dedupKey   = `${fromAgent}|${toAgent}|${subjectKey}`;
     const lastSent   = mailDedupMap.get(dedupKey) ?? 0;
     if (Date.now() - lastSent < MAIL_DEDUP_MS) {
-      // silently drop duplicate alert
       return;
     }
     mailDedupMap.set(dedupKey, Date.now());
@@ -179,6 +230,17 @@ async function sendMail(
   try {
     await db.insert(agentMailTable).values({ fromAgent, toAgent, subject, body, priority, metadata: metadata ?? null });
     log(fromAgent, `📨 mail → ${toAgent}: ${subject}`);
+
+    // Walking animation: sender visits recipient's desk briefly
+    if (fromAgent !== toAgent && fromAgent !== "boss") {
+      const visitEmoji = priority === "critical" ? "🚨" : priority === "high" ? "📣" : "📨";
+      setEmotion(fromAgent, visitEmoji, `Delivering mail to ${toAgent}`);
+      setPosition(fromAgent, "visiting", toAgent, 8_000); // walk back after 8s
+    }
+    // Recipient gets a notification emotion
+    if (priority === "critical" || priority === "high") {
+      setEmotion(toAgent, priority === "critical" ? "😱" : "😤", `Urgent mail: ${subject.slice(0, 25)}`);
+    }
   } catch (e) {
     log(fromAgent, `mail send failed: ${String(e)}`);
   }
@@ -1398,6 +1460,12 @@ function startCollabThread(initiator: string, participants: string[], topic: str
     id: thread.id, topic, participants: thread.participants, initiator,
   });
   log(initiator, `🤝 Discussion: "${topic.slice(0, 60)}" with [${participants.join(", ")}]`);
+
+  // Move all participants to collab room (walking animation in frontend)
+  for (const p of thread.participants) {
+    setPosition(p, "collab_room", thread.id);
+    setEmotion(p, "🤝", `Meeting: ${topic.slice(0, 28)}`);
+  }
   return thread;
 }
 
@@ -1413,6 +1481,13 @@ function concludeThread(threadId: string, conclusion: string) {
   if (!t) return;
   t.concludedAt = Date.now();
   t.conclusion = conclusion;
+
+  // Return all participants to their desks
+  for (const p of t.participants) {
+    setPosition(p, "desk");
+    setEmotion(p, "✅", `Done: ${conclusion.slice(0, 28)}`);
+  }
+
   broadcastWorkerEvent("collab_concluded", { threadId, conclusion: conclusion.slice(0, 200) });
   log(t.initiator, `✅ Concluded: "${conclusion.slice(0, 60)}"`);
 }
@@ -1897,7 +1972,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "curator",
     displayName: "✨ Curator",
     vision: "Every conversation is a learning signal. I extract the best and build our AI legacy.",
-    intervalMs: 3 * 60 * 1000,      // 3 minutes — conversation mining
+    intervalMs: 60 * 1000,           // 60 seconds — active conversation mining
     tick: tickCurator,
     lastRun: 0, running: false,
   },
@@ -1921,7 +1996,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "researcher",
     displayName: "🔬 Researcher",
     vision: "I explore the frontier of AI 24/7. I discover trends, analyze competitors, and bring intelligence to every decision.",
-    intervalMs: 3 * 60 * 1000,      // 3 minutes — research sweep
+    intervalMs: 75 * 1000,           // 75 seconds — active research sweep
     tick: tickResearcher,
     lastRun: 0, running: false,
   },
@@ -1937,7 +2012,7 @@ const WORKERS: WorkerRegistration[] = [
     id: "reviewer",
     displayName: "👁️ Code Reviewer",
     vision: "Code quality is the foundation of everything. I review every response and ensure technical excellence.",
-    intervalMs: 4 * 60 * 1000,      // 4 minutes — code review cycle
+    intervalMs: 90 * 1000,           // 90 seconds — code review cycle
     tick: tickCodeReviewer,
     lastRun: 0, running: false,
   },

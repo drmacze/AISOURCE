@@ -53,6 +53,9 @@ const DESK_POS: Record<string, [number, number]> = {
   botmaster:    [444, 408],
 };
 
+// Dedicated collaboration room position (SVG coordinates)
+const COLLAB_ROOM_POS: [number, number] = [800, 388];
+
 const ZONE_GLOWS = [
   { cx: 232, cy: 218, rx: 148, ry: 78,  fill: "#a855f7" },
   { cx: 460, cy: 155, rx: 90,  ry: 48,  fill: "#10b981" },
@@ -334,9 +337,10 @@ function IsoDesk({ cx, cy, deskColor, active, collaborating }: {
 
 // ─── Agent Character with Thought Bubble ─────────────────────────────────────
 
-function AgentChar({ cx, cy, def, status, collaborating, hovered, thoughtText }: {
+function AgentChar({ cx, cy, def, status, collaborating, hovered, thoughtText, emotion }: {
   cx: number; cy: number; def: typeof AGENT_DEFS[number];
-  status?: AgentStatus; collaborating?: boolean; hovered?: boolean; thoughtText?: string;
+  status?: AgentStatus; collaborating?: boolean; hovered?: boolean;
+  thoughtText?: string; emotion?: string;
 }) {
   const isWorking = status?.status === "working";
   const isError   = status?.status === "error";
@@ -371,6 +375,13 @@ function AgentChar({ cx, cy, def, status, collaborating, hovered, thoughtText }:
           <text x={cx} y={cy - 34} textAnchor="middle" fontSize={5} fill="#cbd5e1" style={{ userSelect: "none" }}>
             {thoughtText.slice(0, 32)}{thoughtText.length > 32 ? "…" : ""}
           </text>
+        </g>
+      )}
+      {/* Emotion badge — floating top-right of character */}
+      {emotion && (
+        <g>
+          <circle cx={cx + 13} cy={cy - 13} r={7.5} fill="#020810" stroke={color} strokeWidth={0.6} opacity={0.95}/>
+          <text x={cx + 13} y={cy - 9} textAnchor="middle" fontSize={9} style={{ userSelect: "none" }}>{emotion}</text>
         </g>
       )}
     </motion.g>
@@ -422,12 +433,14 @@ function ConferenceTable({ cx, cy }: { cx: number; cy: number }) {
 
 // ─── Enhanced Office Scene ───────────────────────────────────────────────────
 
-function OfficeScene({ agentStatuses, selectedAgent, onSelectAgent, particles, activeThreads }: {
+function OfficeScene({ agentStatuses, selectedAgent, onSelectAgent, particles, activeThreads, agentEmotions, agentPositions }: {
   agentStatuses: AgentStatus[];
   selectedAgent: string | null;
   onSelectAgent: (id: string) => void;
   particles: MailParticle[];
   activeThreads: CollabThread[];
+  agentEmotions: Map<string, { emoji: string; reason: string }>;
+  agentPositions: Map<string, { state: string; target?: string }>;
 }) {
   const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
   const statusMap = new Map(agentStatuses.map(a => [a.agentId, a]));
@@ -574,6 +587,40 @@ function OfficeScene({ agentStatuses, selectedAgent, onSelectAgent, particles, a
         )}
       </AnimatePresence>
 
+      {/* ── Dedicated Collaboration Room (bottom-right) ─────────────────────── */}
+      <g>
+        {/* Room boundary */}
+        <rect x={728} y={335} width={168} height={118} rx={7}
+          fill="#030c1c" stroke="#1e3a5f" strokeWidth={1.5} opacity={0.95}/>
+        <text x={812} y={350} textAnchor="middle" fontSize={7} fill="#4f6791"
+          fontFamily="monospace" style={{ userSelect: "none" }}>COLLAB ROOM</text>
+        {/* Round table */}
+        <ellipse cx={812} cy={393} rx={44} ry={26} fill="#0f172a" stroke="#3b82f6" strokeWidth={1.2}/>
+        <ellipse cx={812} cy={389} rx={40} ry={22} fill="#1e293b"/>
+        {/* Pulsing aura when meeting active */}
+        <ellipse cx={812} cy={389} rx={48} ry={30} fill="none"
+          stroke={hasMeeting ? "#6366f1" : "#1e3a5f"} strokeWidth={1.5} opacity={hasMeeting ? 0.7 : 0.3}>
+          {hasMeeting && <animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite"/>}
+        </ellipse>
+        <text x={812} y={392} textAnchor="middle" fontSize={6.5} fill="#818cf8"
+          fontFamily="monospace" style={{ userSelect: "none" }}>{hasMeeting ? "MEETING" : "STANDBY"}</text>
+        {/* 6 chairs around table */}
+        {[0, 60, 120, 180, 240, 300].map((deg, i) => {
+          const r = (deg * Math.PI) / 180;
+          return (
+            <ellipse key={i}
+              cx={Math.round(812 + 54 * Math.cos(r))}
+              cy={Math.round(389 + 33 * Math.sin(r))}
+              rx={7} ry={4} fill="#1e293b" stroke="#334155" strokeWidth={0.6}/>
+          );
+        })}
+        {/* Whiteboard on wall */}
+        <rect x={734} y={342} width={38} height={22} rx={2} fill="#0f172a" stroke="#334155" strokeWidth={0.6}/>
+        <rect x={736} y={344} width={34} height={18} rx={1} fill="#1e293b"/>
+        <line x1={738} y1={349} x2={766} y2={349} stroke="#6366f1" strokeWidth={0.5} opacity={0.6}/>
+        <line x1={738} y1={353} x2={760} y2={353} stroke="#6366f1" strokeWidth={0.5} opacity={0.4}/>
+      </g>
+
       {/* Mail particles */}
       {particles.map(p => {
         const fromPos = DESK_POS[p.fromId]; const toPos = DESK_POS[p.toId];
@@ -597,33 +644,53 @@ function OfficeScene({ agentStatuses, selectedAgent, onSelectAgent, particles, a
         return beams;
       })}
 
-      {/* Desks + Agents */}
+      {/* Desks + Agents (desks fixed, characters animate to target position) */}
       {AGENT_DEFS.map(def => {
-        const pos = DESK_POS[def.id]; if (!pos) return null;
-        const [cx, cy] = pos;
-        const status   = statusMap.get(def.id);
-        const isActive = status?.status === "working";
-        const isCollab = collaboratingAgents.has(def.id);
+        const deskPos = DESK_POS[def.id]; if (!deskPos) return null;
+        const [cx, cy] = deskPos;
+        const status     = statusMap.get(def.id);
+        const isActive   = status?.status === "working";
+        const isCollab   = collaboratingAgents.has(def.id);
         const isSelected = selectedAgent === def.id;
         const isHovered  = hoveredAgent === def.id;
+        const emotion    = agentEmotions.get(def.id);
+
+        // Compute visual target position for walking animation
+        const posState   = agentPositions.get(def.id);
+        let vx = cx; let vy = cy;
+        if (posState?.state === "collab_room") {
+          [vx, vy] = COLLAB_ROOM_POS;
+        } else if (posState?.state === "visiting" && posState.target) {
+          const td = DESK_POS[posState.target];
+          if (td) { vx = Math.round((cx + td[0]) / 2); vy = Math.round((cy + td[1]) / 2) - 8; }
+        }
 
         return (
           <g key={def.id} style={{ cursor: "pointer" }}
             onClick={() => onSelectAgent(def.id)}
             onMouseEnter={() => setHoveredAgent(def.id)}
             onMouseLeave={() => setHoveredAgent(null)}>
+
+            {/* Selection ring stays at desk */}
             {isSelected && (
               <ellipse cx={cx} cy={cy + 4} rx={34} ry={20} fill="none"
                 stroke={def.colorHex} strokeWidth={2} opacity={0.9}/>
             )}
+            {/* Desk is always fixed */}
             <IsoDesk cx={cx} cy={cy} deskColor={def.deskHex} active={isActive} collaborating={isCollab}/>
-            <AgentChar cx={cx} cy={cy - 26} def={def} status={status} collaborating={isCollab}
-              hovered={isHovered} thoughtText={status?.currentTask ?? undefined}/>
-            {/* Name label */}
-            <rect x={cx - 22} y={cy - 52} width={44} height={12} rx={3} fill="#020810" opacity={0.9}/>
-            <text x={cx} y={cy - 43} textAnchor="middle" fontSize={6.5}
-              fill={isActive ? def.colorHex : "#475569"} fontFamily="monospace"
-              style={{ userSelect: "none" }}>{def.name}</text>
+
+            {/* Agent character + name label animate smoothly to target */}
+            <motion.g
+              animate={{ x: vx - cx, y: vy - cy }}
+              transition={{ duration: 1.8, ease: "easeInOut" }}>
+              <AgentChar cx={cx} cy={cy - 26} def={def} status={status} collaborating={isCollab}
+                hovered={isHovered} thoughtText={status?.currentTask ?? undefined}
+                emotion={emotion?.emoji}/>
+              <rect x={cx - 22} y={cy - 52} width={44} height={12} rx={3} fill="#020810" opacity={0.9}/>
+              <text x={cx} y={cy - 43} textAnchor="middle" fontSize={6.5}
+                fill={isActive ? def.colorHex : "#475569"} fontFamily="monospace"
+                style={{ userSelect: "none" }}>{def.name}</text>
+            </motion.g>
           </g>
         );
       })}
@@ -1643,9 +1710,181 @@ function DevAgentTab({ recentMail }: { recentMail: MailItem[] }) {
   );
 }
 
+// ─── Model Create Tab ─────────────────────────────────────────────────────────
+
+function ModelCreateTab() {
+  const [form, setForm] = useState({
+    modelName: "", baseModel: "tinyllama", systemPrompt: "",
+    temperature: "0.7", topK: "", topP: "", numCtx: "", stopSequence: "",
+  });
+  const [log, setLog] = useState<Array<{ type: string; text: string }>>([]);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; model?: string } | null>(null);
+  const [models, setModels] = useState<string[]>(["tinyllama"]);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch("/api/models").then(r => r.json()).then((d: { models?: Array<{ name: string }> }) => {
+      if (d.models?.length) setModels(d.models.map(m => m.name));
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
+  }, [log]);
+
+  async function handleCreate() {
+    if (!form.modelName.trim() || running) return;
+    setRunning(true); setLog([]); setResult(null);
+    const resp = await fetch("/api/models/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        modelName: form.modelName, baseModel: form.baseModel,
+        systemPrompt: form.systemPrompt,
+        temperature: parseFloat(form.temperature) || 0.7,
+        topK: form.topK ? parseInt(form.topK) : undefined,
+        topP: form.topP ? parseFloat(form.topP) : undefined,
+        numCtx: form.numCtx ? parseInt(form.numCtx) : undefined,
+        stopSequence: form.stopSequence || undefined,
+      }),
+    });
+    if (!resp.ok || !resp.body) {
+      setLog([{ type: "error", text: `Request failed: HTTP ${resp.status}` }]);
+      setRunning(false); return;
+    }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop() ?? "";
+      for (const part of parts) {
+        const dataLine = part.split("\n").find(l => l.startsWith("data:"));
+        if (!dataLine) continue;
+        try {
+          const obj = JSON.parse(dataLine.slice(5)) as { type: string; text?: string; success?: boolean; model?: string };
+          if (obj.type === "done") { setResult({ success: obj.success ?? false, model: obj.model }); }
+          else { setLog(l => [...l, { type: obj.type, text: obj.text ?? "" }]); }
+        } catch { /* skip */ }
+      }
+    }
+    setRunning(false);
+  }
+
+  const logColor = (t: string) =>
+    t === "error" ? "text-red-400" : t === "info" ? "text-blue-400" :
+    t === "modelfile" ? "text-violet-300" : "text-emerald-300";
+
+  return (
+    <div className="flex h-full gap-4 overflow-hidden">
+      {/* Left — Config form */}
+      <div className="w-80 flex-shrink-0 flex flex-col gap-3 overflow-y-auto pb-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Cpu className="w-4 h-4 text-violet-400"/>
+          <span className="text-sm font-semibold text-slate-200">Create AI Model</span>
+          <span className="text-[10px] text-slate-500">Ollama Modelfile</span>
+        </div>
+        <div className="bg-slate-900/60 border border-slate-700/40 rounded-xl p-3 space-y-3">
+          <div>
+            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">Model Name *</label>
+            <input value={form.modelName} onChange={e => setForm(f => ({ ...f, modelName: e.target.value }))}
+              placeholder="e.g. my-coder-v1"
+              className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500/50"/>
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">Base Model</label>
+            <select value={form.baseModel} onChange={e => setForm(f => ({ ...f, baseModel: e.target.value }))}
+              className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none">
+              {models.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">System Prompt</label>
+            <textarea value={form.systemPrompt} onChange={e => setForm(f => ({ ...f, systemPrompt: e.target.value }))}
+              rows={5} placeholder="You are a helpful assistant specialized in..."
+              className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 placeholder:text-slate-600 resize-none focus:outline-none focus:border-violet-500/50"/>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { label: "Temperature", key: "temperature", placeholder: "0.7", type: "number", step: "0.1" },
+              { label: "Top-K",       key: "topK",        placeholder: "40",  type: "number", step: "1"   },
+              { label: "Top-P",       key: "topP",        placeholder: "0.95",type: "number", step: "0.05"},
+              { label: "Context",     key: "numCtx",      placeholder: "2048",type: "number", step: "1"   },
+            ].map(f => (
+              <div key={f.key}>
+                <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">{f.label}</label>
+                <input value={(form as Record<string, string>)[f.key]} type={f.type} step={f.step}
+                  onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                  placeholder={f.placeholder}
+                  className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2 py-1.5 text-slate-200 focus:outline-none focus:border-violet-500/50"/>
+              </div>
+            ))}
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-400 uppercase tracking-wide mb-1 block">Stop Sequence</label>
+            <input value={form.stopSequence} onChange={e => setForm(f => ({ ...f, stopSequence: e.target.value }))}
+              placeholder='e.g. "###"'
+              className="w-full text-xs bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-violet-500/50"/>
+          </div>
+          <button onClick={handleCreate} disabled={running || !form.modelName.trim()}
+            className="w-full flex items-center justify-center gap-2 text-xs py-2 rounded-lg bg-violet-600/30 border border-violet-500/40 text-violet-300 hover:bg-violet-600/50 transition-colors disabled:opacity-40">
+            {running ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Sparkles className="w-3.5 h-3.5"/>}
+            {running ? "Building model…" : "Create Model"}
+          </button>
+        </div>
+      </div>
+
+      {/* Right — Build log */}
+      <div className="flex-1 min-w-0 flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <TerminalSquare className="w-4 h-4 text-emerald-400"/>
+          <span className="text-xs font-semibold text-slate-200">Build Log</span>
+          {running && <Loader2 className="w-3 h-3 animate-spin text-violet-400"/>}
+          {result && (
+            <span className={cn("text-xs px-2 py-0.5 rounded-full border",
+              result.success ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-red-500/10 border-red-500/30 text-red-400")}>
+              {result.success ? `✅ ${result.model ?? "Created"}` : "❌ Failed"}
+            </span>
+          )}
+        </div>
+        <div ref={logRef}
+          className="flex-1 min-h-0 overflow-y-auto bg-[#020810] border border-slate-800/60 rounded-xl p-3 font-mono text-[11px] space-y-0.5">
+          {log.length === 0 && !running && (
+            <div className="text-center text-slate-600 mt-8">
+              <Cpu className="w-8 h-8 mx-auto mb-2 opacity-20"/>
+              <p>Configure a model on the left and click Create</p>
+              <p className="opacity-50 mt-1 text-[10px]">Ollama streams build progress here in real time</p>
+            </div>
+          )}
+          {log.map((l, i) => (
+            <div key={i} className={cn("leading-relaxed whitespace-pre-wrap break-all", logColor(l.type))}>
+              <span className="text-slate-700 select-none mr-1">{String(i).padStart(3, "0")}</span>
+              {l.text}
+            </div>
+          ))}
+          {running && <div className="text-violet-400 animate-pulse">▊</div>}
+        </div>
+        {result?.success && (
+          <div className="flex-shrink-0 bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 text-xs">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400"/>
+              <span className="font-semibold text-emerald-300">Model created: {result.model}</span>
+            </div>
+            <p className="text-emerald-400/70">Available in Ollama now. Use it in Chat tab or via the API.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = "office" | "activity" | "collab" | "missions" | "intel" | "memories" | "dev";
+type Tab = "office" | "activity" | "collab" | "missions" | "intel" | "memories" | "dev" | "modelcreate";
 
 export default function AgentPage() {
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
@@ -1660,17 +1899,35 @@ export default function AgentPage() {
   const [lastRefresh, setLastRefresh]     = useState<Date | null>(null);
   const [nudging, setNudging]             = useState<string | null>(null);
   const [circuitLoading, setCircuitLoading] = useState(false);
-  const particleRef = useRef(0);
-  const prevMailIds = useRef(new Set<number>());
+  const [agentEmotions,  setAgentEmotions]  = useState<Map<string, { emoji: string; reason: string }>>(new Map());
+  const [agentPositions, setAgentPositions] = useState<Map<string, { state: string; target?: string }>>(new Map());
+  const [ttsOn, setTtsOn]                 = useState(false);
+  const particleRef  = useRef(0);
+  const prevMailIds  = useRef(new Set<number>());
   const prevThreadIds = useRef(new Set<string>());
+  const ttsRef       = useRef(false);
+  ttsRef.current = ttsOn;
+
+  const speak = useCallback((text: string, rate = 1.05) => {
+    if (!ttsRef.current || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = rate; u.pitch = 1.15; u.volume = 0.75;
+    const voices = window.speechSynthesis.getVoices?.() ?? [];
+    const eng = voices.find(v => v.lang.startsWith("en") && v.name.toLowerCase().includes("google"));
+    if (eng) u.voice = eng;
+    window.speechSynthesis.speak(u);
+  }, []);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [statusRes, mailRes, circuitRes, threadRes] = await Promise.allSettled([
+      const [statusRes, mailRes, circuitRes, threadRes, emotionRes, positionRes] = await Promise.allSettled([
         fetch("/api/workers/status"),
         fetch("/api/workers/mail/all?limit=100"),
         fetch("/api/workers/circuit"),
         fetch("/api/workers/threads"),
+        fetch("/api/workers/emotions"),
+        fetch("/api/workers/positions"),
       ]);
 
       if (statusRes.status === "fulfilled" && statusRes.value.ok) {
@@ -1680,7 +1937,7 @@ export default function AgentPage() {
       if (mailRes.status === "fulfilled" && mailRes.value.ok) {
         const d = await mailRes.value.json() as { mail?: MailItem[] };
         const newMail = d.mail ?? [];
-        // Toast for new high-priority mail [G]
+        // Toast + TTS for new high-priority mail [G]
         newMail.filter(m => !prevMailIds.current.has(m.id) && (m.priority === "critical" || m.priority === "high")).forEach(m => {
           const fromDef = AGENT_DEFS.find(a => a.id === m.fromAgent);
           toast(m.subject, {
@@ -1688,6 +1945,9 @@ export default function AgentPage() {
             duration: 4000,
             icon: m.priority === "critical" ? "🚨" : "📬",
           });
+          if (m.priority === "critical") {
+            speak(`Critical alert from ${fromDef?.name ?? m.fromAgent}: ${m.subject}`, 1.2);
+          }
         });
         newMail.forEach(m => prevMailIds.current.add(m.id));
         setRecentMail(newMail);
@@ -1715,9 +1975,17 @@ export default function AgentPage() {
         newThreads.forEach(t => prevThreadIds.current.add(t.id));
         setThreads(newThreads);
       }
+      if (emotionRes.status === "fulfilled" && emotionRes.value.ok) {
+        const d = await emotionRes.value.json() as { emotions?: Record<string, { emoji: string; reason: string }> };
+        if (d.emotions) setAgentEmotions(new Map(Object.entries(d.emotions)));
+      }
+      if (positionRes.status === "fulfilled" && positionRes.value.ok) {
+        const d = await positionRes.value.json() as { positions?: Record<string, { state: string; target?: string }> };
+        if (d.positions) setAgentPositions(new Map(Object.entries(d.positions)));
+      }
       setLastRefresh(new Date());
     } catch { /* ignore */ }
-  }, []);
+  }, [speak]);
 
   useEffect(() => {
     setSseStatus("connecting");
@@ -1760,6 +2028,32 @@ export default function AgentPage() {
     es.addEventListener("collab_message", () => fetchAll());
     es.addEventListener("collab_concluded", () => fetchAll());
 
+    es.addEventListener("agent_emotion", (e: MessageEvent) => {
+      try {
+        const d = JSON.parse(e.data as string) as { agentId: string; emoji: string; reason: string };
+        if (d.agentId) {
+          setAgentEmotions(prev => {
+            const next = new Map(prev);
+            next.set(d.agentId, { emoji: d.emoji, reason: d.reason });
+            return next;
+          });
+        }
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener("agent_position", (e: MessageEvent) => {
+      try {
+        const d = JSON.parse(e.data as string) as { agentId: string; state: string; target?: string };
+        if (d.agentId) {
+          setAgentPositions(prev => {
+            const next = new Map(prev);
+            next.set(d.agentId, { state: d.state, target: d.target });
+            return next;
+          });
+        }
+      } catch { /* ignore */ }
+    });
+
     fetchAll();
     const interval = setInterval(fetchAll, 8000);
     return () => { es.close(); clearInterval(interval); };
@@ -1789,13 +2083,14 @@ export default function AgentPage() {
   const circuitOpen       = circuit?.open ?? false;
 
   const TABS: Array<{ id: Tab; label: string; icon: React.ReactNode; badge?: number }> = [
-    { id: "office",    label: "Office",       icon: <Building2      className="w-3.5 h-3.5"/> },
-    { id: "activity",  label: "Activity",     icon: <Activity       className="w-3.5 h-3.5"/> },
-    { id: "collab",    label: "Collab",       icon: <Users          className="w-3.5 h-3.5"/>, badge: activeThreadCount },
-    { id: "missions",  label: "Missions",     icon: <Target         className="w-3.5 h-3.5"/> },
-    { id: "intel",     label: "Intelligence", icon: <BarChart3      className="w-3.5 h-3.5"/> },
-    { id: "memories",  label: "Memories",     icon: <Database       className="w-3.5 h-3.5"/> },
-    { id: "dev",       label: "Dev Console",  icon: <TerminalSquare className="w-3.5 h-3.5"/> },
+    { id: "office",      label: "Office",        icon: <Building2      className="w-3.5 h-3.5"/> },
+    { id: "activity",    label: "Activity",      icon: <Activity       className="w-3.5 h-3.5"/> },
+    { id: "collab",      label: "Collab",        icon: <Users          className="w-3.5 h-3.5"/>, badge: activeThreadCount },
+    { id: "missions",    label: "Missions",      icon: <Target         className="w-3.5 h-3.5"/> },
+    { id: "intel",       label: "Intelligence",  icon: <BarChart3      className="w-3.5 h-3.5"/> },
+    { id: "memories",    label: "Memories",      icon: <Database       className="w-3.5 h-3.5"/> },
+    { id: "dev",         label: "Dev Console",   icon: <TerminalSquare className="w-3.5 h-3.5"/> },
+    { id: "modelcreate", label: "Create Model",  icon: <Cpu            className="w-3.5 h-3.5"/> },
   ];
 
   return (
@@ -1845,6 +2140,12 @@ export default function AgentPage() {
           {lastRefresh && (
             <span className="text-[10px] text-slate-600 hidden sm:block">{lastRefresh.toLocaleTimeString()}</span>
           )}
+          {/* TTS toggle */}
+          <button onClick={() => setTtsOn(v => !v)} title={ttsOn ? "TTS on — click to mute" : "TTS off — click to enable voice alerts"}
+            className={cn("text-[10px] px-2 py-0.5 rounded-full border transition-colors",
+              ttsOn ? "bg-violet-500/20 border-violet-500/40 text-violet-300" : "border-slate-700/40 text-slate-600 hover:text-slate-400")}>
+            {ttsOn ? "🔊 voice" : "🔇 mute"}
+          </button>
         </div>
       </div>
 
@@ -1879,6 +2180,8 @@ export default function AgentPage() {
                 onSelectAgent={id => setSelectedAgent(s => s === id ? null : id)}
                 particles={particles}
                 activeThreads={threads}
+                agentEmotions={agentEmotions}
+                agentPositions={agentPositions}
               />
             </div>
             {/* Detail panel */}
@@ -1927,6 +2230,12 @@ export default function AgentPage() {
         {activeTab === "dev" && (
           <div className="h-full p-4">
             <DevAgentTab recentMail={recentMail}/>
+          </div>
+        )}
+
+        {activeTab === "modelcreate" && (
+          <div className="h-full p-4">
+            <ModelCreateTab/>
           </div>
         )}
       </div>

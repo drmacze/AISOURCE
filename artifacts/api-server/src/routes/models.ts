@@ -720,4 +720,110 @@ router.post("/models/benchmark", async (req: Request, res: Response) => {
   });
 });
 
+// ─── POST /api/models/create — Build a custom model from a Modelfile ──────────
+
+/** POST /api/models/create — Create a custom Ollama model via Modelfile (SSE streaming) */
+router.post("/models/create", async (req: Request, res: Response) => {
+  const {
+    modelName, baseModel = "tinyllama", systemPrompt = "",
+    temperature = 0.7, topK, topP, numCtx, stopSequence,
+  } = req.body as {
+    modelName?: string; baseModel?: string; systemPrompt?: string;
+    temperature?: number; topK?: number; topP?: number;
+    numCtx?: number; stopSequence?: string;
+  };
+
+  if (!modelName || typeof modelName !== "string" || !modelName.trim()) {
+    res.status(400).json({ code: "BAD_INPUT", message: "modelName is required", hint: "Provide a valid model name (e.g. 'my-assistant')" });
+    return;
+  }
+
+  const cleanName = modelName.trim().toLowerCase().replace(/[^a-z0-9\-_:.]/g, "-");
+  const temp      = Math.max(0, Math.min(2, Number(temperature) || 0.7));
+
+  // Build Modelfile
+  const lines: string[] = [
+    `FROM ${baseModel.trim()}`,
+    systemPrompt.trim()
+      ? `SYSTEM """${systemPrompt.trim().replace(/"""/g, "'")}"""`
+      : "",
+    `PARAMETER temperature ${temp}`,
+    topK   ? `PARAMETER top_k ${topK}`     : "",
+    topP   ? `PARAMETER top_p ${topP}`     : "",
+    numCtx ? `PARAMETER num_ctx ${numCtx}` : "",
+    stopSequence ? `PARAMETER stop "${stopSequence}"` : "",
+  ];
+  const modelfile = lines.filter(Boolean).join("\n");
+
+  initSSE(res);
+  sse(res, { type: "info",      text: `Creating model "${cleanName}" based on ${baseModel}…`, model: cleanName });
+  sse(res, { type: "modelfile", text: modelfile });
+
+  try {
+    // Ensure Ollama is up
+    const health = await fetch("http://127.0.0.1:11434/api/version", { signal: AbortSignal.timeout(4000) }).catch(() => null);
+    if (!health?.ok) {
+      sse(res, { type: "stdout", text: "Ollama not running — attempting restart…" });
+      try {
+        const { startOllamaServer } = await import("../ollama.js");
+        await startOllamaServer();
+        sse(res, { type: "stdout", text: "Ollama restarted — proceeding…" });
+      } catch (e2) {
+        sse(res, { type: "error", text: `Cannot start Ollama: ${String(e2)}`, code: "OFFLINE" });
+        sse(res, { type: "done", success: false });
+        if (!res.writableEnded) res.end();
+        return;
+      }
+    }
+
+    // Stream model creation
+    const createRes = await fetch("http://127.0.0.1:11434/api/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: cleanName, modelfile, stream: true }),
+      signal: AbortSignal.timeout(10 * 60 * 1000), // 10 min max
+    });
+
+    if (!createRes.ok) {
+      const errBody = await createRes.text().catch(() => `HTTP ${createRes.status}`);
+      sse(res, { type: "error", text: `Ollama refused create: ${errBody}`, code: "BAD_RESPONSE", hint: "Base model may not be installed." });
+      sse(res, { type: "done", success: false });
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
+    if (!createRes.body) {
+      sse(res, { type: "done", success: true, model: cleanName });
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
+    const reader = createRes.body.getReader();
+    const dec    = new TextDecoder();
+    let   buf    = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines2 = buf.split("\n");
+      buf = lines2.pop() ?? "";
+      for (const line of lines2) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line) as { status?: string; error?: string };
+          if (obj.error) { sse(res, { type: "error", text: obj.error }); }
+          else if (obj.status) { sse(res, { type: "stdout", text: obj.status }); }
+        } catch { /* skip malformed */ }
+      }
+    }
+
+    invalidateOllamaModelCache();
+    sse(res, { type: "done", success: true, model: cleanName });
+  } catch (e) {
+    sse(res, { type: "error", text: `Model creation failed: ${String(e)}`, code: "UNKNOWN" });
+    sse(res, { type: "done", success: false });
+  }
+  if (!res.writableEnded) res.end();
+});
+
 export default router;
