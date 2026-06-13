@@ -8,3 +8,4 @@ export * from "./agent";
 export * from "./agent-workers";
 export * from "./whatsapp";
 export * from "./bot-tickets";
+export * from "./builder";

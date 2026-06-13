@@ -2057,9 +2057,491 @@ function AIForgeTab() {
   );
 }
 
+// ─── Builder Tab ──────────────────────────────────────────────────────────────
+
+const BUILDER_AGENTS = [
+  { id: "orchestrator", emoji: "🎯", label: "Orchestrator" },
+  { id: "engineer",     emoji: "⚙️", label: "Engineer" },
+  { id: "reviewer",     emoji: "👁️", label: "Reviewer" },
+  { id: "deployer",     emoji: "🚀", label: "Deployer" },
+  { id: "researcher",   emoji: "🔬", label: "Researcher" },
+  { id: "trainer",      emoji: "🧠", label: "Trainer" },
+  { id: "librarian",    emoji: "📚", label: "Librarian" },
+  { id: "guardian",     emoji: "🛡️", label: "Guardian" },
+  { id: "analyst",      emoji: "📊", label: "Analyst" },
+  { id: "botmaster",    emoji: "🤖", label: "Botmaster" },
+  { id: "curator",      emoji: "✨", label: "Curator" },
+  { id: "mandor",       emoji: "👑", label: "Mandor" },
+];
+
+const STATUS_COLS = ["draft", "queued", "active", "ready", "done"] as const;
+type TaskStatus = typeof STATUS_COLS[number];
+
+const STATUS_META: Record<TaskStatus, { label: string; color: string; bg: string; border: string }> = {
+  draft:   { label: "Draft",   color: "text-slate-400",   bg: "bg-slate-800/40",   border: "border-slate-700/50" },
+  queued:  { label: "Queued",  color: "text-yellow-400",  bg: "bg-yellow-500/5",   border: "border-yellow-700/30" },
+  active:  { label: "Active",  color: "text-blue-400",    bg: "bg-blue-500/5",     border: "border-blue-700/30" },
+  ready:   { label: "Ready",   color: "text-emerald-400", bg: "bg-emerald-500/5",  border: "border-emerald-700/30" },
+  done:    { label: "Done",    color: "text-violet-400",  bg: "bg-violet-500/5",   border: "border-violet-700/30" },
+};
+
+interface BTask {
+  id: number; title: string; description: string; status: TaskStatus;
+  assignedAgent: string; requestedBy: string; priority: number;
+  parentTaskId: number | null; result: string | null;
+  agentLog: string | null; createdAt: string; updatedAt: string;
+}
+
+interface BLogEntry {
+  type: string; content?: string; tool?: string;
+  args?: Record<string, unknown>; data?: unknown;
+  ok?: boolean; ts: number;
+}
+
+function agentEmoji(id: string): string {
+  return BUILDER_AGENTS.find((a) => a.id === id)?.emoji ?? "🤖";
+}
+
+function TaskLogView({ task, onClose }: { task: BTask; onClose: () => void }) {
+  const [log, setLog] = useState<BLogEntry[]>(() => {
+    try { return task.agentLog ? JSON.parse(task.agentLog) : []; } catch { return []; }
+  });
+  const [streaming, setStreaming] = useState(task.status === "active");
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (task.status !== "active") {
+      try { setLog(task.agentLog ? JSON.parse(task.agentLog) : []); } catch { setLog([]); }
+      setStreaming(false);
+      return;
+    }
+    const es = new EventSource(`/api/builder/tasks/${task.id}/stream`);
+    setStreaming(true);
+    const incoming: BLogEntry[] = [];
+    es.onmessage = (e) => {
+      try {
+        const entry = JSON.parse(e.data as string) as BLogEntry;
+        incoming.push(entry);
+        setLog([...incoming]);
+        if (entry.type === "done" || entry.type === "error") {
+          setStreaming(false);
+          es.close();
+        }
+      } catch { /* ignore */ }
+    };
+    es.onerror = () => { setStreaming(false); es.close(); };
+    return () => es.close();
+  }, [task.id, task.status]);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [log]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+        className="w-full max-w-2xl max-h-[85vh] flex flex-col bg-slate-900 border border-slate-700/60 rounded-xl shadow-2xl">
+        {/* Header */}
+        <div className="flex items-start gap-3 p-4 border-b border-slate-800/60">
+          <span className="text-2xl leading-none mt-0.5">{agentEmoji(task.assignedAgent)}</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={cn("text-[10px] px-2 py-0.5 rounded-full border font-mono", STATUS_META[task.status].color, STATUS_META[task.status].bg, STATUS_META[task.status].border)}>
+                {STATUS_META[task.status].label}
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono capitalize">{task.assignedAgent}</span>
+              <span className="text-[10px] text-slate-600">#{task.id}</span>
+            </div>
+            <p className="text-sm font-semibold text-slate-100 mt-1 leading-snug">{task.title}</p>
+            <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{task.description}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0">
+            <X className="w-4 h-4"/>
+          </button>
+        </div>
+
+        {/* Log stream */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-1.5 font-mono text-[11px]">
+          {log.length === 0 && (
+            <div className="text-slate-600 text-center py-8">
+              {streaming ? "Waiting for agent output…" : "No log entries yet."}
+            </div>
+          )}
+          {log.map((entry, i) => (
+            <div key={i} className={cn("rounded-lg px-3 py-2 leading-relaxed",
+              entry.type === "thought"     ? "bg-violet-500/5 border border-violet-700/20 text-violet-300" :
+              entry.type === "tool_call"   ? "bg-blue-500/5 border border-blue-700/20 text-blue-300" :
+              entry.type === "tool_result" ? (entry.ok ? "bg-emerald-500/5 border border-emerald-700/20 text-emerald-300" : "bg-red-500/5 border border-red-700/20 text-red-300") :
+              entry.type === "collab"      ? "bg-yellow-500/5 border border-yellow-700/20 text-yellow-300" :
+              entry.type === "done"        ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 font-semibold" :
+              entry.type === "error"       ? "bg-red-500/10 border border-red-500/30 text-red-300" :
+              "bg-slate-800/30 border border-slate-700/20 text-slate-400"
+            )}>
+              <span className="opacity-50 mr-2">
+                {entry.type === "thought" ? "💭" : entry.type === "tool_call" ? "🔧" :
+                 entry.type === "tool_result" ? (entry.ok ? "✅" : "❌") :
+                 entry.type === "collab" ? "🤝" : entry.type === "done" ? "🏁" :
+                 entry.type === "error" ? "🚨" : "ℹ️"}
+              </span>
+              {entry.type === "thought" && <span>{entry.content}</span>}
+              {entry.type === "tool_call" && (
+                <span>
+                  <span className="text-blue-200 font-bold">{entry.tool}</span>
+                  {entry.args && Object.keys(entry.args).length > 0 && (
+                    <span className="opacity-60 ml-1">({JSON.stringify(entry.args).slice(0, 120)})</span>
+                  )}
+                </span>
+              )}
+              {entry.type === "tool_result" && (
+                <span>
+                  <span className="font-bold">{entry.tool}</span>
+                  <span className="ml-1 opacity-70">
+                    {typeof entry.data === "string"
+                      ? entry.data.slice(0, 200)
+                      : JSON.stringify(entry.data).slice(0, 200)}
+                  </span>
+                </span>
+              )}
+              {(entry.type === "info" || entry.type === "done" || entry.type === "error" || entry.type === "collab") && (
+                <span>{entry.content}</span>
+              )}
+            </div>
+          ))}
+          {streaming && (
+            <div className="flex items-center gap-2 text-blue-400 py-1">
+              <Loader2 className="w-3 h-3 animate-spin"/>
+              <span>Agent working…</span>
+            </div>
+          )}
+          <div ref={logEndRef}/>
+        </div>
+
+        {/* Result */}
+        {task.result && (
+          <div className="border-t border-slate-800/60 p-3">
+            <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">Result</p>
+            <p className="text-[11px] text-slate-300 leading-relaxed">{task.result}</p>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+}
+
+function BuilderTab() {
+  const [tasks, setTasks]           = useState<BTask[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [selected, setSelected]     = useState<BTask | null>(null);
+  const [showForm, setShowForm]     = useState<"single" | "decompose" | null>(null);
+  const [executing, setExecuting]   = useState<number | null>(null);
+  const [formPrompt, setFormPrompt] = useState("");
+  const [formTitle, setFormTitle]   = useState("");
+  const [formDesc, setFormDesc]     = useState("");
+  const [formAgent, setFormAgent]   = useState("engineer");
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchTasks = useCallback(async () => {
+    try {
+      const r = await fetch("/api/builder/tasks");
+      if (r.ok) setTasks(await r.json() as BTask[]);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    fetchTasks();
+    const iv = setInterval(fetchTasks, 5000);
+    return () => clearInterval(iv);
+  }, [fetchTasks]);
+
+  async function createSingle() {
+    if (!formTitle.trim() || !formDesc.trim()) return;
+    setSubmitting(true);
+    try {
+      const r = await fetch("/api/builder/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: formTitle, description: formDesc, assignedAgent: formAgent }),
+      });
+      if (r.ok) {
+        setShowForm(null); setFormTitle(""); setFormDesc(""); setFormAgent("engineer");
+        await fetchTasks();
+        toast.success("Task created");
+      }
+    } finally { setSubmitting(false); }
+  }
+
+  async function decompose() {
+    if (!formPrompt.trim()) return;
+    setSubmitting(true);
+    try {
+      const r = await fetch("/api/builder/decompose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: formPrompt }),
+      });
+      if (r.ok) {
+        const d = await r.json() as { count: number };
+        setShowForm(null); setFormPrompt("");
+        await fetchTasks();
+        toast.success(`Orchestrator created ${d.count} tasks`);
+      }
+    } finally { setSubmitting(false); }
+  }
+
+  async function executeTask(id: number) {
+    setExecuting(id);
+    try {
+      const r = await fetch(`/api/builder/tasks/${id}/execute`, { method: "POST" });
+      if (r.ok) {
+        toast.success("Agent started executing task");
+        await fetchTasks();
+        const updated = tasks.find((t) => t.id === id);
+        if (updated) setSelected({ ...updated, status: "active" });
+      } else {
+        const d = await r.json() as { error?: string };
+        toast.error(d.error ?? "Execution failed");
+      }
+    } finally {
+      setExecuting(null);
+      setTimeout(fetchTasks, 1500);
+    }
+  }
+
+  async function updateStatus(id: number, status: TaskStatus) {
+    await fetch(`/api/builder/tasks/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    setTasks((prev) => prev.map((t) => t.id === id ? { ...t, status } : t));
+  }
+
+  async function deleteTask(id: number) {
+    await fetch(`/api/builder/tasks/${id}`, { method: "DELETE" });
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+    if (selected?.id === id) setSelected(null);
+    toast.info("Task deleted");
+  }
+
+  const tasksByStatus = (status: TaskStatus) => tasks.filter((t) => t.status === status);
+  const activeCount = tasks.filter((t) => t.status === "active").length;
+
+  return (
+    <div className="h-full flex flex-col gap-3 overflow-hidden">
+      {/* Header bar */}
+      <div className="flex-shrink-0 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <ClipboardList className="w-4 h-4 text-violet-400"/>
+          <span className="text-sm font-semibold text-slate-200">AI Builder</span>
+          <span className="text-[10px] text-slate-500 font-mono">{tasks.length} tasks</span>
+          {activeCount > 0 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 font-mono animate-pulse">
+              {activeCount} running
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowForm("decompose")}
+            className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg bg-violet-500/15 border border-violet-500/30 text-violet-300 hover:bg-violet-500/25 transition-colors">
+            <Sparkles className="w-3 h-3"/>
+            Decompose Request
+          </button>
+          <button onClick={() => setShowForm("single")}
+            className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-colors">
+            <PlusCircle className="w-3 h-3"/>
+            New Task
+          </button>
+        </div>
+      </div>
+
+      {/* Kanban board */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-slate-600">
+          <Loader2 className="w-5 h-5 animate-spin mr-2"/> Loading tasks…
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-x-auto">
+          <div className="flex gap-3 h-full min-w-max pb-2">
+            {STATUS_COLS.map((col) => {
+              const meta = STATUS_META[col];
+              const colTasks = tasksByStatus(col);
+              return (
+                <div key={col} className="w-60 flex-shrink-0 flex flex-col gap-2 h-full">
+                  {/* Column header */}
+                  <div className={cn("flex items-center justify-between px-3 py-2 rounded-lg border", meta.bg, meta.border)}>
+                    <span className={cn("text-[11px] font-semibold uppercase tracking-wider", meta.color)}>{meta.label}</span>
+                    <span className={cn("text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold border", meta.color, meta.bg, meta.border)}>
+                      {colTasks.length}
+                    </span>
+                  </div>
+                  {/* Cards */}
+                  <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
+                    <AnimatePresence>
+                      {colTasks.map((task) => (
+                        <motion.div key={task.id}
+                          layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
+                          className="bg-slate-900/80 border border-slate-800/60 rounded-lg p-3 cursor-pointer hover:border-slate-700/80 transition-all group"
+                          onClick={() => setSelected(task)}>
+                          <div className="flex items-start gap-2">
+                            <span className="text-base leading-none mt-0.5 flex-shrink-0">{agentEmoji(task.assignedAgent)}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-semibold text-slate-200 leading-snug line-clamp-2">{task.title}</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5 capitalize">{task.assignedAgent}</p>
+                            </div>
+                          </div>
+                          {/* Priority dots */}
+                          <div className="flex items-center gap-1 mt-2">
+                            {[...Array(Math.min(10, task.priority))].map((_, i) => (
+                              <div key={i} className={cn("w-1.5 h-1.5 rounded-full", i < task.priority - 5 ? "bg-red-500" : i < task.priority - 2 ? "bg-yellow-500" : "bg-slate-600")}/>
+                            ))}
+                            <span className="text-[9px] text-slate-600 ml-auto font-mono">#{task.id}</span>
+                          </div>
+                          {/* Collab badge */}
+                          {task.parentTaskId && (
+                            <div className="mt-1.5 text-[9px] text-yellow-500/70 flex items-center gap-1">
+                              <Users className="w-2.5 h-2.5"/>
+                              collab from #{task.parentTaskId}
+                            </div>
+                          )}
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {(task.status === "draft" || task.status === "queued") && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); executeTask(task.id); }}
+                                disabled={executing === task.id}
+                                className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50">
+                                {executing === task.id ? <Loader2 className="w-2.5 h-2.5 animate-spin"/> : <Zap className="w-2.5 h-2.5"/>}
+                                Run
+                              </button>
+                            )}
+                            {task.status === "ready" && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); updateStatus(task.id, "done"); }}
+                                className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-colors">
+                                <CheckCircle2 className="w-2.5 h-2.5"/>
+                                Accept
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }}
+                              className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded bg-red-500/10 border border-red-700/30 text-red-400 hover:bg-red-500/20 transition-colors ml-auto">
+                              <Trash2 className="w-2.5 h-2.5"/>
+                            </button>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                    {colTasks.length === 0 && (
+                      <div className="text-[10px] text-slate-700 text-center py-6 border border-dashed border-slate-800/60 rounded-lg">
+                        empty
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Create single task form */}
+      <AnimatePresence>
+        {showForm === "single" && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+              className="w-full max-w-md bg-slate-900 border border-slate-700/60 rounded-xl shadow-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-slate-100">New Task</h3>
+                <button onClick={() => setShowForm(null)} className="text-slate-500 hover:text-slate-300"><X className="w-4 h-4"/></button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Task Title</label>
+                  <input value={formTitle} onChange={(e) => setFormTitle(e.target.value)}
+                    placeholder="e.g. Create login API endpoint"
+                    className="w-full bg-slate-800/60 border border-slate-700/60 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-violet-500/50"/>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Description</label>
+                  <textarea value={formDesc} onChange={(e) => setFormDesc(e.target.value)}
+                    placeholder="Describe what the agent should build or do..."
+                    rows={4}
+                    className="w-full bg-slate-800/60 border border-slate-700/60 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-violet-500/50 resize-none"/>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Assign to Agent</label>
+                  <select value={formAgent} onChange={(e) => setFormAgent(e.target.value)}
+                    className="w-full bg-slate-800/60 border border-slate-700/60 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500/50">
+                    {BUILDER_AGENTS.map((a) => (
+                      <option key={a.id} value={a.id}>{a.emoji} {a.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <button onClick={createSingle} disabled={submitting || !formTitle.trim() || !formDesc.trim()}
+                  className="w-full py-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-sm font-semibold hover:bg-emerald-500/30 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin"/> : <PlusCircle className="w-4 h-4"/>}
+                  Create Task
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Decompose request form */}
+      <AnimatePresence>
+        {showForm === "decompose" && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+              className="w-full max-w-lg bg-slate-900 border border-slate-700/60 rounded-xl shadow-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-100">Decompose Request</h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Orchestrator akan memecah request menjadi subtask untuk tiap agent</p>
+                </div>
+                <button onClick={() => setShowForm(null)} className="text-slate-500 hover:text-slate-300"><X className="w-4 h-4"/></button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">Your Request</label>
+                  <textarea value={formPrompt} onChange={(e) => setFormPrompt(e.target.value)}
+                    placeholder="e.g. Buat admin dashboard dengan login, tabel users, dan analytics chart"
+                    rows={5}
+                    className="w-full bg-slate-800/60 border border-slate-700/60 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-violet-500/50 resize-none"/>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-slate-500 bg-slate-800/30 rounded-lg px-3 py-2.5">
+                  <Sparkles className="w-3 h-3 text-violet-400 flex-shrink-0"/>
+                  <span>Orchestrator akan buat 2–5 task spesifik, masing-masing untuk agent yang tepat berdasarkan skill-nya</span>
+                </div>
+                <button onClick={decompose} disabled={submitting || !formPrompt.trim()}
+                  className="w-full py-2 rounded-lg bg-violet-500/20 border border-violet-500/40 text-violet-300 text-sm font-semibold hover:bg-violet-500/30 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
+                  {submitting ? "Orchestrator thinking…" : "Decompose & Create Tasks"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Task detail / log modal */}
+      <AnimatePresence>
+        {selected && (
+          <TaskLogView
+            key={selected.id}
+            task={tasks.find((t) => t.id === selected.id) ?? selected}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = "office" | "activity" | "collab" | "missions" | "intel" | "memories" | "dev" | "modelcreate";
+type Tab = "office" | "activity" | "collab" | "missions" | "intel" | "memories" | "dev" | "modelcreate" | "builder";
 
 export default function AgentPage() {
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
@@ -2266,6 +2748,7 @@ export default function AgentPage() {
     { id: "memories",    label: "Memories",      icon: <Database       className="w-3.5 h-3.5"/> },
     { id: "dev",         label: "Dev Console",   icon: <TerminalSquare className="w-3.5 h-3.5"/> },
     { id: "modelcreate", label: "Create Model",  icon: <Cpu            className="w-3.5 h-3.5"/> },
+    { id: "builder",     label: "AI Builder",    icon: <ClipboardList  className="w-3.5 h-3.5"/> },
   ];
 
   return (
@@ -2411,6 +2894,12 @@ export default function AgentPage() {
         {activeTab === "modelcreate" && (
           <div className="h-full p-4">
             <AIForgeTab/>
+          </div>
+        )}
+
+        {activeTab === "builder" && (
+          <div className="h-full p-4 overflow-hidden">
+            <BuilderTab/>
           </div>
         )}
       </div>

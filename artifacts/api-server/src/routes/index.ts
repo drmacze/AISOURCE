@@ -32,6 +32,8 @@ import tgBotRouter from "./tg-bot";
 import openclawRouter from "./openclaw";
 import openaiCompatRouter from "./openai-compat";
 import workersRouter from "./workers";
+import builderRouter from "./builder";
+
 
 const router: IRouter = Router();
 
@@ -122,5 +124,8 @@ router.use(openaiCompatRouter);
 
 // Multi-agent job worker status, mail, metrics, nudge
 router.use(workersRouter);
+
+// AI Builder — task board, agent execution loop, skill-constrained builder
+router.use(builderRouter);
 
 export default router;
