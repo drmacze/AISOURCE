@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Office3D } from "@/components/Office3D";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, Toaster } from "sonner";
 import {
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils";
 // ─── Agent Definitions — 12 agents ───────────────────────────────────────────
 
 const AGENT_DEFS = [
+  // ── Floor 1 — Main Work Floor ───────────────────────────────────────────────
   { id: "orchestrator", name: "Orchestrator", emoji: "🎯", colorHex: "#10b981", deskHex: "#064e3b", role: "Master coordinator",     zone: "command"   },
   { id: "trainer",      name: "Trainer",      emoji: "🧠", colorHex: "#8b5cf6", deskHex: "#3b0764", role: "AI model training",     zone: "research"  },
   { id: "librarian",    name: "Librarian",    emoji: "📚", colorHex: "#0ea5e9", deskHex: "#0c4a6e", role: "Knowledge base",        zone: "creative"  },
@@ -30,10 +32,21 @@ const AGENT_DEFS = [
   { id: "botmaster",    name: "Botmaster",    emoji: "🤖", colorHex: "#14b8a6", deskHex: "#134e4a", role: "Bot operations",        zone: "comms"     },
   { id: "curator",      name: "Curator",      emoji: "✨", colorHex: "#ec4899", deskHex: "#831843", role: "Prompt curation",       zone: "creative"  },
   { id: "engineer",     name: "Engineer",     emoji: "⚙️", colorHex: "#f97316", deskHex: "#7c2d12", role: "Infrastructure",        zone: "infra"     },
-  { id: "mandor",       name: "Mandor",       emoji: "👑", colorHex: "#eab308", deskHex: "#713f12", role: "AI Prompt Supervisor",  zone: "executive" },
-  { id: "researcher",   name: "Researcher",   emoji: "🔬", colorHex: "#a855f7", deskHex: "#581c87", role: "AI/ML Intelligence",    zone: "research"  },
   { id: "deployer",     name: "Deployer",     emoji: "🚀", colorHex: "#06b6d4", deskHex: "#0e4966", role: "Deployment & Ops",      zone: "infra"     },
   { id: "reviewer",     name: "CodeReviewer", emoji: "👁️", colorHex: "#84cc16", deskHex: "#365314", role: "Code Quality",          zone: "research"  },
+  { id: "dbadmin",      name: "DB Admin",     emoji: "🗄️", colorHex: "#e11d48", deskHex: "#4c0519", role: "Database Manager",      zone: "infra"     },
+  { id: "storage",      name: "Storage Mgr",  emoji: "💾", colorHex: "#0891b2", deskHex: "#0c4a6e", role: "Storage & Files",       zone: "infra"     },
+  { id: "frontend_dev", name: "Frontend Dev", emoji: "🎨", colorHex: "#7c3aed", deskHex: "#3b0764", role: "UI Engineering",        zone: "creative"  },
+  { id: "qa",           name: "QA Engineer",  emoji: "🧪", colorHex: "#15803d", deskHex: "#14532d", role: "Testing & Quality",     zone: "ops"       },
+  // ── Floor 2 — Executive Floor ──────────────────────────────────────────────
+  { id: "mandor",       name: "Mandor",       emoji: "👑", colorHex: "#eab308", deskHex: "#713f12", role: "AI Prompt Supervisor",  zone: "executive" },
+  { id: "codev",        name: "Co-Developer", emoji: "🤝", colorHex: "#c2410c", deskHex: "#7c2d12", role: "Meeting Facilitator",   zone: "executive" },
+  { id: "researcher",   name: "Researcher",   emoji: "🔬", colorHex: "#a855f7", deskHex: "#581c87", role: "AI/ML Intelligence",    zone: "research"  },
+  { id: "security",     name: "Security",     emoji: "🔒", colorHex: "#b45309", deskHex: "#451a03", role: "Security Officer",      zone: "ops"       },
+  { id: "network",      name: "Network",      emoji: "🌐", colorHex: "#0284c7", deskHex: "#0c4a6e", role: "Network Engineer",      zone: "infra"     },
+  { id: "devops",       name: "DevOps",       emoji: "🔧", colorHex: "#059669", deskHex: "#064e3b", role: "DevOps Engineer",       zone: "infra"     },
+  { id: "product",      name: "Product Mgr",  emoji: "📋", colorHex: "#7e22ce", deskHex: "#3b0764", role: "Product Strategy",      zone: "command"   },
+  { id: "backend_dev",  name: "Backend Dev",  emoji: "⚡", colorHex: "#dc2626", deskHex: "#7f1d1d", role: "API Engineering",       zone: "infra"     },
 ] as const;
 
 type AgentId = typeof AGENT_DEFS[number]["id"];
@@ -2830,12 +2843,12 @@ export default function AgentPage() {
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === "office" && (
           <div className="flex h-full">
-            {/* Office SVG */}
+            {/* 3D Office Scene */}
             <div className="flex-1 min-w-0 h-full">
-              <OfficeScene
+              <Office3D
                 agentStatuses={agentStatuses}
                 selectedAgent={selectedAgent}
-                onSelectAgent={id => setSelectedAgent(s => s === id ? null : id)}
+                onSelectAgent={id => setSelectedAgent((s: string | null) => s === id ? null : id)}
                 particles={particles}
                 activeThreads={threads}
                 agentEmotions={agentEmotions}
