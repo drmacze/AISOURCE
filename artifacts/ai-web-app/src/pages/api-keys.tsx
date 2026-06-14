@@ -150,7 +150,7 @@ export default function ApiKeysPage() {
   const [genOpen, setGenOpen] = useState(false);
   const [genName, setGenName] = useState("");
   const [genPerm, setGenPerm] = useState<"read" | "write" | "admin">("write");
-  const [genModel, setGenModel] = useState("kimi/kimi-k2-instruct");
+  const [genModel, setGenModel] = useState("auto");
   const [newKey, setNewKey] = useState<string | null>(null);
   const [generatedData, setGeneratedData] = useState<{ key: string; defaultModel: string | null } | null>(null);
 
@@ -456,15 +456,21 @@ export default function ApiKeysPage() {
         <h3 className="text-sm font-medium text-white">How to use your key</h3>
         <div className="space-y-2">
           {[
-            ["Ask (simple)", `curl -X POST https://YOUR_DOMAIN/api/v1/ask \\
+            ["Ask — Auto model (direkomendasikan)", `curl -X POST https://YOUR_DOMAIN/api/v1/ask \\
   -H "X-API-Key: dlv_..." \\
   -H "Content-Type: application/json" \\
-  -d '{"question":"What is AI?","model":"tinyllama"}'`],
-            ["Chat (with history)", `const res = await fetch('/api/v1/chat', {
+  -d '{"question":"What is AI?","useRAG":true}'
+# Tidak perlu tulis model — auto pakai yang terbaik!`],
+            ["Chat dengan history + Auto", `const res = await fetch('/api/v1/chat', {
   method: 'POST',
-  headers: { 'X-API-Key': 'dlv_...' },
-  body: JSON.stringify({ message: 'Hello', model: 'tinyllama' })
-});`],
+  headers: { 'X-API-Key': 'dlv_...', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ message: 'Hello', useRAG: true })
+  // model tidak perlu ditulis jika defaultModel = "auto"
+});
+const { reply, model, provider } = await res.json();
+// reply     = jawaban AI
+// model     = model yang dipakai (e.g. "openai/gpt-oss-120b")
+// provider  = "groq" | "openrouter" | "kimi" | "ollama"`],
             ["WhatsApp Bot", `const { reply } = await fetch('/api/v1/ask', {
   method: 'POST',
   headers: { 'X-API-Key': 'dlv_...' },
@@ -638,50 +644,114 @@ sock.ev.on("messages.upsert", async ({ messages }) => {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <label className="text-xs text-slate-400 flex items-center gap-2">
                   <Brain className="w-3.5 h-3.5 text-violet-400" />
                   Default AI Model
                 </label>
-                <Select value={genModel} onValueChange={(v) => setGenModel(v)}>
-                  <SelectTrigger className="bg-slate-800 border-white/10 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-800 border-white/10 text-white max-h-60">
-                    {/* Cloud models */}
-                    <div className="px-3 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Cloud (No install needed)</div>
-                    {(modelsQuery.data?.cloud ?? []).map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{m.name}</span>
-                          <span className="text-[10px] text-slate-500 ml-auto">{m.parameters}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                    {/* Local models */}
-                    {(modelsQuery.data?.local ?? []).length > 0 && (
-                      <>
-                        <div className="px-3 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-t border-white/5 mt-1">Local (Ollama)</div>
-                        {(modelsQuery.data?.local ?? []).map((m) => (
+
+                {/* Auto mode highlight card */}
+                <button
+                  type="button"
+                  onClick={() => setGenModel("auto")}
+                  className={cn(
+                    "w-full text-left rounded-lg border p-3 transition-all",
+                    genModel === "auto"
+                      ? "border-emerald-500/60 bg-emerald-500/10"
+                      : "border-white/10 bg-slate-800/60 hover:border-emerald-500/30 hover:bg-emerald-500/5"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-white">⚡ Auto — Best Available</span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-mono border border-emerald-500/30">RECOMMENDED</span>
+                    {genModel === "auto" && <Check className="w-3.5 h-3.5 text-emerald-400 ml-auto" />}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                    Otomatis pilih model terbaik yang tersedia: <span className="text-emerald-400">OpenAI OSS 120B → Groq 70B → Kimi K2 → OpenRouter → Ollama</span>. Website AI kamu selalu pakai AI terkuat.
+                  </p>
+                </button>
+
+                {/* Specific model picker */}
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-1.5">Atau pilih model spesifik:</p>
+                  <Select value={genModel !== "auto" ? genModel : ""} onValueChange={(v) => setGenModel(v)}>
+                    <SelectTrigger className="bg-slate-800 border-white/10 text-white">
+                      <SelectValue placeholder="Pilih model tertentu..." />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-white/10 text-white max-h-72">
+                      {/* Groq */}
+                      <div className="px-3 py-1 text-[10px] text-amber-400 font-semibold uppercase tracking-wider">⚡ Groq LPU — Tercepat</div>
+                      {(modelsQuery.data?.cloud ?? [])
+                        .filter((m) => m.provider === "groq")
+                        .map((m) => (
                           <SelectItem key={m.id} value={m.id}>
-                            <div className="flex items-center gap-2">
-                              <span>{m.name}</span>
-                              <span className="text-[10px] text-slate-500 ml-auto">{m.parameters}</span>
+                            <div className="flex items-center gap-2 w-full">
+                              <span className="font-medium">{m.name}</span>
+                              <span className="text-[10px] text-amber-400/70 font-mono ml-auto">{m.parameters}</span>
                             </div>
                           </SelectItem>
                         ))}
-                      </>
-                    )}
-                    {modelsQuery.isLoading && (
-                      <div className="px-3 py-2 text-xs text-slate-500">Loading models...</div>
-                    )}
-                    {(modelsQuery.data?.cloud ?? []).length === 0 && !modelsQuery.isLoading && (
-                      <div className="px-3 py-2 text-xs text-slate-500">No cloud models available</div>
-                    )}
-                  </SelectContent>
-                </Select>
+                      {/* Kimi */}
+                      <div className="px-3 py-1 text-[10px] text-blue-400 font-semibold uppercase tracking-wider border-t border-white/5 mt-1">🌙 Kimi K2 — 1T MoE</div>
+                      {(modelsQuery.data?.cloud ?? [])
+                        .filter((m) => m.provider === "kimi")
+                        .map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            <div className="flex items-center gap-2 w-full">
+                              <span className="font-medium">{m.name}</span>
+                              <span className="text-[10px] text-blue-400/70 font-mono ml-auto">{m.parameters}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      {/* OpenRouter */}
+                      <div className="px-3 py-1 text-[10px] text-violet-400 font-semibold uppercase tracking-wider border-t border-white/5 mt-1">🔀 OpenRouter — Free Models</div>
+                      {(modelsQuery.data?.cloud ?? [])
+                        .filter((m) => m.provider === "openrouter")
+                        .map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            <div className="flex items-center gap-2 w-full">
+                              <span className="font-medium">{m.name}</span>
+                              <span className="text-[10px] text-violet-400/70 font-mono ml-auto">{m.parameters}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      {/* HuggingFace */}
+                      <div className="px-3 py-1 text-[10px] text-orange-400 font-semibold uppercase tracking-wider border-t border-white/5 mt-1">🤗 HuggingFace — Cloud GPU</div>
+                      {(modelsQuery.data?.cloud ?? [])
+                        .filter((m) => m.provider === "hf")
+                        .map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            <div className="flex items-center gap-2 w-full">
+                              <span className="font-medium">{m.name}</span>
+                              <span className="text-[10px] text-orange-400/70 font-mono ml-auto">{m.parameters}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      {/* Local Ollama */}
+                      {(modelsQuery.data?.local ?? []).length > 0 && (
+                        <>
+                          <div className="px-3 py-1 text-[10px] text-slate-400 font-semibold uppercase tracking-wider border-t border-white/5 mt-1">🖥️ Local Ollama — Offline</div>
+                          {(modelsQuery.data?.local ?? []).map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              <div className="flex items-center gap-2 w-full">
+                                <span className="font-medium">{m.name}</span>
+                                <span className="text-[10px] text-slate-500 font-mono ml-auto">{m.parameters}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </>
+                      )}
+                      {modelsQuery.isLoading && (
+                        <div className="px-3 py-2 text-xs text-slate-500 flex items-center gap-2">
+                          <RefreshCw className="w-3 h-3 animate-spin" /> Loading models...
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <p className="text-[10px] text-slate-500">
-                  This model becomes the default for all requests using this key. You can override per-request.
+                  Model ini jadi default semua request dari key ini. Bisa di-override per-request dengan field <code className="text-violet-300">model</code>.
                 </p>
               </div>
               <Button
