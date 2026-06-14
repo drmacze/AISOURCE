@@ -2556,6 +2556,19 @@ function BuilderTab() {
 
 type Tab = "office" | "activity" | "collab" | "missions" | "intel" | "memories" | "dev" | "modelcreate" | "builder";
 
+interface LogEntry {
+  id: number;
+  ts: number;
+  agentId: string;
+  emoji: string;
+  name: string;
+  color: string;
+  kind: "tick" | "emotion" | "collab" | "mail" | "error";
+  text: string;
+}
+
+let _logSeq = 0;
+
 export default function AgentPage() {
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
   const [recentMail, setRecentMail]       = useState<MailItem[]>([]);
@@ -2572,11 +2585,34 @@ export default function AgentPage() {
   const [agentEmotions,  setAgentEmotions]  = useState<Map<string, { emoji: string; reason: string }>>(new Map());
   const [agentPositions, setAgentPositions] = useState<Map<string, { state: string; target?: string }>>(new Map());
   const [ttsOn, setTtsOn]                 = useState(false);
+  const [agentLogs, setAgentLogs]         = useState<LogEntry[]>([]);
+  const [logOpen, setLogOpen]             = useState(true);
+  const [logFilter, setLogFilter]         = useState<string>("all");
+  const logEndRef   = useRef<HTMLDivElement>(null);
   const particleRef  = useRef(0);
   const prevMailIds  = useRef(new Set<number>());
   const prevThreadIds = useRef(new Set<string>());
   const ttsRef       = useRef(false);
   ttsRef.current = ttsOn;
+
+  const addLog = useCallback((agentId: string, kind: LogEntry["kind"], text: string, overrideEmoji?: string) => {
+    const def = AGENT_DEFS.find(a => a.id === agentId);
+    if (!def && !overrideEmoji) return;
+    setAgentLogs(prev => {
+      const entry: LogEntry = {
+        id: ++_logSeq,
+        ts: Date.now(),
+        agentId,
+        emoji: overrideEmoji ?? def!.emoji,
+        name: def?.name ?? agentId,
+        color: def?.colorHex ?? "#94a3b8",
+        kind,
+        text,
+      };
+      const next = [...prev, entry];
+      return next.length > 80 ? next.slice(next.length - 80) : next;
+    });
+  }, []);
 
   const speak = useCallback((text: string, rate = 1.05) => {
     if (!ttsRef.current || typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -2667,7 +2703,7 @@ export default function AgentPage() {
     es.addEventListener("worker_tick", (e: MessageEvent) => {
       fetchAll();
       try {
-        const d = JSON.parse(e.data as string) as { id?: string };
+        const d = JSON.parse(e.data as string) as { id?: string; status?: string; error?: string };
         if (d.id) {
           const defs = AGENT_DEFS.filter(a => a.id !== d.id);
           const target = defs[Math.floor(Math.random() * defs.length)];
@@ -2676,6 +2712,15 @@ export default function AgentPage() {
             setParticles(p => [...p, { id: pid, fromId: d.id!, toId: target.id, ts: Date.now() }]);
             setTimeout(() => setParticles(p => p.filter(x => x.id !== pid)), 1200);
           }
+          if (d.status === "error" && d.error) {
+            addLog(d.id, "error", `Error: ${d.error.slice(0, 80)}`);
+          } else if (d.status === "ok") {
+            setAgentStatuses(prev => {
+              const agent = prev.find(a => a.agentId === d.id);
+              if (agent?.currentTask) addLog(d.id!, "tick", agent.currentTask);
+              return prev;
+            });
+          }
         }
       } catch { /* ignore */ }
     });
@@ -2683,7 +2728,7 @@ export default function AgentPage() {
     es.addEventListener("collab_started", (e: MessageEvent) => {
       fetchAll();
       try {
-        const d = JSON.parse(e.data as string) as { participants?: string[] };
+        const d = JSON.parse(e.data as string) as { participants?: string[]; topic?: string; initiator?: string };
         if (d.participants && d.participants.length >= 2) {
           const a = d.participants[0]; const b = d.participants[1];
           if (a && b) {
@@ -2691,12 +2736,28 @@ export default function AgentPage() {
             setParticles(p => [...p, { id: pid, fromId: a, toId: b, ts: Date.now() }]);
             setTimeout(() => setParticles(p => p.filter(x => x.id !== pid)), 1200);
           }
+          if (d.initiator && d.topic) {
+            addLog(d.initiator, "collab", `🤝 Started meeting: "${d.topic.slice(0, 60)}" with [${d.participants.slice(0,3).join(", ")}]`);
+          }
         }
       } catch { /* ignore */ }
     });
 
-    es.addEventListener("collab_message", () => fetchAll());
-    es.addEventListener("collab_concluded", () => fetchAll());
+    es.addEventListener("collab_message", (e: MessageEvent) => {
+      fetchAll();
+      try {
+        const d = JSON.parse(e.data as string) as { agentId?: string; content?: string };
+        if (d.agentId && d.content) addLog(d.agentId, "collab", `💬 ${d.content.slice(0, 90)}`);
+      } catch { /* ignore */ }
+    });
+
+    es.addEventListener("collab_concluded", (e: MessageEvent) => {
+      fetchAll();
+      try {
+        const d = JSON.parse(e.data as string) as { conclusion?: string };
+        if (d.conclusion) addLog("orchestrator", "collab", `✅ Meeting concluded: ${d.conclusion.slice(0, 80)}`);
+      } catch { /* ignore */ }
+    });
 
     es.addEventListener("agent_emotion", (e: MessageEvent) => {
       try {
@@ -2707,6 +2768,7 @@ export default function AgentPage() {
             next.set(d.agentId, { emoji: d.emoji, reason: d.reason });
             return next;
           });
+          if (d.reason && d.reason.length > 2) addLog(d.agentId, "emotion", `${d.emoji} ${d.reason}`);
         }
       } catch { /* ignore */ }
     });
@@ -2747,6 +2809,10 @@ export default function AgentPage() {
     } catch { /* ignore */ }
     setTimeout(() => setCircuitLoading(false), 1000);
   }
+
+  useEffect(() => {
+    if (logOpen) logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [agentLogs, logOpen]);
 
   const activeThreadCount = threads.filter(t => t.active).length;
   const workingCount      = agentStatuses.filter(a => a.status === "working").length;
@@ -2842,7 +2908,7 @@ export default function AgentPage() {
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === "office" && (
-          <div className="h-full w-full">
+          <div className="h-full w-full relative">
             <OfficeRealistic
               agentStatuses={agentStatuses}
               selectedAgent={selectedAgent}
@@ -2852,6 +2918,105 @@ export default function AgentPage() {
               agentEmotions={agentEmotions}
               agentPositions={agentPositions}
             />
+
+            {/* ── Live Agent Log Feed ───────────────────────────────── */}
+            <div className="absolute bottom-4 right-4 z-30 flex flex-col items-end gap-1" style={{ width: logOpen ? 340 : "auto" }}>
+              {/* Header bar */}
+              <div
+                className="flex items-center gap-2 bg-slate-950/90 border border-slate-700/70 rounded-xl px-3 py-2 backdrop-blur-md shadow-2xl cursor-pointer select-none w-full"
+                onClick={() => setLogOpen(v => !v)}
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"/>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"/>
+                </span>
+                <span className="font-mono text-[11px] text-slate-300 font-semibold tracking-wider flex-1">LIVE AGENT LOG</span>
+                {agentLogs.length > 0 && (
+                  <span className="text-[10px] font-mono text-slate-500">{agentLogs.length} entries</span>
+                )}
+                {/* Filter pills */}
+                {logOpen && (
+                  <div className="flex gap-1 ml-1" onClick={e => e.stopPropagation()}>
+                    {(["all","tick","emotion","collab","error"] as const).map(f => (
+                      <button
+                        key={f}
+                        onClick={() => setLogFilter(f)}
+                        className={cn(
+                          "text-[9px] font-mono px-1.5 py-0.5 rounded-full transition-all",
+                          logFilter === f
+                            ? f === "error" ? "bg-red-600/60 text-red-200 border border-red-500/50"
+                              : f === "collab" ? "bg-violet-600/60 text-violet-200 border border-violet-500/50"
+                              : f === "emotion" ? "bg-amber-600/60 text-amber-200 border border-amber-500/50"
+                              : "bg-emerald-700/60 text-emerald-200 border border-emerald-600/50"
+                            : "text-slate-600 hover:text-slate-400"
+                        )}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <span className="text-slate-600 ml-1 text-[10px]">{logOpen ? "▼" : "▲"}</span>
+              </div>
+
+              {/* Log entries */}
+              {logOpen && (
+                <div className="w-full bg-slate-950/95 border border-slate-800/70 rounded-xl backdrop-blur-md shadow-2xl overflow-hidden">
+                  <div className="h-64 overflow-y-auto px-2 py-2 space-y-0.5 font-mono text-[10px]"
+                    style={{ scrollbarWidth: "thin", scrollbarColor: "#334155 transparent" }}>
+                    {agentLogs.length === 0 && (
+                      <div className="flex items-center justify-center h-full text-slate-600 text-[11px]">
+                        Waiting for agent activity…
+                      </div>
+                    )}
+                    {agentLogs
+                      .filter(l => logFilter === "all" || l.kind === logFilter)
+                      .map(l => {
+                        const time = new Date(l.ts).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                        const kindColor =
+                          l.kind === "error"   ? "#f87171" :
+                          l.kind === "collab"  ? "#a78bfa" :
+                          l.kind === "emotion" ? "#fbbf24" :
+                          l.kind === "mail"    ? "#38bdf8" :
+                                                 "#4ade80";
+                        return (
+                          <div key={l.id} className="flex items-start gap-1.5 py-0.5 px-1.5 rounded hover:bg-slate-800/50 group transition-colors">
+                            <span className="text-slate-600 shrink-0 mt-px leading-none">{time}</span>
+                            <span
+                              className="shrink-0 w-1 self-stretch rounded-full mt-1"
+                              style={{ backgroundColor: kindColor, minHeight: 8 }}
+                            />
+                            <span className="shrink-0 leading-none mt-px">{l.emoji}</span>
+                            <span className="shrink-0 font-bold leading-none mt-px" style={{ color: l.color }}>
+                              {l.name}
+                            </span>
+                            <span className="text-slate-400 leading-tight break-words min-w-0">{l.text}</span>
+                          </div>
+                        );
+                      })}
+                    <div ref={logEndRef}/>
+                  </div>
+                  {/* Footer stats */}
+                  <div className="border-t border-slate-800/60 px-3 py-1.5 flex items-center gap-3">
+                    {(["tick","emotion","collab","error"] as const).map(k => {
+                      const count = agentLogs.filter(l => l.kind === k).length;
+                      const col = k === "error" ? "#f87171" : k === "collab" ? "#a78bfa" : k === "emotion" ? "#fbbf24" : "#4ade80";
+                      return count > 0 ? (
+                        <span key={k} className="text-[9px] font-mono" style={{ color: col }}>
+                          {k} ×{count}
+                        </span>
+                      ) : null;
+                    })}
+                    <button
+                      className="ml-auto text-[9px] font-mono text-slate-700 hover:text-slate-400 transition-colors"
+                      onClick={() => setAgentLogs([])}
+                    >
+                      clear
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
