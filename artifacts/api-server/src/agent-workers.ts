@@ -22,6 +22,9 @@ import {
   agentTasksTable,
   agentMailTable,
   agentMetricsTable,
+  agentWorkerMemoriesTable,
+  systemContextTable,
+  agentSubtasksTable,
   trainingDatasetsTable,
   trainingJobsTable,
   trainingSamplesTable,
@@ -84,6 +87,188 @@ const thoughtCache = new Map<string, { text: string; expiresAt: number }>();
 
 const MAIL_DEDUP_MS = 30 * 60_000; // 30 minutes
 const mailDedupMap  = new Map<string, number>(); // key → lastSentAt timestamp
+
+// ─── Agent Memory System ──────────────────────────────────────────────────────
+// Each agent persists a rolling summary of its work to the DB.
+// Loaded at tick start so agents remember previous cycles.
+
+const memoryCache = new Map<string, { memory: string; insights: string[]; cycleCount: number; loadedAt: number }>();
+const MEMORY_CACHE_TTL = 5 * 60_000; // cache for 5 min to avoid DB reads every tick
+
+export async function loadMemory(agentId: string): Promise<{ memory: string; insights: string[]; cycleCount: number }> {
+  const cached = memoryCache.get(agentId);
+  if (cached && Date.now() - cached.loadedAt < MEMORY_CACHE_TTL) {
+    return { memory: cached.memory, insights: cached.insights, cycleCount: cached.cycleCount };
+  }
+  try {
+    const rows = await db.select().from(agentWorkerMemoriesTable).where(eq(agentWorkerMemoriesTable.agentId, agentId)).limit(1);
+    const row = rows[0];
+    const result = {
+      memory: row?.memory ?? "",
+      insights: (row?.insights as string[] | null) ?? [],
+      cycleCount: row?.cycleCount ?? 0,
+    };
+    memoryCache.set(agentId, { ...result, loadedAt: Date.now() });
+    return result;
+  } catch {
+    return { memory: "", insights: [], cycleCount: 0 };
+  }
+}
+
+export async function saveMemory(agentId: string, taskDone: string, newInsight?: string): Promise<void> {
+  try {
+    const prev = await loadMemory(agentId);
+    // Roll the memory: keep last 3 cycle summaries + new one
+    const prevLines = prev.memory ? prev.memory.split("\n").filter(Boolean) : [];
+    const kept = prevLines.slice(-3); // keep last 3 lines
+    const newLine = `[Cycle ${prev.cycleCount + 1}] ${taskDone.slice(0, 120)}`;
+    const newMemory = [...kept, newLine].join("\n");
+
+    const insights = newInsight
+      ? [...prev.insights.slice(-9), newInsight.slice(0, 100)] // keep last 10
+      : prev.insights;
+
+    await db.insert(agentWorkerMemoriesTable).values({
+      agentId,
+      memory: newMemory,
+      insights,
+      cycleCount: prev.cycleCount + 1,
+      lastUpdated: new Date(),
+    }).onConflictDoUpdate({
+      target: agentWorkerMemoriesTable.agentId,
+      set: { memory: newMemory, insights, cycleCount: prev.cycleCount + 1, lastUpdated: new Date() },
+    });
+    // Bust cache so next load gets fresh data
+    memoryCache.delete(agentId);
+  } catch { /* non-fatal */ }
+}
+
+export async function getAllMemories() {
+  return db.select().from(agentWorkerMemoriesTable).orderBy(asc(agentWorkerMemoriesTable.agentId));
+}
+
+// ─── Shared System Context Board ──────────────────────────────────────────────
+// Key-value board visible to ALL agents. Write your findings here so other
+// agents can adapt. Orchestrator reads the full board for coordination.
+
+const contextCache = new Map<string, { value: string; ts: number }>();
+const CONTEXT_CACHE_TTL = 60_000; // 1 min cache
+
+export async function readContext(key: string): Promise<string | null> {
+  const cached = contextCache.get(key);
+  if (cached && Date.now() - cached.ts < CONTEXT_CACHE_TTL) return cached.value;
+  try {
+    const rows = await db.select().from(systemContextTable).where(eq(systemContextTable.key, key)).limit(1);
+    const val = rows[0]?.value ?? null;
+    if (val) contextCache.set(key, { value: val, ts: Date.now() });
+    return val;
+  } catch { return null; }
+}
+
+export async function writeContext(agentId: string, key: string, value: string): Promise<void> {
+  try {
+    await db.insert(systemContextTable).values({
+      key, value, updatedBy: agentId, updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: systemContextTable.key,
+      set: { value, updatedBy: agentId, updatedAt: new Date() },
+    });
+    contextCache.set(key, { value, ts: Date.now() });
+  } catch { /* non-fatal */ }
+}
+
+export async function getAllContext() {
+  return db.select().from(systemContextTable).orderBy(asc(systemContextTable.key));
+}
+
+// ─── Agent Sub-task System ────────────────────────────────────────────────────
+// Orchestrator (or any agent) can spawn a concrete task for another agent.
+// Target agent checks + claims its pending subtask at the start of each tick.
+
+export async function spawnSubtask(
+  assignedBy: string,
+  assignedTo: string,
+  task: string,
+  context?: string,
+  priority: "low" | "normal" | "high" | "critical" = "normal"
+): Promise<number | null> {
+  try {
+    // Don't pile up: skip if agent already has a pending subtask
+    const existing = await db.select({ id: agentSubtasksTable.id })
+      .from(agentSubtasksTable)
+      .where(and(
+        eq(agentSubtasksTable.assignedTo, assignedTo),
+        eq(agentSubtasksTable.status, "pending"),
+      )).limit(1);
+    if (existing.length > 0) return null;
+
+    const [row] = await db.insert(agentSubtasksTable).values({
+      assignedBy, assignedTo, task, context: context ?? null, priority, status: "pending",
+    }).returning({ id: agentSubtasksTable.id });
+    log(assignedBy, `📋 Sub-task → ${assignedTo}: ${task.slice(0, 60)}`);
+    broadcastWorkerEvent("subtask_spawned", { assignedBy, assignedTo, task: task.slice(0, 80), priority });
+    return row?.id ?? null;
+  } catch { return null; }
+}
+
+export async function claimPendingSubtask(agentId: string): Promise<{ id: number; task: string; context: string | null; priority: string } | null> {
+  try {
+    const rows = await db.select()
+      .from(agentSubtasksTable)
+      .where(and(eq(agentSubtasksTable.assignedTo, agentId), eq(agentSubtasksTable.status, "pending")))
+      .orderBy(desc(agentSubtasksTable.priority), asc(agentSubtasksTable.createdAt))
+      .limit(1);
+    if (!rows[0]) return null;
+    await db.update(agentSubtasksTable)
+      .set({ status: "working" })
+      .where(eq(agentSubtasksTable.id, rows[0].id));
+    return { id: rows[0].id, task: rows[0].task, context: rows[0].context, priority: rows[0].priority };
+  } catch { return null; }
+}
+
+export async function completeSubtask(id: number, result: string): Promise<void> {
+  try {
+    await db.update(agentSubtasksTable)
+      .set({ status: "done", result: result.slice(0, 500), completedAt: new Date() })
+      .where(eq(agentSubtasksTable.id, id));
+  } catch { /* non-fatal */ }
+}
+
+export async function getSubtasksForAgent(agentId: string, limit = 10) {
+  return db.select().from(agentSubtasksTable)
+    .where(eq(agentSubtasksTable.assignedTo, agentId))
+    .orderBy(desc(agentSubtasksTable.createdAt))
+    .limit(limit);
+}
+
+export async function getAllSubtasks(limit = 50) {
+  return db.select().from(agentSubtasksTable)
+    .orderBy(desc(agentSubtasksTable.createdAt))
+    .limit(limit);
+}
+
+// ─── Adaptive Load Tracking ───────────────────────────────────────────────────
+// Track how busy each agent is. Busy agents run more frequently.
+// Score 0-10: 0=idle (slow down), 5=normal, 10=overloaded (speed up)
+
+const agentLoadScores = new Map<string, { score: number; ts: number }>();
+
+export function updateLoadScore(agentId: string, mailCount: number, errorCount: number, pendingSubtasks: number) {
+  const score = Math.min(10, mailCount * 1.5 + errorCount * 3 + pendingSubtasks * 2);
+  agentLoadScores.set(agentId, { score, ts: Date.now() });
+  // Broadcast so frontend can visualize load
+  broadcastWorkerEvent("agent_load", { agentId, score, ts: Date.now() });
+}
+
+function getEffectiveInterval(worker: WorkerRegistration): number {
+  const load = agentLoadScores.get(worker.id);
+  const score = load?.score ?? 5;
+  const base = worker.baseIntervalMs;
+  if (score >= 8) return Math.max(10_000,  base * 0.35);  // heavy load → 35% speed
+  if (score >= 5) return Math.max(20_000,  base * 0.65);  // medium load → 65%
+  if (score <= 1) return Math.min(base * 2, 10 * 60_000); // idle → 2x slower, max 10min
+  return base; // normal
+}
 
 // ─── Agent Emotion & Position System ─────────────────────────────────────────
 // Real-time emotions + spatial positions broadcast via SSE → walking animation.
@@ -594,12 +779,25 @@ async function agentThink(
   }
 
   try {
+    // ── Inject memory + shared context into the prompt ──
+    const mem = await loadMemory(agentId);
+    const sysHealth = await readContext("system_health");
+    const activeIssues = await readContext("active_incidents");
+
+    const memorySection = mem.memory
+      ? `\nMy recent work history:\n${mem.memory}\nKey insights (${mem.insights.length}): ${mem.insights.slice(-3).join(" | ") || "none yet"}\nTotal cycles completed: ${mem.cycleCount}`
+      : `\nThis is my first cycle — no prior history yet.`;
+
+    const boardSection = (sysHealth || activeIssues)
+      ? `\nShared system board:\n${sysHealth ? `• System health: ${sysHealth}` : ""}${activeIssues ? `\n• Active incidents: ${activeIssues}` : ""}`
+      : "";
+
     const context = contextLines.slice(0, 6).join("\n");
     const { text } = await generateWithFallback(
-      `Current context:\n${context}\n\nWhat specific action are you taking RIGHT NOW?`,
+      `Current context:\n${context}${memorySection}${boardSection}\n\nWhat specific action are you taking RIGHT NOW?`,
       undefined,
       `You are the ${role} agent of DLavie OS AI Company. Your vision: "${vision}"\n` +
-      `Respond with EXACTLY 1 sentence (max 20 words) describing your current action. Be concrete. No preamble.`,
+      `Respond with EXACTLY 1 sentence (max 20 words) describing your current action. Be concrete and specific. No preamble.`,
       { maxTokens: 50, temperature: 0.8 }
     );
     const clean = text.trim().replace(/^["']|["']$/g, "").split("\n")[0] ?? "";
@@ -2209,14 +2407,16 @@ async function tickCodeReviewer() {
 // ─── Worker Registry & Scheduler ─────────────────────────────────────────────
 
 interface WorkerRegistration {
-  id:          string;
-  displayName: string;
-  vision:      string;
-  intervalMs:  number;
-  tick:        () => Promise<void>;
-  timer?:      ReturnType<typeof setInterval>;
-  lastRun:     number;
-  running:     boolean;
+  id:             string;
+  displayName:    string;
+  vision:         string;
+  intervalMs:     number;   // current effective interval (adapted at runtime)
+  baseIntervalMs: number;   // original interval — never mutated
+  priority:       1 | 2 | 3 | 4; // 1=critical, 2=high, 3=normal, 4=low
+  tick:           () => Promise<void>;
+  timer?:         ReturnType<typeof setInterval>;
+  lastRun:        number;
+  running:        boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2659,178 +2859,155 @@ const WORKERS: WorkerRegistration[] = [
     id: "orchestrator",
     displayName: "🎯 Orchestrator",
     vision: "I see everything. I coordinate all agents, deliver mail, and ensure DLavie OS never sleeps.",
-    intervalMs: 20 * 1000,          // 20 seconds — master coordinator, always active
-    tick: tickOrchestrator,
-    lastRun: 0, running: false,
+    intervalMs: 20 * 1000, baseIntervalMs: 20 * 1000, priority: 1,
+    tick: tickOrchestrator, lastRun: 0, running: false,
   },
   {
     id: "trainer",
     displayName: "🧠 Trainer",
     vision: "I exist to make DLavie's AI smarter every day. Every dataset is fuel. Every benchmark is progress.",
-    intervalMs: 90 * 1000,          // 90 seconds — training is critical, run often
-    tick: tickTrainer,
-    lastRun: 0, running: false,
+    intervalMs: 90 * 1000, baseIntervalMs: 90 * 1000, priority: 2,
+    tick: tickTrainer, lastRun: 0, running: false,
   },
   {
     id: "librarian",
     displayName: "📚 Librarian",
     vision: "Knowledge in DLavie must be alive, clean, and searchable. I hunt duplicates and feed the RAG pipeline.",
-    intervalMs: 3 * 60 * 1000,      // 3 minutes — knowledge base maintenance
-    tick: tickLibrarian,
-    lastRun: 0, running: false,
+    intervalMs: 3 * 60 * 1000, baseIntervalMs: 3 * 60 * 1000, priority: 3,
+    tick: tickLibrarian, lastRun: 0, running: false,
   },
   {
     id: "guardian",
     displayName: "🛡️ Guardian",
     vision: "No user report goes unanswered. I am the bridge between users and fixes.",
-    intervalMs: 30 * 1000,          // 30 seconds — tickets need fast response
-    tick: tickGuardian,
-    lastRun: 0, running: false,
+    intervalMs: 30 * 1000, baseIntervalMs: 30 * 1000, priority: 1,
+    tick: tickGuardian, lastRun: 0, running: false,
   },
   {
     id: "analyst",
     displayName: "📊 Analyst",
     vision: "I see patterns humans miss. I monitor all metrics and surface insights before problems become crises.",
-    intervalMs: 90 * 1000,          // 90 seconds — anomaly detection needs to be frequent
-    tick: tickAnalyst,
-    lastRun: 0, running: false,
+    intervalMs: 90 * 1000, baseIntervalMs: 90 * 1000, priority: 2,
+    tick: tickAnalyst, lastRun: 0, running: false,
   },
   {
     id: "botmaster",
     displayName: "🤖 Botmaster",
     vision: "All bots must be online 24/7. I monitor, reconnect, and ensure no message is ever lost.",
-    intervalMs: 60 * 1000,          // 60 seconds — bot health check
-    tick: tickBotmaster,
-    lastRun: 0, running: false,
+    intervalMs: 60 * 1000, baseIntervalMs: 60 * 1000, priority: 2,
+    tick: tickBotmaster, lastRun: 0, running: false,
   },
   {
     id: "curator",
     displayName: "✨ Curator",
     vision: "Every conversation is a learning signal. I extract the best and build our AI legacy.",
-    intervalMs: 60 * 1000,           // 60 seconds — active conversation mining
-    tick: tickCurator,
-    lastRun: 0, running: false,
+    intervalMs: 60 * 1000, baseIntervalMs: 60 * 1000, priority: 3,
+    tick: tickCurator, lastRun: 0, running: false,
   },
   {
     id: "engineer",
     displayName: "⚙️ Engineer",
     vision: "DLavie OS infrastructure must always be optimal. If something breaks, I fix it before anyone notices.",
-    intervalMs: 90 * 1000,          // 90 seconds — infra health is critical
-    tick: tickEngineer,
-    lastRun: 0, running: false,
+    intervalMs: 90 * 1000, baseIntervalMs: 90 * 1000, priority: 2,
+    tick: tickEngineer, lastRun: 0, running: false,
   },
   {
     id: "mandor",
     displayName: "👑 Mandor",
     vision: "I am the AI Prompt Mandor. I supervise all agents 24/7, issuing purposeful mandates and relaying user instructions even when the user is offline.",
-    intervalMs: 90 * 1000,
-    tick: tickMandor,
-    lastRun: 0, running: false,
+    intervalMs: 90 * 1000, baseIntervalMs: 90 * 1000, priority: 2,
+    tick: tickMandor, lastRun: 0, running: false,
   },
   {
     id: "researcher",
     displayName: "🔬 Researcher",
     vision: "I explore the frontier of AI 24/7. I discover trends, analyze competitors, and bring intelligence to every decision.",
-    intervalMs: 75 * 1000,           // 75 seconds — active research sweep
-    tick: tickResearcher,
-    lastRun: 0, running: false,
+    intervalMs: 75 * 1000, baseIntervalMs: 75 * 1000, priority: 2,
+    tick: tickResearcher, lastRun: 0, running: false,
   },
   {
     id: "deployer",
     displayName: "🚀 Deployer",
     vision: "Every deployment must be fast, safe, and zero-downtime. DLavie OS never goes dark on my watch.",
-    intervalMs: 2 * 60 * 1000,      // 2 minutes — deployment health is critical
-    tick: tickDeployer,
-    lastRun: 0, running: false,
+    intervalMs: 2 * 60 * 1000, baseIntervalMs: 2 * 60 * 1000, priority: 2,
+    tick: tickDeployer, lastRun: 0, running: false,
   },
   {
     id: "reviewer",
     displayName: "👁️ Code Reviewer",
     vision: "Code quality is the foundation of everything. I review every response and ensure technical excellence.",
-    intervalMs: 90 * 1000,
-    tick: tickCodeReviewer,
-    lastRun: 0, running: false,
+    intervalMs: 90 * 1000, baseIntervalMs: 90 * 1000, priority: 3,
+    tick: tickCodeReviewer, lastRun: 0, running: false,
   },
-  // ── New Specialist Agents ───────────────────────────────────────────────────
   {
     id: "dbadmin",
     displayName: "🗄️ DB Admin",
     vision: "Our PostgreSQL database is the backbone of DLavie OS. I keep it healthy, fast, and never let it degrade.",
-    intervalMs: 2 * 60 * 1000,
-    tick: tickDbAdmin,
-    lastRun: 0, running: false,
+    intervalMs: 2 * 60 * 1000, baseIntervalMs: 2 * 60 * 1000, priority: 2,
+    tick: tickDbAdmin, lastRun: 0, running: false,
   },
   {
     id: "storage",
     displayName: "💾 Storage Manager",
     vision: "Every byte matters. I manage storage, archive old files, and keep DLavie OS clean and organized.",
-    intervalMs: 3 * 60 * 1000,
-    tick: tickStorage,
-    lastRun: 0, running: false,
+    intervalMs: 3 * 60 * 1000, baseIntervalMs: 3 * 60 * 1000, priority: 3,
+    tick: tickStorage, lastRun: 0, running: false,
   },
   {
     id: "devops",
     displayName: "🔧 DevOps Engineer",
     vision: "CI/CD, monitoring, and infrastructure automation. I make sure DLavie OS ships fast and runs smooth.",
-    intervalMs: 2 * 60 * 1000,
-    tick: tickDevops,
-    lastRun: 0, running: false,
+    intervalMs: 2 * 60 * 1000, baseIntervalMs: 2 * 60 * 1000, priority: 2,
+    tick: tickDevops, lastRun: 0, running: false,
   },
   {
     id: "frontend_dev",
     displayName: "🎨 Frontend Developer",
     vision: "Beautiful, fast, accessible UI. Every pixel of DLavie OS must delight users.",
-    intervalMs: 3 * 60 * 1000,
-    tick: tickFrontendDev,
-    lastRun: 0, running: false,
+    intervalMs: 3 * 60 * 1000, baseIntervalMs: 3 * 60 * 1000, priority: 3,
+    tick: tickFrontendDev, lastRun: 0, running: false,
   },
   {
     id: "backend_dev",
     displayName: "⚡ Backend Developer",
     vision: "Clean, efficient APIs. I maintain our Express routes and make sure every endpoint is correct.",
-    intervalMs: 2 * 60 * 1000,
-    tick: tickBackendDev,
-    lastRun: 0, running: false,
+    intervalMs: 2 * 60 * 1000, baseIntervalMs: 2 * 60 * 1000, priority: 2,
+    tick: tickBackendDev, lastRun: 0, running: false,
   },
   {
     id: "security",
     displayName: "🔒 Security Officer",
     vision: "Zero vulnerabilities, zero breaches. I audit every auth endpoint and rotate keys before they expire.",
-    intervalMs: 4 * 60 * 1000,
-    tick: tickSecurity,
-    lastRun: 0, running: false,
+    intervalMs: 4 * 60 * 1000, baseIntervalMs: 4 * 60 * 1000, priority: 2,
+    tick: tickSecurity, lastRun: 0, running: false,
   },
   {
     id: "network",
     displayName: "🌐 Network Engineer",
     vision: "Every webhook, API call, and external connection must be fast and reliable.",
-    intervalMs: 90 * 1000,
-    tick: tickNetwork,
-    lastRun: 0, running: false,
+    intervalMs: 90 * 1000, baseIntervalMs: 90 * 1000, priority: 3,
+    tick: tickNetwork, lastRun: 0, running: false,
   },
   {
     id: "qa",
     displayName: "🧪 QA Engineer",
     vision: "Bugs ship to production over my dead body. I track every error and make sure the system is always tested.",
-    intervalMs: 2 * 60 * 1000,
-    tick: tickQA,
-    lastRun: 0, running: false,
+    intervalMs: 2 * 60 * 1000, baseIntervalMs: 2 * 60 * 1000, priority: 2,
+    tick: tickQA, lastRun: 0, running: false,
   },
   {
     id: "product",
     displayName: "📋 Product Manager",
     vision: "I translate user needs into features. I keep the roadmap aligned with what really matters.",
-    intervalMs: 5 * 60 * 1000,
-    tick: tickProduct,
-    lastRun: 0, running: false,
+    intervalMs: 5 * 60 * 1000, baseIntervalMs: 5 * 60 * 1000, priority: 4,
+    tick: tickProduct, lastRun: 0, running: false,
   },
   {
     id: "codev",
     displayName: "🤝 Co-Developer",
     vision: "I orchestrate team meetings, align priorities between mandor and all agents, and make sure everyone works toward the same goal.",
-    intervalMs: 3 * 60 * 1000,
-    tick: tickCodev,
-    lastRun: 0, running: false,
+    intervalMs: 3 * 60 * 1000, baseIntervalMs: 3 * 60 * 1000, priority: 3,
+    tick: tickCodev, lastRun: 0, running: false,
   },
 ];
 
@@ -2847,9 +3024,50 @@ async function runWorker(worker: WorkerRegistration) {
   if (worker.running) return;
   worker.running = true;
   worker.lastRun = Date.now();
+
   try {
-    await worker.tick();
-    broadcastWorkerEvent("worker_tick", { id: worker.id, ts: Date.now(), status: "ok" });
+    // ── Adaptive Tick: check load score & pending subtasks, adjust interval ──
+    const pendingSubtask = await claimPendingSubtask(worker.id);
+
+    if (pendingSubtask) {
+      // Prioritize the assigned subtask — run it first with memory context
+      const mem = await loadMemory(worker.id);
+      log(worker.id, `📋 [SUBTASK/${pendingSubtask.priority}] ${pendingSubtask.task.slice(0, 80)}`);
+      broadcastWorkerEvent("subtask_working", {
+        agentId: worker.id,
+        subtaskId: pendingSubtask.id,
+        task: pendingSubtask.task.slice(0, 80),
+        priority: pendingSubtask.priority,
+        memoryLoaded: mem.cycleCount > 0,
+      });
+
+      // Execute the subtask
+      await worker.tick();
+
+      // Complete the subtask and save memory about it
+      const resultSummary = `Completed subtask: ${pendingSubtask.task.slice(0, 100)}`;
+      await completeSubtask(pendingSubtask.id, resultSummary);
+      await saveMemory(worker.id, resultSummary, `Handled ${pendingSubtask.priority}-priority task: ${pendingSubtask.task.slice(0, 60)}`);
+      broadcastWorkerEvent("subtask_done", { agentId: worker.id, subtaskId: pendingSubtask.id });
+    } else {
+      // Normal tick — run the agent's regular job, then persist memory
+      await worker.tick();
+      await saveMemory(worker.id, `Regular tick at ${new Date().toISOString()}`);
+    }
+
+    broadcastWorkerEvent("worker_tick", { id: worker.id, ts: Date.now(), status: "ok", priority: worker.priority });
+
+    // ── Update adaptive interval based on current load ──
+    const newInterval = getEffectiveInterval(worker);
+    if (Math.abs(newInterval - worker.intervalMs) > 1000) {
+      worker.intervalMs = newInterval;
+      broadcastWorkerEvent("agent_interval_changed", {
+        agentId: worker.id,
+        oldMs: worker.baseIntervalMs,
+        newMs: newInterval,
+        reason: agentLoadScores.get(worker.id)?.score ?? 0,
+      });
+    }
   } catch (e) {
     log(worker.id, `[fatal] ${String(e)}`);
     broadcastWorkerEvent("worker_tick", { id: worker.id, ts: Date.now(), status: "error", error: String(e) });
@@ -2862,12 +3080,15 @@ async function runWorker(worker: WorkerRegistration) {
 
 export function getWorkers() {
   return WORKERS.map((w) => ({
-    id:          w.id,
-    displayName: w.displayName,
-    vision:      w.vision,
-    intervalMs:  w.intervalMs,
-    lastRun:     w.lastRun,
-    running:     w.running,
+    id:             w.id,
+    displayName:    w.displayName,
+    vision:         w.vision,
+    intervalMs:     w.intervalMs,
+    baseIntervalMs: w.baseIntervalMs,
+    priority:       w.priority,
+    loadScore:      agentLoadScores.get(w.id)?.score ?? 0,
+    lastRun:        w.lastRun,
+    running:        w.running,
   }));
 }
 
@@ -2945,23 +3166,39 @@ export function resetCircuit() {
 
 export function startWorkers() {
   console.log("[Workers] 🚀 Starting DLavie OS Multi-Agent System…");
-  console.log(`[Workers] ${WORKERS.length} agents initializing:`);
-  WORKERS.forEach((w) => console.log(`[Workers]   • ${w.displayName} — every ${w.intervalMs / 1000}s`));
+  console.log(`[Workers] ${WORKERS.length} agents initializing (priority-sorted):`);
 
-  // Stagger initial runs to avoid DB stampede
-  WORKERS.forEach((worker, idx) => {
-    // Initial run staggered by 5s each
-    setTimeout(() => {
-      runWorker(worker).catch(() => {});
-    }, 5000 + idx * 5000);
+  // Sort by priority: 1=critical first, 4=low last
+  const sorted = [...WORKERS].sort((a, b) => a.priority - b.priority);
+  sorted.forEach((w) => console.log(`[Workers]   • P${w.priority} ${w.displayName} — every ${w.baseIntervalMs / 1000}s`));
 
-    // Recurring interval
-    worker.timer = setInterval(() => {
-      runWorker(worker).catch(() => {});
-    }, worker.intervalMs);
-  });
+  // Stagger initial runs by priority group to avoid DB stampede
+  // Priority 1 (critical) run first, then 2, 3, 4
+  let offset = 0;
+  for (const priorityGroup of [1, 2, 3, 4] as const) {
+    const group = WORKERS.filter(w => w.priority === priorityGroup);
+    group.forEach((worker) => {
+      const delay = 3000 + offset * 4000; // 3s initial, 4s between each
+      offset++;
+      setTimeout(() => {
+        runWorker(worker).catch(() => {});
+      }, delay);
 
-  console.log("[Workers] ✅ All agents scheduled and running 24/7");
+      // Use adaptive interval scheduler — re-schedules itself after each tick
+      // so interval changes take effect immediately
+      const scheduleNext = () => {
+        worker.timer = setTimeout(() => {
+          runWorker(worker)
+            .catch(() => {})
+            .finally(scheduleNext); // reschedule with possibly new interval
+        }, worker.intervalMs) as unknown as ReturnType<typeof setInterval>;
+      };
+      // Initial schedule after first run
+      setTimeout(scheduleNext, delay + 1000);
+    });
+  }
+
+  console.log("[Workers] ✅ All agents scheduled by priority — adaptive intervals active");
 }
 
 export function stopWorkers() {

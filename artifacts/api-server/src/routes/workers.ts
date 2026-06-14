@@ -1,24 +1,32 @@
 /**
  * DLavie OS — Worker Status & Control Routes
  *
- * GET  /workers/status        — all worker statuses + agent heartbeats
- * GET  /workers/agents        — agent DB heartbeats
- * GET  /workers/mail          — boss inbox
- * GET  /workers/mail/all      — all inter-agent mail
- * POST /workers/mail/send     — send mail to an agent
- * DELETE /workers/mail/:id    — mark mail read
- * GET  /workers/metrics       — recent agent metrics
- * POST /workers/:id/nudge     — manually trigger a worker tick
- * GET  /workers/events        — SSE live stream
- * GET  /workers/circuit       — circuit breaker status
- * POST /workers/circuit/reset — reset circuit breaker
- * GET  /workers/threads       — collab threads
- * GET  /workers/heatmap       — 24-hour hourly activity heatmap per agent
- * GET  /workers/scorecard     — performance scorecard per agent
- * GET  /workers/missions      — mission board (in-memory)
- * POST /workers/missions      — create mission
- * PATCH /workers/missions/:id — update mission status
- * DELETE /workers/missions/:id— delete mission
+ * GET  /workers/status           — all worker statuses + agent heartbeats
+ * GET  /workers/agents           — agent DB heartbeats
+ * GET  /workers/mail             — boss inbox
+ * GET  /workers/mail/all         — all inter-agent mail
+ * POST /workers/mail/send        — send mail to an agent
+ * DELETE /workers/mail/:id       — mark mail read
+ * GET  /workers/metrics          — recent agent metrics
+ * POST /workers/:id/nudge        — manually trigger a worker tick
+ * GET  /workers/events           — SSE live stream
+ * GET  /workers/circuit          — circuit breaker status
+ * POST /workers/circuit/reset    — reset circuit breaker
+ * GET  /workers/threads          — collab threads
+ * GET  /workers/heatmap          — 24-hour hourly activity heatmap per agent
+ * GET  /workers/scorecard        — performance scorecard per agent
+ * GET  /workers/missions         — mission board (in-memory)
+ * POST /workers/missions         — create mission
+ * PATCH /workers/missions/:id    — update mission status
+ * DELETE /workers/missions/:id   — delete mission
+ *
+ * — New AI Agent Improvement Endpoints —
+ * GET  /workers/memories         — all agent persistent memories
+ * GET  /workers/memories/:id     — single agent memory
+ * GET  /workers/context          — shared system context board (all keys)
+ * GET  /workers/subtasks         — all subtasks (recent 50)
+ * GET  /workers/subtasks/:agentId— subtasks for a specific agent
+ * POST /workers/subtasks         — spawn a new subtask for an agent
  */
 
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -38,6 +46,11 @@ import {
   startCollabThread,
   addThreadMsg,
   concludeThread,
+  getAllMemories,
+  getAllContext,
+  getAllSubtasks,
+  getSubtasksForAgent,
+  spawnSubtask,
 } from "../agent-workers.js";
 import { db } from "@workspace/db";
 import { agentMailTable, agentStatusTable } from "@workspace/db";
@@ -359,6 +372,87 @@ router.post("/workers/test-collab", (req: Request, res: Response) => {
   }, durationMs);
 
   res.json({ ok: true, threadId: thread.id, topic, participants: thread.participants, durationMs });
+});
+
+// ─── Agent Memory Persistence ─────────────────────────────────────────────────
+
+/** GET /workers/memories — all agent persistent memories */
+router.get("/workers/memories", async (_req: Request, res: Response) => {
+  try {
+    const memories = await getAllMemories();
+    res.json({ memories, count: memories.length });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+/** GET /workers/memories/:agentId — single agent memory */
+router.get("/workers/memories/:agentId", async (req: Request, res: Response) => {
+  try {
+    const memories = await getAllMemories();
+    const mem = memories.find(m => m.agentId === req.params.agentId);
+    if (!mem) return void res.status(404).json({ error: "No memory found for agent" });
+    res.json(mem);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ─── Shared System Context Board ──────────────────────────────────────────────
+
+/** GET /workers/context — full shared context board */
+router.get("/workers/context", async (_req: Request, res: Response) => {
+  try {
+    const items = await getAllContext();
+    const board: Record<string, { value: string; updatedBy: string; updatedAt: Date }> = {};
+    items.forEach(i => { board[i.key] = { value: i.value, updatedBy: i.updatedBy, updatedAt: i.updatedAt }; });
+    res.json({ board, count: items.length });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ─── Agent Subtask Queue ──────────────────────────────────────────────────────
+
+/** GET /workers/subtasks — all subtasks (recent 50) */
+router.get("/workers/subtasks", async (_req: Request, res: Response) => {
+  try {
+    const subtasks = await getAllSubtasks(50);
+    res.json({ subtasks, count: subtasks.length });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+/** GET /workers/subtasks/:agentId — subtasks assigned to a specific agent */
+router.get("/workers/subtasks/:agentId", async (req: Request, res: Response) => {
+  try {
+    const subtasks = await getSubtasksForAgent(req.params.agentId!, 20);
+    res.json({ agentId: req.params.agentId, subtasks, count: subtasks.length });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+/**
+ * POST /workers/subtasks
+ * Spawn a new subtask for an agent.
+ * Body: { assignedBy, assignedTo, task, context?, priority? }
+ */
+router.post("/workers/subtasks", async (req: Request, res: Response) => {
+  const { assignedBy = "boss", assignedTo, task, context, priority = "normal" } = req.body ?? {};
+  if (!assignedTo || !task) {
+    return void res.status(400).json({ error: "assignedTo and task are required" });
+  }
+  try {
+    const id = await spawnSubtask(assignedBy, assignedTo, task, context, priority);
+    if (id === null) {
+      return void res.status(409).json({ ok: false, message: `Agent ${assignedTo} already has a pending subtask` });
+    }
+    res.json({ ok: true, subtaskId: id, assignedTo, task, priority });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
 });
 
 export default router;
