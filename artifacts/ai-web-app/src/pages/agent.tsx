@@ -2590,8 +2590,9 @@ export default function AgentPage() {
   const [logFilter, setLogFilter]         = useState<string>("all");
   const logEndRef   = useRef<HTMLDivElement>(null);
   const particleRef  = useRef(0);
-  const prevMailIds  = useRef(new Set<number>());
-  const prevThreadIds = useRef(new Set<string>());
+  const prevMailIds      = useRef(new Set<number>());
+  const prevThreadIds    = useRef(new Set<string>());
+  const prevConcludedIds = useRef(new Set<string>()); // track concluded meetings to avoid duplicate toasts
   const ttsRef       = useRef(false);
   ttsRef.current = ttsOn;
 
@@ -2643,18 +2644,18 @@ export default function AgentPage() {
       if (mailRes.status === "fulfilled" && mailRes.value.ok) {
         const d = await mailRes.value.json() as { mail?: MailItem[] };
         const newMail = d.mail ?? [];
-        // Toast + TTS for new high-priority mail [G]
-        newMail.filter(m => !prevMailIds.current.has(m.id) && (m.priority === "critical" || m.priority === "high")).forEach(m => {
+        // Toast for new high-priority mail — max 1 critical + 1 high per cycle to prevent spam
+        const newHighMail = newMail.filter(m => !prevMailIds.current.has(m.id) && m.priority === "critical");
+        const newNormalHighMail = newMail.filter(m => !prevMailIds.current.has(m.id) && m.priority === "high");
+        if (newHighMail.length > 0) {
+          const m = newHighMail[0]!;
           const fromDef = AGENT_DEFS.find(a => a.id === m.fromAgent);
-          toast(m.subject, {
-            description: `${fromDef?.emoji ?? "📨"} ${m.fromAgent} → ${m.toAgent}`,
-            duration: 4000,
-            icon: m.priority === "critical" ? "🚨" : "📬",
-          });
-          if (m.priority === "critical") {
-            speak(`Critical alert from ${fromDef?.name ?? m.fromAgent}: ${m.subject}`, 1.2);
-          }
-        });
+          toast(m.subject.slice(0, 50), { description: `🚨 ${m.fromAgent} → ${m.toAgent}`, duration: 3500, icon: "🚨" });
+          speak(`Critical: ${fromDef?.name ?? m.fromAgent}: ${m.subject.slice(0, 40)}`, 1.2);
+        } else if (newNormalHighMail.length > 0) {
+          const m = newNormalHighMail[0]!;
+          toast(m.subject.slice(0, 50), { description: `📬 ${m.fromAgent}`, duration: 2500, icon: "📬" });
+        }
         newMail.forEach(m => prevMailIds.current.add(m.id));
         setRecentMail(newMail);
       }
@@ -2669,15 +2670,19 @@ export default function AgentPage() {
       if (threadRes.status === "fulfilled" && threadRes.value.ok) {
         const d = await threadRes.value.json() as { threads?: CollabThread[] };
         const newThreads = d.threads ?? [];
-        // Toast for new meetings [G]
-        newThreads.filter(t => t.active && !prevThreadIds.current.has(t.id)).forEach(t => {
-          toast(`New meeting: ${t.topic}`, { description: `Participants: ${t.participants.join(", ")}`, icon: "🤝", duration: 5000 });
-          prevThreadIds.current.add(t.id);
-        });
-        // Toast for concluded meetings
-        newThreads.filter(t => !t.active && prevThreadIds.current.has(t.id) && t.conclusion).forEach(t => {
-          toast.success(`Meeting concluded`, { description: t.conclusion?.slice(0, 80), duration: 5000 });
-        });
+        // Toast for new meetings — max 1 toast per fetch cycle
+        const newMeetings = newThreads.filter(t => t.active && !prevThreadIds.current.has(t.id));
+        if (newMeetings.length > 0) {
+          const t = newMeetings[0]!;
+          toast(`New meeting: ${t.topic.slice(0, 40)}`, { description: `${t.participants.slice(0,3).join(", ")}`, icon: "🤝", duration: 2500 });
+          newMeetings.forEach(m => prevThreadIds.current.add(m.id));
+        }
+        // Toast for concluded meetings — only once per concluded thread
+        const newlyConcluded = newThreads.filter(t => !t.active && prevThreadIds.current.has(t.id) && t.conclusion && !prevConcludedIds.current.has(t.id));
+        if (newlyConcluded.length > 0) {
+          toast.success(`Meeting concluded`, { description: newlyConcluded[0]!.conclusion?.slice(0, 60), duration: 2500 });
+          newlyConcluded.forEach(t => prevConcludedIds.current.add(t.id));
+        }
         newThreads.forEach(t => prevThreadIds.current.add(t.id));
         setThreads(newThreads);
       }
@@ -2832,11 +2837,24 @@ export default function AgentPage() {
 
   return (
     <div className="flex flex-col h-screen bg-[#020810] text-slate-200 font-['Space_Mono',monospace] overflow-hidden">
-      {/* Toast provider [G] */}
+      {/* Toast provider — compact, max 2 visible, short duration on mobile */}
       <Toaster
         theme="dark"
         position="bottom-right"
-        toastOptions={{ style: { background: "#0a1628", border: "1px solid #1e3a5f", color: "#e2e8f0", fontFamily: "Space Mono, monospace", fontSize: "12px" } }}
+        visibleToasts={2}
+        toastOptions={{
+          duration: 3000,
+          style: {
+            background: "#0a1628",
+            border: "1px solid #1e3a5f",
+            color: "#e2e8f0",
+            fontFamily: "Space Mono, monospace",
+            fontSize: "11px",
+            padding: "8px 12px",
+            maxWidth: "280px",
+            minHeight: "unset",
+          },
+        }}
       />
 
       {/* Header */}
@@ -2919,34 +2937,37 @@ export default function AgentPage() {
               agentPositions={agentPositions}
             />
 
-            {/* ── Live Agent Log Feed ───────────────────────────────── */}
-            <div className="absolute bottom-4 right-4 z-30 flex flex-col items-end gap-1" style={{ width: logOpen ? 340 : "auto" }}>
+            {/* ── Live Agent Log Feed — compact & responsive ─────── */}
+            {/* Mobile landscape: narrow + short. Desktop: wider + taller. */}
+            <div
+              className="absolute bottom-2 right-2 z-30 flex flex-col items-end gap-1"
+              style={{ width: logOpen ? "min(300px, 45vw)" : "auto", maxWidth: "calc(100vw - 16px)" }}
+            >
               {/* Header bar */}
               <div
-                className="flex items-center gap-2 bg-slate-950/90 border border-slate-700/70 rounded-xl px-3 py-2 backdrop-blur-md shadow-2xl cursor-pointer select-none w-full"
+                className="flex items-center gap-1.5 bg-slate-950/92 border border-slate-700/70 rounded-lg px-2 py-1.5 backdrop-blur-md shadow-xl cursor-pointer select-none w-full"
                 onClick={() => setLogOpen(v => !v)}
               >
-                <span className="relative flex h-2 w-2">
+                <span className="relative flex h-1.5 w-1.5 shrink-0">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"/>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"/>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"/>
                 </span>
-                <span className="font-mono text-[11px] text-slate-300 font-semibold tracking-wider flex-1">LIVE AGENT LOG</span>
+                <span className="font-mono text-[10px] text-slate-300 font-semibold tracking-wider flex-1 truncate">LOG</span>
                 {agentLogs.length > 0 && (
-                  <span className="text-[10px] font-mono text-slate-500">{agentLogs.length} entries</span>
+                  <span className="text-[9px] font-mono text-slate-500 shrink-0">{agentLogs.length}</span>
                 )}
-                {/* Filter pills */}
+                {/* Filter pills — only visible when open */}
                 {logOpen && (
-                  <div className="flex gap-1 ml-1" onClick={e => e.stopPropagation()}>
-                    {(["all","tick","emotion","collab","error"] as const).map(f => (
+                  <div className="flex gap-0.5 ml-1 shrink-0" onClick={e => e.stopPropagation()}>
+                    {(["all","tick","collab","error"] as const).map(f => (
                       <button
                         key={f}
                         onClick={() => setLogFilter(f)}
                         className={cn(
-                          "text-[9px] font-mono px-1.5 py-0.5 rounded-full transition-all",
+                          "text-[8px] font-mono px-1 py-0.5 rounded-full transition-all",
                           logFilter === f
-                            ? f === "error" ? "bg-red-600/60 text-red-200 border border-red-500/50"
+                            ? f === "error"  ? "bg-red-600/60 text-red-200 border border-red-500/50"
                               : f === "collab" ? "bg-violet-600/60 text-violet-200 border border-violet-500/50"
-                              : f === "emotion" ? "bg-amber-600/60 text-amber-200 border border-amber-500/50"
                               : "bg-emerald-700/60 text-emerald-200 border border-emerald-600/50"
                             : "text-slate-600 hover:text-slate-400"
                         )}
@@ -2956,21 +2977,28 @@ export default function AgentPage() {
                     ))}
                   </div>
                 )}
-                <span className="text-slate-600 ml-1 text-[10px]">{logOpen ? "▼" : "▲"}</span>
+                <span className="text-slate-600 ml-1 text-[9px] shrink-0">{logOpen ? "▼" : "▲"}</span>
               </div>
 
-              {/* Log entries */}
+              {/* Log entries — height capped for mobile landscape */}
               {logOpen && (
-                <div className="w-full bg-slate-950/95 border border-slate-800/70 rounded-xl backdrop-blur-md shadow-2xl overflow-hidden">
-                  <div className="h-64 overflow-y-auto px-2 py-2 space-y-0.5 font-mono text-[10px]"
-                    style={{ scrollbarWidth: "thin", scrollbarColor: "#334155 transparent" }}>
+                <div className="w-full bg-slate-950/95 border border-slate-800/70 rounded-lg backdrop-blur-md shadow-xl overflow-hidden">
+                  <div
+                    className="overflow-y-auto px-1.5 py-1.5 space-y-px font-mono text-[9px]"
+                    style={{
+                      height: "min(160px, 30vh)",
+                      scrollbarWidth: "thin",
+                      scrollbarColor: "#334155 transparent",
+                    }}
+                  >
                     {agentLogs.length === 0 && (
-                      <div className="flex items-center justify-center h-full text-slate-600 text-[11px]">
-                        Waiting for agent activity…
+                      <div className="flex items-center justify-center h-full text-slate-600 text-[9px]">
+                        Waiting…
                       </div>
                     )}
                     {agentLogs
                       .filter(l => logFilter === "all" || l.kind === logFilter)
+                      .slice(-40)
                       .map(l => {
                         const time = new Date(l.ts).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
                         const kindColor =
@@ -2980,35 +3008,28 @@ export default function AgentPage() {
                           l.kind === "mail"    ? "#38bdf8" :
                                                  "#4ade80";
                         return (
-                          <div key={l.id} className="flex items-start gap-1.5 py-0.5 px-1.5 rounded hover:bg-slate-800/50 group transition-colors">
-                            <span className="text-slate-600 shrink-0 mt-px leading-none">{time}</span>
-                            <span
-                              className="shrink-0 w-1 self-stretch rounded-full mt-1"
-                              style={{ backgroundColor: kindColor, minHeight: 8 }}
-                            />
-                            <span className="shrink-0 leading-none mt-px">{l.emoji}</span>
-                            <span className="shrink-0 font-bold leading-none mt-px" style={{ color: l.color }}>
-                              {l.name}
-                            </span>
-                            <span className="text-slate-400 leading-tight break-words min-w-0">{l.text}</span>
+                          <div key={l.id} className="flex items-start gap-1 py-px px-1 rounded hover:bg-slate-800/40 transition-colors">
+                            <span className="text-slate-600 shrink-0 leading-none">{time}</span>
+                            <span className="shrink-0 w-0.5 self-stretch rounded-full" style={{ backgroundColor: kindColor, minHeight: 6 }}/>
+                            <span className="shrink-0 leading-none">{l.emoji}</span>
+                            <span className="shrink-0 font-bold leading-none truncate max-w-[40px]" style={{ color: l.color }}>{l.name}</span>
+                            <span className="text-slate-400 leading-tight break-words min-w-0 line-clamp-1">{l.text}</span>
                           </div>
                         );
                       })}
                     <div ref={logEndRef}/>
                   </div>
-                  {/* Footer stats */}
-                  <div className="border-t border-slate-800/60 px-3 py-1.5 flex items-center gap-3">
-                    {(["tick","emotion","collab","error"] as const).map(k => {
+                  {/* Footer stats — single compact line */}
+                  <div className="border-t border-slate-800/60 px-2 py-1 flex items-center gap-2">
+                    {(["tick","collab","error"] as const).map(k => {
                       const count = agentLogs.filter(l => l.kind === k).length;
-                      const col = k === "error" ? "#f87171" : k === "collab" ? "#a78bfa" : k === "emotion" ? "#fbbf24" : "#4ade80";
+                      const col = k === "error" ? "#f87171" : k === "collab" ? "#a78bfa" : "#4ade80";
                       return count > 0 ? (
-                        <span key={k} className="text-[9px] font-mono" style={{ color: col }}>
-                          {k} ×{count}
-                        </span>
+                        <span key={k} className="text-[8px] font-mono" style={{ color: col }}>{k} ×{count}</span>
                       ) : null;
                     })}
                     <button
-                      className="ml-auto text-[9px] font-mono text-slate-700 hover:text-slate-400 transition-colors"
+                      className="ml-auto text-[8px] font-mono text-slate-700 hover:text-slate-400 transition-colors"
                       onClick={() => setAgentLogs([])}
                     >
                       clear
