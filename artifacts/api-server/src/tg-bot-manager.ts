@@ -7,11 +7,21 @@ import { generateWithFallback } from "./lib/provider-chain.js";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { db } from "@workspace/db";
-import { botTicketsTable } from "@workspace/db";
+import { botTicketsTable, messageFeedbackTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { eventBus } from "./lib/event-bus.js";
 
 const BASE        = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
 const CONFIG_PATH = join(BASE, ".dlavie-tg-config.json");
+
+// ─── Feedback session ─────────────────────────────────────────────────────────
+// Tracks the last AI reply per chat for RLHF attribution
+
+interface FeedbackSession {
+  aiReplyText: string;
+  model:       string;
+  ts:          number;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -164,7 +174,8 @@ class TgBotManager {
   private polling:      boolean       = false;
   private offset:       number        = 0;
   private abortCtrl:    AbortController | null = null;
-  private reportSessions = new Map<number, ReportSession>();
+  private reportSessions  = new Map<number, ReportSession>();
+  private feedbackSessions = new Map<number, FeedbackSession>(); // BLOK A2
 
   getConfig()  { return { ...this.config }; }
   getLogs()    { return [...this.logs].reverse().slice(0, 100); }
@@ -310,6 +321,43 @@ class TgBotManager {
     if (!text) return;
     if (isGroup && !this.config.replyInGroup) return;
 
+    // ── BLOK A2: +1 / -1 / 👍 / 👎 feedback detection ─────────────────────
+
+    const trimmedLower = text.trim().toLowerCase();
+    if (trimmedLower === "+1" || trimmedLower === "👍" || trimmedLower === "suka" || trimmedLower === "bagus") {
+      const fbSession = this.feedbackSessions.get(chatId);
+      if (fbSession) {
+        try {
+          await db.insert(messageFeedbackTable).values({
+            rating: "positive", source: "telegram",
+            userId: String(fromId), messageContent: fbSession.aiReplyText.slice(0, 500),
+            model: fbSession.model, notes: `Telegram +1 from ${name}`,
+          });
+          eventBus.fire("feedback_received", { rating: "positive", source: "telegram", userId: String(fromId), model: fbSession.model }, "tg_bot");
+          await sendAIReply(this.config.token, chatId, "👍 Terima kasih atas feedback positif Anda!", msg.message_id);
+          this.feedbackSessions.delete(chatId);
+        } catch { /* non-fatal */ }
+      }
+      return;
+    }
+
+    if (trimmedLower === "-1" || trimmedLower === "👎" || trimmedLower === "jelek" || trimmedLower === "buruk") {
+      const fbSession = this.feedbackSessions.get(chatId);
+      if (fbSession) {
+        try {
+          await db.insert(messageFeedbackTable).values({
+            rating: "negative", source: "telegram",
+            userId: String(fromId), messageContent: fbSession.aiReplyText.slice(0, 500),
+            model: fbSession.model, notes: `Telegram -1 from ${name}`,
+          });
+          eventBus.fire("feedback_received", { rating: "negative", source: "telegram", userId: String(fromId), model: fbSession.model }, "tg_bot");
+          await sendAIReply(this.config.token, chatId, "👎 Terima kasih! Kami akan terus meningkatkan kualitas.", msg.message_id);
+          this.feedbackSessions.delete(chatId);
+        } catch { /* non-fatal */ }
+      }
+      return;
+    }
+
     // ── .report command ────────────────────────────────────────────────────
 
     if (text.toLowerCase() === ".report") {
@@ -356,9 +404,18 @@ class TgBotManager {
 
     // Plain text footer (no Markdown) because AI output may contain special chars
     // that break Telegram's legacy Markdown parser
-    const footer = `\n\n${this.config.botName} · Powered by DLavie OS`;
+    const footer = `\n\n${this.config.botName} · Powered by DLavie OS\n\nBalas "+1" 👍 atau "-1" 👎 untuk beri feedback`;
     const finalReply = aiReply.trim() + footer;
     await sendAIReply(this.config.token, chatId, finalReply, msg.message_id);
+
+    // BLOK A2: Store feedback session for attribution
+    this.feedbackSessions.set(chatId, {
+      aiReplyText: aiReply.trim().slice(0, 500),
+      model: `${provider}/${modelUsed}`,
+      ts: Date.now(),
+    });
+    // Auto-expire feedback sessions after 5 minutes
+    setTimeout(() => { this.feedbackSessions.delete(chatId); }, 5 * 60_000);
 
     this.status.messageCount = (this.status.messageCount || 0) + 1;
     const logEntry: TgBotLog = {

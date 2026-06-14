@@ -16,7 +16,7 @@ import {
   Plus, Trash2, Send, Bot, User, Loader2, MessageSquare,
   ChevronDown, Cpu, Zap, StopCircle, Sparkles, Cloud,
   Copy, Check, Download, Code2, ChevronRight, Mic, MicOff,
-  FileDown,
+  FileDown, ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
@@ -188,6 +188,8 @@ export default function Chat() {
   const recognitionRef = React.useRef<SpeechRecognition | null>(null);
   const [renamingId, setRenamingId] = React.useState<number | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
+  const [feedbackGiven, setFeedbackGiven] = React.useState<Record<number, "positive" | "negative">>({});
+  const [feedbackLoading, setFeedbackLoading] = React.useState<number | null>(null);
 
   const { data: conversations, isLoading: loadingConvos } = useListConversations();
   const { data: activeConversation, isLoading: loadingActive } = useGetConversation(
@@ -484,6 +486,29 @@ export default function Chat() {
 
   const handleStopStream = () => {
     abortRef.current?.abort();
+  };
+
+  // ── BLOK A1: Submit feedback 👍/👎 ─────────────────────────────────────────
+  const handleFeedback = async (msgId: number, rating: "positive" | "negative", msgContent: string) => {
+    if (feedbackGiven[msgId]) return;
+    setFeedbackLoading(msgId);
+    try {
+      const model = activeConversation?.model ?? activeModel;
+      await fetch(`${BASE}/api/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messageId: msgId,
+          conversationId: activeId,
+          rating,
+          source: "web",
+          messageContent: msgContent.slice(0, 500),
+          model,
+        }),
+      });
+      setFeedbackGiven((prev) => ({ ...prev, [msgId]: rating }));
+    } catch { /* non-fatal */ }
+    finally { setFeedbackLoading(null); }
   };
 
   // ── Voice Input via Web Speech API ─────────────────────────────────────────
@@ -980,6 +1005,35 @@ export default function Chat() {
                           <span className="text-[10px] text-muted-foreground mt-1 font-mono">
                             {msg.tokens} tokens
                           </span>
+                        )}
+                        {/* BLOK A1: Feedback buttons on AI messages */}
+                        {msg.role === "assistant" && (
+                          <div className="flex items-center gap-1 mt-1">
+                            {feedbackGiven[msg.id] ? (
+                              <span className="text-[10px] font-mono text-muted-foreground">
+                                {feedbackGiven[msg.id] === "positive" ? "👍 Feedback recorded" : "👎 Feedback recorded"}
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleFeedback(msg.id, "positive", msg.content)}
+                                  disabled={feedbackLoading === msg.id}
+                                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground hover:text-green-400 hover:bg-green-400/10 transition-colors disabled:opacity-50"
+                                  title="Good response"
+                                >
+                                  {feedbackLoading === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsUp className="w-3 h-3" />}
+                                </button>
+                                <button
+                                  onClick={() => handleFeedback(msg.id, "negative", msg.content)}
+                                  disabled={feedbackLoading === msg.id}
+                                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors disabled:opacity-50"
+                                  title="Bad response"
+                                >
+                                  {feedbackLoading === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsDown className="w-3 h-3" />}
+                                </button>
+                              </>
+                            )}
+                          </div>
                         )}
                       </div>
                     </motion.div>

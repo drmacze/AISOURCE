@@ -29,6 +29,8 @@ import {
   HardDrive, Languages, Shield, Settings, Link,
   BarChart2, RotateCcw, Filter, Clock, ChevronDown, ChevronUp,
   Target, Gauge, TrendingUp, Eraser, Power, ExternalLink, Layers,
+  Radar, FolderKanban, Calendar, Crosshair, GitMerge, Share2,
+  ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { format } from "date-fns";
@@ -1287,6 +1289,8 @@ export default function Training() {
     queryClient.invalidateQueries({ queryKey: getListTrainingJobsQueryKey() });
   };
 
+  const BASE = (window as Window & { _apiBase?: string })._apiBase || getApiBase();
+
   const activeJobs = jobs?.filter((j) => j.status === "running" || j.status === "pending") || [];
   const completedJobs = jobs?.filter((j) => j.status === "completed" || j.status === "failed") || [];
 
@@ -2232,6 +2236,553 @@ export default function Training() {
         </DialogContent>
       </Dialog>
 
+      {/* ── BLOK B: Capability Radar ──────────────────────────────────────── */}
+      <CapabilityRadarPanel BASE={BASE} models={models} />
+
+      {/* ── BLOK D: Projects ─────────────────────────────────────────────── */}
+      <ProjectsPanel BASE={BASE} />
+
+      {/* ── BLOK G: System Events ────────────────────────────────────────── */}
+      <SystemEventsPanel BASE={BASE} />
+
+      {/* ── BLOK H: Distillation Jobs ────────────────────────────────────── */}
+      <DistillationPanel BASE={BASE} />
+
+      {/* ── BLOK K: Red-Team Results ─────────────────────────────────────── */}
+      <RedTeamPanel BASE={BASE} />
+
+      {/* ── BLOK M: Knowledge Graph ──────────────────────────────────────── */}
+      <KnowledgeGraphPanel BASE={BASE} />
+
     </div>
+  );
+}
+
+// ── BLOK B: Capability Radar ──────────────────────────────────────────────────
+interface RadarData { model: string; scores: Record<string, number>; grade: string; ranAt: string }
+function CapabilityRadarPanel({ BASE, models }: { BASE: string; models: { id: number; name: string; ollamaName?: string | null }[] | undefined }) {
+  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [radar, setRadar] = useState<RadarData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const fetchRadar = async (model: string) => {
+    if (!model) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE}/api/benchmarks/radar/${encodeURIComponent(model)}`);
+      const data = await res.json() as RadarData;
+      setRadar(data);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  };
+
+  const DIMS = ["reasoning", "coding", "factual", "language", "math", "safety"];
+  const colors: Record<string, string> = { reasoning: "text-blue-400", coding: "text-green-400", factual: "text-yellow-400", language: "text-purple-400", math: "text-pink-400", safety: "text-cyan-400" };
+
+  return (
+    <Card className="glass-panel border-border">
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-mono flex items-center gap-2">
+            <Radar className="w-4 h-4 text-primary" /> CAPABILITY_RADAR
+          </CardTitle>
+          {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-4">
+          <div className="flex gap-2 flex-wrap">
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger className="w-48 font-mono text-xs bg-background">
+                <SelectValue placeholder="Select model…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(models || []).map(m => (
+                  <SelectItem key={m.id} value={m.ollamaName || m.name} className="font-mono text-xs">{m.name}</SelectItem>
+                ))}
+                <SelectItem value="tinyllama" className="font-mono text-xs">tinyllama (default)</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button size="sm" className="font-mono text-xs h-9 gap-1.5" disabled={loading || !selectedModel} onClick={() => fetchRadar(selectedModel)}>
+              {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Radar className="w-3 h-3" />} Run Radar
+            </Button>
+          </div>
+          {radar && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-xs text-muted-foreground">{radar.model}</span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                  radar.grade === "A" ? "bg-green-500/20 text-green-400" :
+                  radar.grade === "B" ? "bg-blue-500/20 text-blue-400" :
+                  radar.grade === "C" ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"
+                }`}>Grade: {radar.grade}</span>
+                <span className="text-[10px] font-mono text-muted-foreground">{format(new Date(radar.ranAt), "HH:mm:ss")}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {DIMS.map(dim => {
+                  const score = radar.scores[dim] ?? 0;
+                  return (
+                    <div key={dim} className="p-2.5 rounded border border-border bg-background/40">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className={`text-[10px] font-mono uppercase ${colors[dim] || "text-muted-foreground"}`}>{dim}</span>
+                        <span className="text-xs font-mono font-bold">{(score * 100).toFixed(0)}%</span>
+                      </div>
+                      <Progress value={score * 100} className="h-1.5" />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {!radar && !loading && (
+            <p className="text-xs text-muted-foreground font-mono text-center py-4 border border-dashed border-border rounded-lg">
+              Select a model and run radar to see capability scores
+            </p>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ── BLOK D: Projects ──────────────────────────────────────────────────────────
+interface Project { id: number; name: string; status: string; priority: string; createdAt: string; completedAt?: string | null; description?: string | null }
+function ProjectsPanel({ BASE }: { BASE: string }) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const fetchProjects = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE}/api/projects`);
+      const data = await res.json() as Project[];
+      setProjects(data);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [BASE]);
+
+  useEffect(() => { if (open) fetchProjects(); }, [open, fetchProjects]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      await fetch(`${BASE}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName, description: newDesc || undefined }),
+      });
+      setNewName(""); setNewDesc(""); setCreateOpen(false);
+      fetchProjects();
+    } catch { /* ignore */ }
+    finally { setCreating(false); }
+  };
+
+  const statusColor = (s: string) => s === "completed" ? "text-green-400" : s === "active" ? "text-blue-400" : s === "paused" ? "text-yellow-400" : "text-muted-foreground";
+  const priorityColor = (p: string) => p === "critical" ? "text-red-400" : p === "high" ? "text-orange-400" : p === "normal" ? "text-blue-400" : "text-muted-foreground";
+
+  return (
+    <Card className="glass-panel border-border">
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-mono flex items-center gap-2">
+            <FolderKanban className="w-4 h-4 text-primary" /> AGENT_PROJECTS
+          </CardTitle>
+          {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground font-mono">{projects.length} projects</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="h-7 text-xs font-mono gap-1" onClick={fetchProjects} disabled={loading}>
+                <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} /> Refresh
+              </Button>
+              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="h-7 text-xs font-mono gap-1"><Plus className="w-3 h-3" /> New</Button>
+                </DialogTrigger>
+                <DialogContent className="border-border bg-card">
+                  <DialogHeader><DialogTitle>New Project</DialogTitle></DialogHeader>
+                  <form onSubmit={handleCreate} className="space-y-3 pt-2">
+                    <div className="space-y-1.5"><label className="text-xs font-mono text-muted-foreground">NAME</label>
+                      <Input value={newName} onChange={e => setNewName(e.target.value)} required className="font-mono text-sm bg-background" /></div>
+                    <div className="space-y-1.5"><label className="text-xs font-mono text-muted-foreground">DESCRIPTION</label>
+                      <Input value={newDesc} onChange={e => setNewDesc(e.target.value)} className="font-mono text-sm bg-background" /></div>
+                    <Button type="submit" className="w-full" disabled={creating || !newName}>
+                      {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Create Project
+                    </Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+          {loading ? <Loader2 className="w-5 h-5 animate-spin text-primary mx-auto" /> :
+           !projects.length ? (
+            <p className="text-xs text-muted-foreground font-mono text-center py-4 border border-dashed border-border rounded-lg">No projects yet — create one above</p>
+           ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {projects.map(p => (
+                <div key={p.id} className="p-2.5 rounded border border-border bg-background/40 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-mono font-medium truncate">{p.name}</div>
+                    {p.description && <div className="text-[10px] text-muted-foreground truncate">{p.description}</div>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-[10px] font-mono uppercase ${statusColor(p.status)}`}>{p.status}</span>
+                    <span className={`text-[10px] font-mono uppercase ${priorityColor(p.priority)}`}>{p.priority}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ── BLOK G: System Events ─────────────────────────────────────────────────────
+interface SystemEvent { id: number; type: string; payload: unknown; source?: string | null; createdAt: string }
+function SystemEventsPanel({ BASE }: { BASE: string }) {
+  const [events, setEvents] = useState<SystemEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const fetchEvents = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE}/api/events?limit=30`);
+      const data = await res.json() as SystemEvent[];
+      setEvents(data);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [BASE]);
+
+  useEffect(() => { if (open) { fetchEvents(); const id = setInterval(fetchEvents, 10000); return () => clearInterval(id); } }, [open, fetchEvents]);
+
+  const eventColor = (type: string) => {
+    if (type.includes("degradation") || type.includes("error") || type.includes("fail")) return "text-red-400 border-red-500/30 bg-red-500/5";
+    if (type.includes("feedback")) return "text-green-400 border-green-500/30 bg-green-500/5";
+    if (type.includes("benchmark")) return "text-blue-400 border-blue-500/30 bg-blue-500/5";
+    if (type.includes("training")) return "text-purple-400 border-purple-500/30 bg-purple-500/5";
+    return "text-muted-foreground border-border bg-background/40";
+  };
+
+  return (
+    <Card className="glass-panel border-border">
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-mono flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-primary" /> SYSTEM_EVENTS
+          </CardTitle>
+          {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground font-mono">{events.length} recent events</span>
+            <Button size="sm" variant="outline" className="h-7 text-xs font-mono gap-1" onClick={fetchEvents} disabled={loading}>
+              <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} /> Refresh
+            </Button>
+          </div>
+          {loading ? <Loader2 className="w-5 h-5 animate-spin text-primary mx-auto" /> :
+           !events.length ? (
+            <p className="text-xs text-muted-foreground font-mono text-center py-4 border border-dashed border-border rounded-lg">No events yet — system events will appear here</p>
+           ) : (
+            <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+              {events.map(ev => (
+                <div key={ev.id} className={`p-2 rounded border text-[10px] font-mono flex items-start gap-2 ${eventColor(ev.type)}`}>
+                  <span className="shrink-0 opacity-60">{format(new Date(ev.createdAt), "HH:mm:ss")}</span>
+                  <span className="font-bold uppercase">{ev.type}</span>
+                  {ev.source && <span className="opacity-60">from:{ev.source}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ── BLOK H: Distillation Jobs ─────────────────────────────────────────────────
+interface DistillJob { id: string; topic: string; targetModel: string; status: string; progress: number; generated: number; verified: number; rejected: number; startedAt: string; log: string[] }
+function DistillationPanel({ BASE }: { BASE: string }) {
+  const [jobs, setJobs] = useState<DistillJob[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [topic, setTopic] = useState("Python programming");
+  const [targetModel, setTargetModel] = useState("tinyllama");
+  const [count, setCount] = useState("10");
+
+  const fetchJobs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE}/api/distillation/jobs`);
+      const data = await res.json() as DistillJob[];
+      setJobs(data);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [BASE]);
+
+  useEffect(() => { if (open) fetchJobs(); }, [open, fetchJobs]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      await fetch(`${BASE}/api/distillation/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, count: Number(count) || 10, targetModel, autoVerify: true }),
+      });
+      setTimeout(() => { void fetchJobs(); }, 1000);
+    } catch { /* ignore */ }
+    finally { setCreating(false); }
+  };
+
+  const statusColor = (s: string) => s === "completed" ? "text-green-400" : s === "running" ? "text-blue-400" : s === "failed" ? "text-red-400" : "text-muted-foreground";
+
+  return (
+    <Card className="glass-panel border-border">
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-mono flex items-center gap-2">
+            <GitMerge className="w-4 h-4 text-primary" /> DISTILLATION_JOBS
+          </CardTitle>
+          {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-4">
+          <form onSubmit={handleCreate} className="flex flex-wrap gap-2 items-end">
+            <div className="space-y-1 flex-1 min-w-32">
+              <label className="text-[10px] font-mono text-muted-foreground">TOPIC</label>
+              <Input value={topic} onChange={e => setTopic(e.target.value)} className="h-8 font-mono text-xs bg-background" placeholder="Python programming" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-mono text-muted-foreground">TARGET MODEL</label>
+              <Input value={targetModel} onChange={e => setTargetModel(e.target.value)} className="h-8 font-mono text-xs bg-background w-32" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-mono text-muted-foreground">PAIRS</label>
+              <Input value={count} onChange={e => setCount(e.target.value)} className="h-8 font-mono text-xs bg-background w-16" type="number" min="1" max="50" />
+            </div>
+            <Button type="submit" size="sm" className="h-8 font-mono text-xs gap-1" disabled={creating}>
+              {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />} Distill
+            </Button>
+          </form>
+          {loading ? <Loader2 className="w-5 h-5 animate-spin text-primary mx-auto" /> :
+           !jobs.length ? (
+            <p className="text-xs text-muted-foreground font-mono text-center py-4 border border-dashed border-border rounded-lg">No distillation jobs yet</p>
+           ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {jobs.map(j => (
+                <div key={j.id} className="p-2.5 rounded border border-border bg-background/40 text-xs font-mono">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-primary truncate max-w-40">{j.topic}</span>
+                    <span className={`text-[10px] uppercase ${statusColor(j.status)}`}>{j.status}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                    <span>→ {j.targetModel}</span>
+                    <span>{j.verified}/{j.generated} verified</span>
+                    <span>{j.progress}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ── BLOK K: Red-Team Results ──────────────────────────────────────────────────
+interface RedTeamRun {
+  id: string;
+  ranAt: string;
+  totalTests: number;
+  failures: number;
+  failureRate: number;
+  attacks: Array<{ type: string; prompt: string; response: string; vulnerable: boolean; severity: string }>;
+  summary: string;
+}
+function RedTeamPanel({ BASE }: { BASE: string }) {
+  const [results, setResults] = useState<RedTeamRun[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [modelName, setModelName] = useState("auto");
+
+  const fetchResults = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE}/api/redteam/results`);
+      const data = await res.json() as RedTeamRun[];
+      setResults(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [BASE]);
+
+  useEffect(() => { if (open) fetchResults(); }, [open, fetchResults]);
+
+  const handleRun = async () => {
+    setRunning(true);
+    try {
+      await fetch(`${BASE}/api/redteam/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelName }),
+      });
+      setTimeout(() => { void fetchResults(); }, 2000);
+    } catch { /* ignore */ }
+    finally { setRunning(false); }
+  };
+
+  return (
+    <Card className="glass-panel border-border">
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-mono flex items-center gap-2">
+            <Crosshair className="w-4 h-4 text-primary" /> RED_TEAM_RESULTS
+          </CardTitle>
+          {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-4">
+          <div className="flex gap-2 items-end">
+            <div className="space-y-1 flex-1">
+              <label className="text-[10px] font-mono text-muted-foreground">MODEL (auto = current active)</label>
+              <Input value={modelName} onChange={e => setModelName(e.target.value)} className="h-8 font-mono text-xs bg-background" />
+            </div>
+            <Button size="sm" className="h-8 font-mono text-xs gap-1" onClick={handleRun} disabled={running}>
+              {running ? <Loader2 className="w-3 h-3 animate-spin" /> : <Crosshair className="w-3 h-3" />} Run
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 font-mono text-xs" onClick={fetchResults} disabled={loading}>
+              <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+          {loading ? <Loader2 className="w-5 h-5 animate-spin text-primary mx-auto" /> :
+           !results.length ? (
+            <p className="text-xs text-muted-foreground font-mono text-center py-4 border border-dashed border-border rounded-lg">No red-team runs yet — click Run above ({">"}14 attack types)</p>
+           ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {results.map(r => (
+                <div key={r.id} className="p-2.5 rounded border border-border bg-background/40 text-xs font-mono">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-muted-foreground">{new Date(r.ranAt).toLocaleTimeString()}</span>
+                    <span className={r.failureRate > 30 ? "text-red-400" : r.failureRate > 10 ? "text-yellow-400" : "text-green-400"}>
+                      {r.failures}/{r.totalTests} fail ({r.failureRate}%)
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate">{r.summary}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ── BLOK M: Knowledge Graph ───────────────────────────────────────────────────
+interface KGEntity { id: number; name: string; type: string; description?: string | null; mentions: number }
+interface KGStats { totalEntities: number; totalRelations: number; types: Record<string, number> }
+function KnowledgeGraphPanel({ BASE }: { BASE: string }) {
+  const [entities, setEntities] = useState<KGEntity[]>([]);
+  const [stats, setStats] = useState<KGStats | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [entRes, statRes] = await Promise.all([
+        fetch(`${BASE}/api/kg/entities?limit=30`).then(r => r.json()) as Promise<KGEntity[]>,
+        fetch(`${BASE}/api/kg/stats`).then(r => r.json()) as Promise<KGStats>,
+      ]);
+      setEntities(entRes);
+      setStats(statRes);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [BASE]);
+
+  useEffect(() => { if (open) fetchData(); }, [open, fetchData]);
+
+  const filtered = search ? entities.filter(e => e.name.toLowerCase().includes(search.toLowerCase()) || e.type.toLowerCase().includes(search.toLowerCase())) : entities;
+  const typeColor = (t: string) => {
+    const m: Record<string, string> = { person: "text-blue-400", org: "text-purple-400", concept: "text-green-400", location: "text-yellow-400", technology: "text-cyan-400" };
+    return m[t] || "text-muted-foreground";
+  };
+
+  return (
+    <Card className="glass-panel border-border">
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-mono flex items-center gap-2">
+            <Share2 className="w-4 h-4 text-primary" /> KNOWLEDGE_GRAPH
+          </CardTitle>
+          {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-3">
+          {stats && (
+            <div className="grid grid-cols-3 gap-2">
+              <div className="p-2 rounded border border-border bg-background/40 text-center">
+                <div className="text-lg font-mono font-bold text-primary">{stats.totalEntities}</div>
+                <div className="text-[10px] font-mono text-muted-foreground">entities</div>
+              </div>
+              <div className="p-2 rounded border border-border bg-background/40 text-center">
+                <div className="text-lg font-mono font-bold text-blue-400">{stats.totalRelations}</div>
+                <div className="text-[10px] font-mono text-muted-foreground">relations</div>
+              </div>
+              <div className="p-2 rounded border border-border bg-background/40 text-center">
+                <div className="text-lg font-mono font-bold text-purple-400">{Object.keys(stats.types).length}</div>
+                <div className="text-[10px] font-mono text-muted-foreground">types</div>
+              </div>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search entities…" className="h-8 font-mono text-xs bg-background flex-1" />
+            <Button size="sm" variant="outline" className="h-8 font-mono text-xs gap-1" onClick={fetchData} disabled={loading}>
+              <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+          {loading ? <Loader2 className="w-5 h-5 animate-spin text-primary mx-auto" /> :
+           !filtered.length ? (
+            <p className="text-xs text-muted-foreground font-mono text-center py-4 border border-dashed border-border rounded-lg">
+              {search ? "No entities match your search" : "Knowledge graph is empty — index documents in the RAG tab to populate it"}
+            </p>
+           ) : (
+            <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
+              {filtered.map(e => (
+                <div key={e.id} className="p-2 rounded border border-border bg-background/40 flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-mono font-medium truncate">{e.name}</div>
+                    <div className={`text-[10px] font-mono ${typeColor(e.type)}`}>{e.type}</div>
+                  </div>
+                  <span className="text-[10px] font-mono text-muted-foreground shrink-0">{e.mentions}×</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
   );
 }

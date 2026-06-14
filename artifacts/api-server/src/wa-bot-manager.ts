@@ -29,8 +29,9 @@ import {
 } from "fs";
 import { generateWithFallback } from "./lib/provider-chain.js";
 import { db } from "@workspace/db";
-import { botTicketsTable } from "@workspace/db";
+import { botTicketsTable, messageFeedbackTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { eventBus } from "./lib/event-bus.js";
 import pino from "pino";
 
 // ─── SSE broker ───────────────────────────────────────────────────────────────
@@ -277,6 +278,7 @@ class WaBotManager {
   private reconnecting:     boolean         = false;
   private wasEverConnected: boolean         = false;
   private reportSessions    = new Map<string, ReportSession>();
+  feedbackSessions          = new Map<string, { aiReplyText: string; model: string; ts: number }>(); // BLOK A3
   /** Incremented on every connect() call so stale event handlers from previous sockets
    *  can detect they're out-of-date and skip mutations to this.status. */
   private connGen           = 0;
@@ -544,6 +546,42 @@ class WaBotManager {
 
           const senderName = msg.pushName || jid.split("@")[0];
 
+          // ── BLOK A3: +1 / -1 / 👍 / 👎 feedback detection ──────────────
+          const trimLower = text.trim().toLowerCase();
+          if (trimLower === "+1" || trimLower === "👍" || trimLower === "suka" || trimLower === "bagus") {
+            const fbSession = this.feedbackSessions?.get(jid);
+            if (fbSession) {
+              try {
+                await db.insert(messageFeedbackTable).values({
+                  rating: "positive", source: "whatsapp",
+                  userId: jid, messageContent: fbSession.aiReplyText,
+                  model: fbSession.model, notes: `WA +1 from ${senderName}`,
+                });
+                eventBus.fire("feedback_received", { rating: "positive", source: "whatsapp", userId: jid, model: fbSession.model }, "wa_bot");
+                await sock.sendMessage(jid, { text: "👍 Terima kasih atas feedback positif Anda!" }, { quoted: msg });
+                this.feedbackSessions?.delete(jid);
+              } catch { /* non-fatal */ }
+            }
+            continue;
+          }
+
+          if (trimLower === "-1" || trimLower === "👎" || trimLower === "jelek" || trimLower === "buruk") {
+            const fbSession = this.feedbackSessions?.get(jid);
+            if (fbSession) {
+              try {
+                await db.insert(messageFeedbackTable).values({
+                  rating: "negative", source: "whatsapp",
+                  userId: jid, messageContent: fbSession.aiReplyText,
+                  model: fbSession.model, notes: `WA -1 from ${senderName}`,
+                });
+                eventBus.fire("feedback_received", { rating: "negative", source: "whatsapp", userId: jid, model: fbSession.model }, "wa_bot");
+                await sock.sendMessage(jid, { text: "👎 Terima kasih! Kami akan terus meningkatkan kualitas." }, { quoted: msg });
+                this.feedbackSessions?.delete(jid);
+              } catch { /* non-fatal */ }
+            }
+            continue;
+          }
+
           // ── .report command ──────────────────────────────────────────────
           if (text.toLowerCase() === ".report") {
             this.reportSessions.set(jid, { step: "ask_title" });
@@ -585,9 +623,18 @@ class WaBotManager {
             text, undefined, buildSystemPrompt(this.config)
           );
 
-          const finalReply = reply.trim() + buildFooter(this.config);
+          const finalReply = reply.trim() + buildFooter(this.config) + "\n\nBalas \"+1\" 👍 atau \"-1\" 👎 untuk beri feedback";
           await sock.sendMessage(jid, { text: finalReply }, { quoted: msg });
           try { await sock.sendPresenceUpdate("paused", jid); } catch { /* ignore */ }
+
+          // BLOK A3: store feedback session for attribution
+          if (!this.feedbackSessions) this.feedbackSessions = new Map();
+          this.feedbackSessions.set(jid, {
+            aiReplyText: reply.trim().slice(0, 500),
+            model: `${provider}/${modelUsed}`,
+            ts: Date.now(),
+          });
+          setTimeout(() => { this.feedbackSessions?.delete(jid); }, 5 * 60_000);
 
           this.status.messageCount = (this.status.messageCount || 0) + 1;
           const logEntry: WaBotLog = {

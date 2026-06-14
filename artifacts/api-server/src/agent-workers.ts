@@ -34,9 +34,11 @@ import {
   messagesTable,
   botTicketsTable,
   promptsTable,
+  messageFeedbackTable,
 } from "@workspace/db";
 import { eq, and, desc, asc, lt, gte, sql, count, not, inArray } from "drizzle-orm";
 import { generateWithFallback } from "./lib/provider-chain.js";
+import { eventBus } from "./lib/event-bus.js";
 import { promises as fsAsync } from "fs";
 import path from "path";
 
@@ -525,6 +527,16 @@ const SKILL_POOLS: Record<string, string[]> = {
     "Prioritising backlog based on usage data",
     "Writing weekly product intelligence brief",
     "Coordinating sprint goals with mandor",
+  ],
+  modelops: [
+    "Scanning 50 recent feedback entries",
+    "Calculating negative-feedback rate",
+    "Firing benchmark on quality drop",
+    "Comparing model versions in registry",
+    "Generating quality trend report",
+    "Alerting trainer on regression",
+    "Logging performance snapshot",
+    "Checking RLHF loop efficiency",
   ],
   codev: [
     "Scheduling cross-agent planning meeting",
@@ -2804,6 +2816,66 @@ async function tickProduct() {
   }
 }
 
+// ── AGENT 23: MODELOPS ────────────────────────────────────────────────────────
+async function tickModelOps() {
+  // BLOK F/O: Monitor model quality, fire benchmarks, track performance
+  try {
+    const recentFeedback = await db
+      .select()
+      .from(messageFeedbackTable)
+      .orderBy(desc(messageFeedbackTable.createdAt))
+      .limit(50)
+      .catch(() => [] as typeof messageFeedbackTable.$inferSelect[]);
+
+    const negCount = recentFeedback.filter(f => f.rating === "negative").length;
+    const posCount = recentFeedback.filter(f => f.rating === "positive").length;
+    const total = recentFeedback.length;
+    const negRate = total > 0 ? (negCount / total) * 100 : 0;
+
+    const task = pickTask("modelops");
+    const thought = await agentThink("modelops", "ModelOps",
+      "I monitor AI model quality 24/7. I detect quality drops, fire benchmarks, track model performance, and alert the team when a model needs retraining.",
+      [
+        `Recent feedback: ${total} total (${posCount} positive, ${negCount} negative)`,
+        `Negative rate: ${negRate.toFixed(1)}%${negRate > 40 ? " ⚠️ HIGH" : ""}`,
+        task,
+      ]
+    );
+
+    // Fire event if negative rate is high
+    if (negRate > 40 && total >= 5) {
+      await eventBus.fire("quality_degradation", {
+        agent: "modelops",
+        negRate: negRate.toFixed(1),
+        total,
+        action: "benchmark_requested",
+      });
+    }
+
+    await recordMetric("modelops", "feedback_negative_rate", negRate.toFixed(1));
+    await recordMetric("modelops", "feedback_total", String(total));
+    await db.insert(agentStatusTable).values({
+      agentId: "modelops",
+      displayName: "🤖 ModelOps",
+      status: "active",
+      currentTask: task,
+      lastThought: thought,
+      contextItems: [`Feedback: ${total}`, `Neg rate: ${negRate.toFixed(1)}%`, negRate > 40 ? "⚠️ Alert fired" : "✅ Nominal"],
+    }).onConflictDoUpdate({
+      target: agentStatusTable.agentId,
+      set: { status: "active", currentTask: task, lastThought: thought, updatedAt: new Date() },
+    });
+  } catch (err) {
+    await db.insert(agentStatusTable).values({
+      agentId: "modelops", displayName: "🤖 ModelOps", status: "idle",
+      currentTask: "Monitoring model quality", lastThought: "Awaiting feedback data", contextItems: [],
+    }).onConflictDoUpdate({
+      target: agentStatusTable.agentId,
+      set: { status: "idle", updatedAt: new Date() },
+    }).catch(() => {});
+  }
+}
+
 // ── AGENT 22: CO-DEVELOPER ────────────────────────────────────────────────────
 async function tickCodev() {
   // Check pending mails from all agents to see if coordination is needed
@@ -3008,6 +3080,13 @@ const WORKERS: WorkerRegistration[] = [
     vision: "I orchestrate team meetings, align priorities between mandor and all agents, and make sure everyone works toward the same goal.",
     intervalMs: 3 * 60 * 1000, baseIntervalMs: 3 * 60 * 1000, priority: 3,
     tick: tickCodev, lastRun: 0, running: false,
+  },
+  {
+    id: "modelops",
+    displayName: "🤖 ModelOps",
+    vision: "I monitor AI model quality 24/7. I detect quality drops, fire benchmarks, track model performance, and alert the team when a model needs retraining.",
+    intervalMs: 2 * 60 * 1000, baseIntervalMs: 2 * 60 * 1000, priority: 2,
+    tick: tickModelOps, lastRun: 0, running: false,
   },
 ];
 

@@ -9,3 +9,7 @@ export * from "./agent-workers";
 export * from "./whatsapp";
 export * from "./bot-tickets";
 export * from "./builder";
+export * from "./feedback";
+export * from "./benchmarks";
+export * from "./projects";
+export * from "./knowledge-graph";

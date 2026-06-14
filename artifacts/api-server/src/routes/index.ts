@@ -33,6 +33,13 @@ import openclawRouter from "./openclaw";
 import openaiCompatRouter from "./openai-compat";
 import workersRouter from "./workers";
 import builderRouter from "./builder";
+import feedbackRouter from "./feedback";
+import benchmarksRouter from "./benchmarks";
+import projectsRouter from "./projects";
+import distillationRouter from "./distillation";
+import redteamRouter from "./redteam";
+import knowledgeGraphRouter from "./knowledge-graph-routes";
+import intentRouter from "./intent";
 
 
 const router: IRouter = Router();
@@ -127,5 +134,26 @@ router.use(workersRouter);
 
 // AI Builder — task board, agent execution loop, skill-constrained builder
 router.use(builderRouter);
+
+// BLOK A — RLHF-lite: User feedback (👍/👎) from Web, Telegram, WhatsApp
+router.use(feedbackRouter);
+
+// BLOK B/C/N — Capability Map, Self-Healing Loop, Golden Test Set
+router.use(benchmarksRouter);
+
+// BLOK D/G/O — Project System, System Events, Agent Performance
+router.use(projectsRouter);
+
+// BLOK E — Smart Model Routing (intent-based)
+router.use(intentRouter);
+
+// BLOK H/I — Model Distillation + 3-Agent Debate Verification
+router.use(distillationRouter);
+
+// BLOK J/K — Active Learning (uncertainty) + Automated Red-Teaming
+router.use(redteamRouter);
+
+// BLOK M — Knowledge Graph (relational entity graph for RAG)
+router.use(knowledgeGraphRouter);
 
 export default router;
