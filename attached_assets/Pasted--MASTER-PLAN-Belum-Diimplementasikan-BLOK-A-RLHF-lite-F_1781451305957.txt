@@ -1,0 +1,332 @@
+📋 MASTER PLAN — Belum Diimplementasikan
+BLOK A — RLHF-lite: Feedback Loop ke Training
+A1. Web Chat — Tombol Feedback di Setiap Pesan AI
+Apa yang dibangun:
+
+Tombol 👍 / 👎 muncul di bawah setiap balasan AI di halaman Chat
+Klik 👍 = jawaban bagus, klik 👎 = jawaban kurang
+Data tersimpan ke tabel DB baru: message_feedback (fields: messageId, conversationId, rating, source, userId, createdAt)
+Tidak mengganggu flow chat — tombol kecil, subtle
+Efek downstream:
+
+Agent Curator (sudah ada, 22 agent) membaca feedback setiap cycle
+Jawaban dengan rating tinggi → otomatis masuk training set sebagai contoh positif
+Jawaban dengan rating rendah → ditandai sebagai contoh negatif + trigger analisis kenapa salah
+A2. Telegram Bot — Inline Feedback Buttons
+Apa yang dibangun:
+
+Setiap balasan bot Telegram sudah punya dua tombol di bawahnya: 👍 Bagus dan 👎 Kurang
+Tombol adalah InlineKeyboardButton (bukan ReplyKeyboard)
+Ketika user klik → callback handler menangkap → simpan ke message_feedback dengan source: "telegram"
+Callback dihandle di file bot Telegram yang sudah ada
+A3. WhatsApp Bot — Footer Text + Reply +1/-1 (iOS Compatible)
+Apa yang dibangun:
+
+Karena iOS WhatsApp tidak support interactive buttons dari Baileys, solusinya berbeda:
+Setiap balasan AI ditambahkan footer: _Ketik *+1* (bagus) atau *-1* (kurang)_
+Handler WhatsApp detect jika user membalas +1 atau -1
+Link ke message sebelumnya via quotedMsg atau cache last-message-per-jid
+Simpan ke message_feedback dengan source: "whatsapp"
+BLOK B — Capability Map + Gap Analysis
+Apa yang dibangun:
+
+Tabel DB baru model_benchmarks:
+
+id, modelName, capability (e.g. "coding", "bahasa_indonesia", "reasoning", "math", "creative"), 
+score (0-100), testedAt, sampleCount
+Benchmark Suite:
+
+50 pertanyaan standar per capability area
+Setelah setiap training job selesai → auto-test semua capability
+Score dibandingkan dengan versi sebelumnya
+Agent Integration:
+
+Agent Analyst membaca model_benchmarks setiap cycle
+Identifikasi gap: capability mana yang scorenya paling rendah
+Kirim "gap report" ke Agent Researcher → cari data untuk area lemah
+Kirim ke Agent Trainer → prioritaskan training di area lemah
+Dashboard UI:
+
+Radar chart di Training Hub: visual 6 capability per model
+Warna merah = gap, hijau = kuat
+BLOK C — Self-Healing Training Loop
+Apa yang dibangun:
+
+Logika otomatis setelah setiap training job selesai:
+
+Jalankan benchmark suite (dari BLOK B)
+Bandingkan score dengan versi model sebelumnya
+Jika score turun → auto-rollback ke versi sebelumnya + log reason + Trainer retry dengan parameter berbeda (learning rate lebih kecil, epoch lebih sedikit)
+Jika score naik → promote model ke status active, tulis changelog otomatis
+Golden Test Set:
+
+200 pertanyaan standar yang model HARUS bisa jawab
+Disimpan di golden_test_set table
+Model tidak boleh lulus training jika score golden set turun > 5%
+BLOK D — Project System (Goal → Auto Execution)
+Apa yang dibangun:
+
+Tabel DB baru agent_projects:
+
+id, title, description, targetCapabilities (JSON), status, progress (0-100), 
+estimatedCompletion, createdAt, completedAt
+Flow:
+
+User buat project di UI: "Tingkatkan kemampuan coding Python"
+Agent Orchestrator terima project → urai jadi subtask:
+Researcher: cari dataset Python
+Curator: filter dataset berkualitas
+Trainer: training dengan dataset tersebut
+Analyst: benchmark setelah selesai
+Setiap subtask masuk ke agent_subtasks table dengan status
+Progress tracking real-time di dashboard
+Auto-notify (log + badge) ketika milestone tercapai
+UI Page baru di Training Hub:
+
+Tab "Projects" di Training Hub
+Tombol "+ New Project"
+Progress bar per project dengan breakdown subtask
+ETA estimasi selesai
+BLOK E — Smart Model Routing (Intent-Based)
+Apa yang dibangun:
+
+Intent classifier yang jalan sebelum setiap request:
+
+Kode/Programming → groq:qwen3-32b atau groq:llama-4-scout
+Bahasa Indonesia → kimi/kimi-k2-instruct (terbaik untuk multilingual)
+Math/Logic → groq:openai/gpt-oss-120b atau deepseek-r1
+Creative/Writing → groq:llama-3.3-70b-versatile
+Quick Q&A → groq:llama-3.1-8b-instant (paling cepat)
+Long context → groq:mixtral-8x7b-32768
+Cara kerja:
+
+Fungsi detectIntent(message) → klasifikasi via keyword + pola
+Mapping intent → model terbaik yang tersedia
+Jika model terbaik rate-limited → fallback ke model kedua dari kategori sama
+Response include intent dan routedTo untuk transparency
+Berlaku di:
+
+Web chat (mode auto)
+API endpoint ketika model: "auto"
+WhatsApp bot
+Telegram bot
+BLOK F — ModelOps Agent + Lifecycle Otomatis
+Apa yang dibangun:
+
+Agent baru modelops (agent ke-23) yang khusus manage lifecycle model:
+
+Triggers:
+
+Model baru dibuat via AI Forge → modelops auto-kick pipeline development:
+Download base model via Ollama
+Siapkan initial training dataset
+Run first training job
+Benchmark hasilnya
+Deploy jika lulus, rollback jika gagal
+Version Control:
+
+Setiap model punya version history di model_versions table
+Semantic versioning: v1.0 → v1.1 (minor improvement) → v2.0 (major retrain)
+Changelog otomatis ditulis setiap version bump
+Quality Plateau Detection:
+
+Jika 3 training run berturut-turut score tidak naik > 2% → tandai "plateau"
+Trigger Researcher untuk cari data baru dari sumber berbeda
+Atau trigger Model Distillation (BLOK I)
+BLOK G — Event Bus (Sistem Reaktif)
+Apa yang dibangun:
+
+Menggantikan timer-only system dengan event-driven system:
+
+Events yang di-handle:
+
+feedback_received      → Curator langsung proses (tidak tunggu timer)
+model_created          → ModelOps langsung start pipeline
+quality_drop_detected  → Trainer langsung investigasi
+dataset_threshold_hit  → Training langsung dimulai
+benchmark_completed    → Analyst langsung buat laporan
+error_rate_spike       → Guardian langsung alert
+Implementasi:
+
+EventEmitter sederhana di Node.js (tidak perlu Kafka/Redis)
+Setiap agent bisa emit dan listen events
+Event log tersimpan di system_events table untuk audit
+Dashboard menampilkan event feed real-time
+BLOK H — Model Distillation (Guru Mengajar Murid)
+Apa yang dibangun:
+
+Pipeline otomatis dimana model besar mengajarkan model kecil:
+
+Flow:
+
+Agent Researcher identify topik yang model lokal (tinyllama/qwen2.5-small) lemah
+Gunakan Groq (llama-3.3-70b atau OpenAI OSS 120B) untuk generate 500-1000 Q&A pairs berkualitas tinggi tentang topik tersebut
+Format: {input: "pertanyaan", output: "jawaban berkualitas dari model besar"}
+Dataset langsung masuk ke training pipeline model lokal
+Kualitas training data jauh lebih tinggi dari Wikipedia random
+Kenapa ini penting:
+
+Training dari data internet = 30-40% noise
+Training dari model besar yang di-curate = hampir 0% noise
+Model kecil bisa "mencuri" kemampuan model besar dengan efisien
+BLOK I — Multi-Agent Debate untuk Verifikasi Data
+Apa yang dibangun:
+
+Sebelum training sample masuk ke dataset, harus lulus verifikasi 3-agent:
+
+Agent A (Researcher): Generate jawaban untuk pertanyaan X
+Agent B (Code Reviewer): Kritik jawaban Agent A — apakah benar?
+Agent C (Analyst): Arbitrasi — siapa yang benar?
+Acceptance rule:
+
+Consensus (A & B setuju, atau C pilih A) → masuk training
+No consensus → buang sample tersebut
+Track reject rate per topik → topik dengan reject rate tinggi = area yang perlu lebih banyak research
+Efek:
+
+Training dataset 3-5× lebih kecil tapi kualitas jauh lebih tinggi
+Menghilangkan contoh yang ambigu atau salah sebelum meracuni model
+BLOK J — Active Learning (Train yang Tidak Diketahui)
+Apa yang dibangun:
+
+Sistem yang identify area model paling tidak yakin:
+
+Cara mengukur uncertainty:
+
+Test model dengan 500 prompt standar di berbagai topik
+Ukur: waktu respons (lama = tidak yakin), panjang jawaban, konsistensi (tanya 3x, bandingkan)
+Buat uncertainty map per topik
+Pipeline:
+
+Agent Analyst jalankan uncertainty test setiap 24 jam
+Top 10 area dengan uncertainty tertinggi → laporan ke Agent Researcher
+Researcher cari data spesifik untuk area-area ini
+Trainer prioritaskan area ini dalam training run berikutnya
+Hasil: training 3-5× lebih efisien karena tidak buang siklus di topik yang sudah dikuasai
+BLOK K — Automated Red-Teaming
+Apa yang dibangun:
+
+Agent khusus yang tugasnya "menyerang" model sendiri:
+
+Jenis serangan:
+
+Pertanyaan jebakan (pertanyaan yang tampak mudah tapi model sering salah)
+Ambiguitas bahasa (pertanyaan yang bisa diinterpretasi dua cara)
+Edge cases (angka ekstrem, string kosong, bahasa campuran)
+Adversarial prompts (coba buat model keluar karakter/hallucinate)
+Out-of-distribution (topik yang tidak ada di training data)
+Flow:
+
+Red-Team Agent generate 100 adversarial prompts per hari
+Test ke model yang sedang aktif
+Catat semua kegagalan: jenis kegagalan, severity
+Kegagalan → masuk training set sebagai negative examples dengan correct answers
+Laporan mingguan: "Model rentan terhadap X jenis serangan"
+BLOK L — LoRA Adapter Pipeline (Perbaikan Cepat)
+Apa yang dibangun:
+
+Sistem untuk menambah kemampuan ke model tanpa full retraining:
+
+Konsep:
+
+Full retrain Ollama: 2-8 jam, berat, mengubah seluruh model
+LoRA adapter: 5-30 menit, ringan, hanya tambah lapisan kecil di atas model base
+Pipeline:
+
+Agent Trainer detect gap atau feedback negatif di topik spesifik
+Buat LoRA adapter kecil khusus topik tersebut
+Test adapter → jika OK, attach ke model base
+Bisa stack: base_model + coding_adapter + bahasa_indonesia_adapter
+Ketika adapter cukup matang (score stabil) → merge ke model baru = version upgrade
+File baru:
+
+artifacts/api-server/src/lora-pipeline.ts
+Ollama modelfile generation untuk LoRA merge
+UI tab "Adapters" di Training Hub
+BLOK M — Knowledge Graph (Bukan Sekedar RAG Flat)
+Apa yang dibangun:
+
+Menggantikan/melengkapi RAG flat chunks dengan graph relasional:
+
+Struktur:
+
+Entitas: "Python"
+  → [relates_to] → "TypeScript", "JavaScript"
+  → [used_for] → "data science", "automation", "web"
+  → [has_concept] → "async/await", "decorator", "generator"
+  → [source_chunks] → chunk_1234, chunk_5678
+  → [user_confused_about] → "GIL", "metaclass"
+Tabel DB baru:
+
+kg_entities (id, name, type, description)
+kg_relations (fromId, toId, relationType, weight)
+kg_entity_chunks (entityId, chunkId) — link ke RAG chunks yang ada
+Cara pakai saat chat:
+
+User tanya sesuatu → extract entities dari pertanyaan
+Graph traversal: cari related entities + chunks
+Inject graph context ke prompt bersama RAG context biasa
+Jawaban jadi lebih kontekstual dan "mengerti hubungan antar konsep"
+Agent yang build graph:
+
+Agent Librarian secara otomatis extract entities dari setiap dokumen yang diupload
+Agent Researcher tambah edges baru berdasarkan topic yang dipelajari
+BLOK N — Catastrophic Forgetting Prevention
+Apa yang dibangun:
+
+Sistem yang memastikan model tidak lupa apa yang sudah bisa sebelumnya:
+
+Golden Test Set:
+
+200 pertanyaan fundamental yang model HARUS bisa jawab (math dasar, programming dasar, bahasa Indonesia dasar)
+Tersimpan di golden_test_set table
+Admin bisa tambah/edit via UI
+Validation Rule (ketat):
+
+Setiap selesai training → auto-test golden set
+Skor golden set < 85%? → Training job DITOLAK otomatis
+Skor turun > 5% dari sebelumnya? → Auto-rollback ke versi sebelumnya
+Log semua perubahan skor untuk tracking trend
+Replay Buffer:
+
+Setiap training run selalu include 20% sample dari golden set
+Ini "anchor" yang mencegah model terlalu fokus pada data baru dan melupakan yang lama
+Dikenal sebagai teknik "Experience Replay" di RL
+BLOK O — Agent Specialization Evolution
+Apa yang dibangun:
+
+Sistem di mana 22 agent secara otomatis "berevolusi" berdasarkan track record:
+
+Tabel DB baru agent_performance:
+
+agentId, taskType, successCount, failCount, avgLatencyMs, lastTestedAt
+Mekanisme:
+
+Orchestrator track setiap task yang diselesaikan agent + hasilnya
+Setiap 7 hari: Analyst buat "performance matrix" — agent mana terbaik di task apa
+Orchestrator update routing: task type X → assign ke agent yang track record-nya terbaik
+Agent yang sering gagal di task tertentu → diberi task alternatif + "remedial training" (prompt lebih detail)
+Secara kolektif, sistem jadi makin optimal tanpa perubahan manual
+UI:
+
+Tabel di AI Agent page: performance matrix per agent per task type
+Warna hijau/merah per sel
+History evolusi: "Minggu ini Researcher lebih baik di data mining, Analyst lebih baik di quality scoring"
+RINGKASAN EKSEKUTIF
+Blok	Nama	Prioritas	Estimasi Kompleksitas
+A	RLHF-lite (Web + Telegram + WA)	🔴 Tinggi	Medium
+B	Capability Map + Gap Analysis	🔴 Tinggi	Medium
+C	Self-Healing Loop	🔴 Tinggi	Medium
+D	Project System	🟡 Sedang	Tinggi
+E	Smart Model Routing	🔴 Tinggi	Low-Medium
+F	ModelOps Agent	🟡 Sedang	Tinggi
+G	Event Bus	🟡 Sedang	Medium
+H	Model Distillation	🔴 Tinggi	Medium
+I	Multi-Agent Debate	🟡 Sedang	Medium
+J	Active Learning	🟡 Sedang	Medium
+K	Red-Teaming	🟡 Sedang	Medium
+L	LoRA Adapter Pipeline	🟢 Rendah	Sangat Tinggi
+M	Knowledge Graph	🟢 Rendah	Sangat Tinggi
+N	Anti-Forgetting (Golden Set)	🔴 Tinggi	Low
+O	Agent Evolution	🟢 Rendah	Medium
+Total: 15 blok fitur — semua real, tidak ada simulasi.
