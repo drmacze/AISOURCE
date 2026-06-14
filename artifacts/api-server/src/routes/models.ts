@@ -28,6 +28,8 @@ import {
   restartOllamaServer,
 } from "../ollama";
 import { listHFModels } from "../huggingface";
+import { db } from "@workspace/db";
+import { aiModelsTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -932,7 +934,6 @@ router.post("/models/forge", async (req: Request, res: Response) => {
           } catch { /* skip */ }
         }
       }
-      if (!buildOk) buildOk = true;
     } catch (e) {
       sse(res, { type: "stdout", agent: "engineer", text: `⚠️ Build error: ${String(e).slice(0, 120)}` });
     }
@@ -961,6 +962,25 @@ router.post("/models/forge", async (req: Request, res: Response) => {
     sse(res, { type: "agent", agent: "orchestrator", emoji: "🎯", text: "Finalizing and recording to DLavie OS…" });
     if (buildOk) {
       invalidateOllamaModelCache();
+
+      // Save model to database so it appears in Training Hub and model lists
+      try {
+        await db.insert(aiModelsTable).values({
+          name: modelName,
+          type: "llm",
+          status: "active",
+          version: "1.0",
+          architecture: baseModel,
+          description: `AI Forge model: ${desc.slice(0, 200)}`,
+          ollamaName: modelName,
+          baseOllamaModel: baseModel,
+          quantization: "Q4_0",
+        });
+        sse(res, { type: "agent_output", agent: "orchestrator", text: `✅ Model registered in database — visible in Training Hub & Chat` });
+      } catch (dbErr) {
+        sse(res, { type: "agent_output", agent: "orchestrator", text: `⚠️ DB register warning: ${String(dbErr).slice(0, 80)}` });
+      }
+
       sse(res, { type: "done", success: true, model: modelName,
         summary: `"${modelName}" built on ${baseModel} • System prompt by Trainer • Validated by Reviewer • Ready in Chat & Training Hub` });
     } else {
