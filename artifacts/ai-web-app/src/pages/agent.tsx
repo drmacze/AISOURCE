@@ -6,8 +6,6 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Office3D } from "@/components/Office3D";
-import { OfficeWebGL } from "@/components/OfficeWebGL";
 import { OfficeRealistic } from "@/components/OfficeRealistic";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast, Toaster } from "sonner";
@@ -2566,7 +2564,6 @@ export default function AgentPage() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [chatAgent, setChatAgent]         = useState<string | null>(null);
   const [activeTab, setActiveTab]         = useState<Tab>("office");
-  const [officeView, setOfficeView]       = useState<"realistic"|"css3d"|"iso">("realistic");
   const [particles, setParticles]         = useState<MailParticle[]>([]);
   const [sseStatus, setSseStatus]         = useState<"connecting" | "connected" | "error">("connecting");
   const [lastRefresh, setLastRefresh]     = useState<Date | null>(null);
@@ -2845,71 +2842,16 @@ export default function AgentPage() {
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === "office" && (
-          <div className="flex h-full">
-            {/* Office viewport */}
-            <div className="flex-1 min-w-0 h-full relative">
-              {/* View mode toggle */}
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-slate-900/90 border border-slate-700/60 rounded-full px-1 py-1 backdrop-blur-md shadow-lg">
-                {([
-                  { key: "realistic", label: "🏢 Realistic", active: "bg-blue-600/40 border border-blue-500/60 text-blue-200" },
-                  { key: "css3d",     label: "✦ CSS 3D",    active: "bg-violet-600/40 border border-violet-500/60 text-violet-200" },
-                  { key: "iso",       label: "◫ ISO",       active: "bg-slate-700/60 border border-slate-600/50 text-slate-200" },
-                ] as const).map(v => (
-                  <button
-                    key={v.key}
-                    onClick={() => setOfficeView(v.key)}
-                    className={cn("text-[10px] font-mono px-3 py-1 rounded-full transition-all",
-                      officeView === v.key ? v.active : "text-slate-500 hover:text-slate-300")}
-                  >
-                    {v.label}
-                  </button>
-                ))}
-              </div>
-
-              {officeView === "realistic" && (
-                <OfficeRealistic
-                  agentStatuses={agentStatuses}
-                  selectedAgent={selectedAgent}
-                  onSelectAgent={id => setSelectedAgent((s: string | null) => s === id ? null : id)}
-                  particles={particles}
-                  activeThreads={threads}
-                  agentEmotions={agentEmotions}
-                  agentPositions={agentPositions}
-                />
-              )}
-              {officeView === "css3d" && (
-                <OfficeWebGL
-                  agentStatuses={agentStatuses}
-                  selectedAgent={selectedAgent}
-                  onSelectAgent={id => setSelectedAgent((s: string | null) => s === id ? null : id)}
-                  particles={particles}
-                  activeThreads={threads}
-                  agentEmotions={agentEmotions}
-                  agentPositions={agentPositions}
-                />
-              )}
-              {officeView === "iso" && (
-                <Office3D
-                  agentStatuses={agentStatuses}
-                  selectedAgent={selectedAgent}
-                  onSelectAgent={id => setSelectedAgent((s: string | null) => s === id ? null : id)}
-                  particles={particles}
-                  activeThreads={threads}
-                  agentEmotions={agentEmotions}
-                  agentPositions={agentPositions}
-                />
-              )}
-            </div>
-            {/* Detail panel */}
-            <div className="w-72 flex-shrink-0 border-l border-slate-800/60 bg-slate-900/20 backdrop-blur-sm h-full overflow-hidden">
-              <AgentDetailPanel
-                agentId={selectedAgent}
-                agentStatuses={agentStatuses}
-                recentMail={recentMail}
-                onNudge={nudgeAgent}
-                onChat={id => setChatAgent(id)}
-              />
-            </div>
+          <div className="h-full w-full">
+            <OfficeRealistic
+              agentStatuses={agentStatuses}
+              selectedAgent={selectedAgent}
+              onSelectAgent={id => setSelectedAgent((s: string | null) => s === id ? null : id)}
+              particles={particles}
+              activeThreads={threads}
+              agentEmotions={agentEmotions}
+              agentPositions={agentPositions}
+            />
           </div>
         )}
 
