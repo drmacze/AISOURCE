@@ -105,14 +105,13 @@ const WAVE_HEIGHTS = [0.35, 0.65, 1, 0.75, 0.9, 0.5, 0.85, 0.4, 0.95, 0.6, 0.8, 
 function ThinkingWave({ model }: { model: string }) {
   return (
     <div className="flex items-center gap-3 py-1">
-      {/* Audio-waveform equalizer */}
-      <div className="flex items-end gap-[2px] h-6">
+      <div className="flex items-end gap-[2px] h-5">
         {WAVE_HEIGHTS.map((h, i) => (
           <div
             key={i}
-            className="w-[3px] bg-primary rounded-full origin-bottom"
+            className="w-[2.5px] bg-primary/70 rounded-full origin-bottom"
             style={{
-              height: `${Math.round(h * 24)}px`,
+              height: `${Math.round(h * 20)}px`,
               animation: `wave-bar 0.9s ease-in-out infinite alternate`,
               animationDelay: `${i * 0.06}s`,
             }}
@@ -120,12 +119,8 @@ function ThinkingWave({ model }: { model: string }) {
         ))}
       </div>
       <div className="flex flex-col gap-0.5">
-        <span className="text-xs font-mono text-primary leading-none tracking-widest uppercase">
-          Processing
-        </span>
-        <span className="text-[10px] text-muted-foreground font-mono leading-none">
-          {model || "model"}
-        </span>
+        <span className="text-xs text-primary leading-none font-medium">Generating</span>
+        <span className="text-[10px] text-muted-foreground leading-none truncate max-w-[160px]">{model || "model"}</span>
       </div>
     </div>
   );
@@ -134,31 +129,21 @@ function ThinkingWave({ model }: { model: string }) {
 // ─── Neural Pulse (loading state before stream starts) ───────────────────────
 function NeuralPulse() {
   return (
-    <div className="flex items-center gap-2 py-1">
-      <div className="relative w-8 h-8 flex items-center justify-center">
-        {/* Outer ring */}
-        <span
-          className="absolute inset-0 rounded-full border border-primary/30"
-          style={{ animation: "neural-pulse 1.5s ease-in-out infinite" }}
-        />
-        <span
-          className="absolute inset-1 rounded-full border border-primary/50"
-          style={{ animation: "neural-pulse 1.5s ease-in-out 0.3s infinite" }}
-        />
-        {/* Core dot */}
-        <span
-          className="w-2 h-2 rounded-full bg-primary"
-          style={{ animation: "neural-pulse 1.5s ease-in-out 0.6s infinite" }}
-        />
+    <div className="flex items-center gap-2.5 py-1">
+      <div className="flex gap-1 items-end h-4">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="w-1 rounded-full bg-primary/60"
+            style={{
+              height: "8px",
+              animation: "wave-bar 1s ease-in-out infinite alternate",
+              animationDelay: `${i * 0.2}s`,
+            }}
+          />
+        ))}
       </div>
-      <div className="flex flex-col gap-0.5">
-        <span className="text-xs font-mono text-primary tracking-widest uppercase leading-none">
-          Neural Init
-        </span>
-        <span className="text-[10px] text-muted-foreground font-mono leading-none">
-          loading model...
-        </span>
-      </div>
+      <span className="text-xs text-muted-foreground">Loading model…</span>
     </div>
   );
 }
@@ -584,14 +569,14 @@ export default function Chat() {
           <Button
             onClick={handleCreate}
             disabled={createMutation.isPending}
-            className="w-full justify-start gap-2 font-mono"
+            className="w-full justify-start gap-2"
           >
             {createMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Plus className="w-4 h-4" />
             )}
-            NEW_SESSION
+            New Chat
           </Button>
         </div>
         <ScrollArea className="flex-1">
@@ -662,20 +647,20 @@ export default function Chat() {
 
         {/* Installed models panel */}
         <div className="border-t border-border p-3">
-          <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest mb-2">
+          <p className="text-[10px] text-muted-foreground/50 uppercase tracking-widest mb-2 font-semibold">
             Installed Models
           </p>
           {loadingModels ? (
-            <div className="text-xs text-muted-foreground font-mono animate-pulse">Loading...</div>
+            <div className="text-xs text-muted-foreground animate-pulse">Loading…</div>
           ) : (ollamaModels || []).length === 0 ? (
-            <div className="text-xs text-muted-foreground font-mono">No models installed</div>
+            <div className="text-xs text-muted-foreground">No models installed</div>
           ) : (
             <div className="space-y-1">
               {(ollamaModels || []).map((m) => (
                 <div
                   key={m.name}
                   onClick={() => activeId && handleSwitchModel(m.name)}
-                  className={`flex items-center justify-between px-2 py-1.5 rounded text-xs font-mono cursor-pointer transition-colors hover:bg-accent/50 ${
+                  className={`flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-colors hover:bg-accent/50 ${
                     m.name === activeModel ? "bg-primary/10 text-primary" : ""
                   }`}
                 >
@@ -696,7 +681,7 @@ export default function Chat() {
               <MessageSquare className="w-8 h-8 text-primary" />
             </div>
             <div className="text-center space-y-1">
-              <p className="font-mono text-base text-foreground/80">No session selected</p>
+              <p className="text-base font-medium text-foreground/80">No session selected</p>
               <p className="text-sm text-muted-foreground">Create a new conversation or pick one from the sidebar</p>
             </div>
             <div className="flex items-center gap-3">
@@ -717,8 +702,8 @@ export default function Chat() {
               </button>
             </div>
             {ollamaModels && ollamaModels.length > 0 && (
-              <div className="text-xs font-mono text-muted-foreground bg-accent/30 px-3 py-1.5 rounded-full">
-                ⚡ {ollamaModels.length} local model{ollamaModels.length > 1 ? "s" : ""} ready
+              <div className="text-xs text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-full">
+                {ollamaModels.length} local model{ollamaModels.length > 1 ? "s" : ""} ready
               </div>
             )}
           </div>
@@ -754,7 +739,7 @@ export default function Chat() {
                 <button
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
                   disabled={switchingModel || loadingModels}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono bg-accent hover:bg-accent/80 text-primary border border-border transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-accent hover:bg-accent/80 text-foreground border border-border transition-colors disabled:opacity-50"
                 >
                   <Cpu className="w-3 h-3" />
                   <span className="max-w-[140px] truncate">
@@ -777,20 +762,20 @@ export default function Chat() {
                       className="absolute right-0 top-full mt-1 w-72 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden"
                     >
                       <div className="px-3 py-2 border-b border-border">
-                        <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">
-                          Select AI Model
+                        <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-semibold">
+                          Select Model
                         </p>
                       </div>
                       {loadingModels ? (
-                        <div className="p-4 text-center text-sm font-mono text-muted-foreground animate-pulse">
-                          Loading models...
+                        <div className="p-4 text-center text-sm text-muted-foreground animate-pulse">
+                          Loading models…
                         </div>
                       ) : (
                         <div className="py-1 max-h-64 overflow-y-auto">
                           {/* Local Ollama Models */}
                           {(ollamaModels || []).length > 0 && (
                             <div>
-                              <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest">
+                              <div className="px-3 py-1 text-[10px] text-muted-foreground/50 uppercase tracking-widest font-semibold">
                                 Local · Ollama
                               </div>
                               {(ollamaModels || []).map((m) => {
@@ -807,7 +792,7 @@ export default function Chat() {
                                     }`}
                                   >
                                     <div className="flex flex-col">
-                                      <span className="text-sm font-medium font-mono">{m.name}</span>
+                                      <span className="text-sm font-medium">{m.name}</span>
                                       <span className="text-xs text-muted-foreground mt-0.5">
                                         {m.family} · {m.parameterSize} · {m.quantization}
                                       </span>
@@ -837,8 +822,8 @@ export default function Chat() {
                           )}
                           {/* Groq Models */}
                           <div>
-                            <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest border-t border-border mt-1 pt-2">
-                              ⚡ Groq LPU · Fastest
+                            <div className="px-3 py-1 text-[10px] text-muted-foreground/50 uppercase tracking-widest font-semibold border-t border-border mt-1 pt-2">
+                              Groq LPU · Fastest
                             </div>
                             {GROQ_MODELS.map((m) => {
                               const isActive = m.name === activeModel;
@@ -851,12 +836,12 @@ export default function Chat() {
                                   }`}
                                 >
                                   <div className="flex flex-col">
-                                    <span className="text-sm font-medium font-mono">{m.label}</span>
+                                    <span className="text-sm font-medium">{m.label}</span>
                                     <span className="text-xs text-muted-foreground mt-0.5">{m.description}</span>
                                   </div>
                                   <div className="flex flex-col items-end ml-2 shrink-0">
-                                    <span className="text-[10px] text-orange-400 font-mono border border-orange-500/30 bg-orange-500/10 px-1.5 py-0.5 rounded-full">LPU</span>
-                                    {isActive && <span className="text-[10px] text-primary font-mono mt-0.5">ACTIVE</span>}
+                                    <span className="text-[10px] text-muted-foreground border border-border bg-muted px-1.5 py-0.5 rounded-full">LPU</span>
+                                    {isActive && <span className="text-[10px] text-primary mt-0.5 font-medium">Active</span>}
                                   </div>
                                 </button>
                               );
@@ -865,8 +850,8 @@ export default function Chat() {
 
                           {/* OpenRouter Models */}
                           <div>
-                            <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest border-t border-border mt-1 pt-2">
-                              🌐 OpenRouter · Free
+                            <div className="px-3 py-1 text-[10px] text-muted-foreground/50 uppercase tracking-widest font-semibold border-t border-border mt-1 pt-2">
+                              OpenRouter · Free
                             </div>
                             {OPENROUTER_MODELS.map((m) => {
                               const isActive = m.name === activeModel;
@@ -879,12 +864,12 @@ export default function Chat() {
                                   }`}
                                 >
                                   <div className="flex flex-col">
-                                    <span className="text-sm font-medium font-mono">{m.label}</span>
+                                    <span className="text-sm font-medium">{m.label}</span>
                                     <span className="text-xs text-muted-foreground mt-0.5">{m.description}</span>
                                   </div>
                                   <div className="flex flex-col items-end ml-2 shrink-0">
-                                    <span className="text-[10px] text-blue-400 font-mono border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 rounded-full">FREE</span>
-                                    {isActive && <span className="text-[10px] text-primary font-mono mt-0.5">ACTIVE</span>}
+                                    <span className="text-[10px] text-muted-foreground border border-border bg-muted px-1.5 py-0.5 rounded-full">Free</span>
+                                    {isActive && <span className="text-[10px] text-primary mt-0.5 font-medium">Active</span>}
                                   </div>
                                 </button>
                               );
@@ -893,8 +878,8 @@ export default function Chat() {
 
                           {/* Kimi K2 Models */}
                           <div>
-                            <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest border-t border-border mt-1 pt-2">
-                              🌙 Kimi K2 · MoonshotAI
+                            <div className="px-3 py-1 text-[10px] text-muted-foreground/50 uppercase tracking-widest font-semibold border-t border-border mt-1 pt-2">
+                              Kimi K2 · MoonshotAI
                             </div>
                             {KIMI_MODELS.map((m) => {
                               const isActive = m.name === activeModel;
@@ -907,13 +892,13 @@ export default function Chat() {
                                   }`}
                                 >
                                   <div className="flex flex-col">
-                                    <span className="text-sm font-medium font-mono">{m.label}</span>
+                                    <span className="text-sm font-medium">{m.label}</span>
                                     <span className="text-xs text-muted-foreground mt-0.5">{m.description}</span>
                                   </div>
                                   <div className="flex flex-col items-end ml-2">
-                                    <span className="text-[10px] text-amber-400 font-mono border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 rounded-full">1T</span>
+                                    <span className="text-[10px] text-muted-foreground border border-border bg-muted px-1.5 py-0.5 rounded-full">1T</span>
                                     {isActive && (
-                                      <span className="text-[10px] text-primary font-mono mt-0.5">ACTIVE</span>
+                                      <span className="text-[10px] text-primary mt-0.5 font-medium">Active</span>
                                     )}
                                   </div>
                                 </button>
@@ -923,8 +908,8 @@ export default function Chat() {
 
                           {/* Cloud Puter Models */}
                           <div>
-                            <div className="px-3 py-1 text-[10px] text-muted-foreground font-mono uppercase tracking-widest border-t border-border mt-1 pt-2">
-                              ☁ Premium · Puter.js
+                            <div className="px-3 py-1 text-[10px] text-muted-foreground/50 uppercase tracking-widest font-semibold border-t border-border mt-1 pt-2">
+                              Premium · Puter.js
                             </div>
                             {PUTER_MODELS.map((m) => {
                               const isActive = m.name === activeModel;
@@ -937,7 +922,7 @@ export default function Chat() {
                                   }`}
                                 >
                                   <div className="flex flex-col">
-                                    <span className="text-sm font-medium font-mono">{m.label}</span>
+                                    <span className="text-sm font-medium">{m.label}</span>
                                     <span className="text-xs text-muted-foreground mt-0.5">
                                       {m.name.replace("puter/", "")}
                                     </span>
@@ -945,9 +930,7 @@ export default function Chat() {
                                   <div className="flex flex-col items-end ml-2">
                                     <Cloud className="w-3 h-3 text-muted-foreground" />
                                     {isActive && (
-                                      <span className="text-[10px] text-primary font-mono mt-0.5">
-                                        ACTIVE
-                                      </span>
+                                      <span className="text-[10px] text-primary mt-0.5 font-medium">Active</span>
                                     )}
                                   </div>
                                 </button>
@@ -957,8 +940,8 @@ export default function Chat() {
                         </div>
                       )}
                       <div className="px-3 py-2 border-t border-border">
-                        <p className="text-[10px] text-muted-foreground font-mono">
-                          ⚡ Groq LPU · 🌐 OpenRouter Free · 🌙 Kimi K2 · ☁ Puter · 💻 Ollama Local
+                        <p className="text-[10px] text-muted-foreground/50">
+                          Groq · OpenRouter · Kimi K2 · Puter · Ollama Local
                         </p>
                       </div>
                     </motion.div>
@@ -1010,8 +993,8 @@ export default function Chat() {
                         {msg.role === "assistant" && (
                           <div className="flex items-center gap-1 mt-1">
                             {feedbackGiven[msg.id] ? (
-                              <span className="text-[10px] font-mono text-muted-foreground">
-                                {feedbackGiven[msg.id] === "positive" ? "👍 Feedback recorded" : "👎 Feedback recorded"}
+                              <span className="text-[10px] text-muted-foreground">
+                                Feedback recorded
                               </span>
                             ) : (
                               <>
@@ -1089,12 +1072,13 @@ export default function Chat() {
                           <ThinkingWave model={activeModel} />
                         )}
                       </div>
-                      <span className="text-[10px] text-muted-foreground mt-1 font-mono flex items-center gap-1">
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-primary inline-block"
-                          style={{ animation: "neural-pulse 1s ease-in-out infinite" }}
-                        />
-                        {streamPhase === "init" ? "Initializing model..." : `Streaming · ${activeModel}`}
+                      <span className="text-[10px] text-muted-foreground/50 mt-1 flex items-center gap-1.5">
+                        <svg width="6" height="6" viewBox="0 0 6 6">
+                          <circle cx="3" cy="3" r="2.5" fill="hsl(250 84% 68%)">
+                            <animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite" />
+                          </circle>
+                        </svg>
+                        {streamPhase === "init" ? "Initializing…" : activeModel.split(":").pop()?.split("/").pop()}
                       </span>
                     </div>
                   </motion.div>
@@ -1111,8 +1095,8 @@ export default function Chat() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={voiceActive ? "🎙 Listening..." : isStreaming ? "AI is responding..." : "Query DLavie OS..."}
-                  className="pr-24 h-12 bg-card border-card-border focus-visible:ring-primary font-mono text-sm"
+                  placeholder={voiceActive ? "Listening..." : isStreaming ? "AI is responding..." : "Send a message..."}
+                  className="pr-24 h-12 bg-card border-card-border focus-visible:ring-primary text-sm"
                   disabled={isStreaming}
                 />
                 <div className="absolute right-1 top-1 flex gap-1">
@@ -1152,20 +1136,18 @@ export default function Chat() {
                 </div>
               </form>
               <div className="max-w-3xl mx-auto mt-2 text-center">
-                <span className="text-xs text-muted-foreground font-mono">
+                <span className="text-xs text-muted-foreground/50">
                   {isStreaming
-                    ? "Generating response — click ■ to stop"
-                    : `${activeModel ? `${activeModel} ·` : ""} Enter to send · ${
-                        activeModel.startsWith("groq:")
-                          ? "⚡ Groq LPU"
-                          : activeModel.startsWith("openrouter:")
-                          ? "🌐 OpenRouter Free"
-                          : activeModel.startsWith("kimi/")
-                          ? "🌙 Kimi K2 · MoonshotAI"
-                          : activeModel.startsWith("puter/")
-                          ? "☁ Cloud AI via Puter.js"
-                          : "💻 Local AI via Ollama"
-                      }`}
+                    ? "Generating — click stop to cancel"
+                    : activeModel
+                      ? `${activeModel.split(":").pop()?.split("/").pop()} · ${
+                          activeModel.startsWith("groq:") ? "Groq LPU" :
+                          activeModel.startsWith("openrouter:") ? "OpenRouter" :
+                          activeModel.startsWith("kimi/") ? "Kimi K2" :
+                          activeModel.startsWith("puter/") ? "Cloud" : "Ollama Local"
+                        }`
+                      : "Press Enter to send"
+                  }
                 </span>
               </div>
             </div>

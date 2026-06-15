@@ -235,17 +235,17 @@ export default function Rag() {
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold font-sans tracking-tight mb-1.5">Knowledge Base</h1>
-          <p className="text-muted-foreground font-mono text-sm">
-            RAG · Vector search (HF embeddings) · BM25 fallback · PDF/DOCX parsing · URL import
+          <p className="text-muted-foreground text-sm">
+            Vector search with HF embeddings · BM25 fallback · PDF/DOCX/URL import
           </p>
         </div>
         <div className="flex gap-2 flex-wrap sm:flex-nowrap">
           {/* URL Import dialog */}
           <Dialog open={isUrlOpen} onOpenChange={setIsUrlOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" className="gap-2 font-mono">
+              <Button variant="outline" className="gap-2">
                 <CloudUpload className="w-4 h-4" />
-                IMPORT_URL
+                Import URL
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-[500px] border-border bg-card">
@@ -254,12 +254,12 @@ export default function Rag() {
               </DialogHeader>
               <form onSubmit={handleUrlImport} className="space-y-4 pt-2">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium font-mono text-muted-foreground">URL</label>
+                  <label className="text-sm font-medium text-muted-foreground">URL</label>
                   <Input
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
                     placeholder="https://docs.example.com/getting-started"
-                    className="font-mono bg-background"
+                    className="bg-background"
                     required
                   />
                   <p className="text-xs text-muted-foreground">
@@ -267,7 +267,7 @@ export default function Rag() {
                   </p>
                 </div>
                 {urlMsg && (
-                  <div className={`text-xs font-mono px-3 py-2 rounded ${
+                  <div className={`text-xs px-3 py-2 rounded ${
                     urlStatus === "error" ? "text-red-400 bg-red-500/10" :
                     urlStatus === "done"  ? "text-green-400 bg-green-500/10" :
                     "text-primary/80 bg-primary/5"
@@ -282,9 +282,9 @@ export default function Rag() {
 
           <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
             <DialogTrigger asChild>
-              <Button className="gap-2 font-mono">
+              <Button className="gap-2">
                 <Upload className="w-4 h-4" />
-                ADD_DOCUMENT
+                Add Document
               </Button>
             </DialogTrigger>
           <DialogContent className="sm:max-w-[560px] border-border bg-card">
@@ -293,7 +293,7 @@ export default function Rag() {
             </DialogHeader>
             <form onSubmit={handleUpload} className="space-y-4 pt-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium font-mono text-muted-foreground">DOCUMENT_TITLE</label>
+                <label className="text-sm font-medium text-muted-foreground">Document Title</label>
                 <Input
                   value={uploadTitle}
                   onChange={(e) => setUploadTitle(e.target.value)}
@@ -304,8 +304,8 @@ export default function Rag() {
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium font-mono text-muted-foreground">RAW_CONTENT</label>
-                  <label className="flex items-center gap-1 text-[10px] font-mono text-primary hover:underline cursor-pointer">
+                  <label className="text-sm font-medium text-muted-foreground">Content</label>
+                  <label className="flex items-center gap-1 text-[10px] text-primary hover:underline cursor-pointer">
                     <Upload className="w-3 h-3" />
                     import file
                     <input type="file" accept=".txt,.md,.csv,.json" className="hidden" onChange={handleFileInput} />
@@ -315,12 +315,12 @@ export default function Rag() {
                   value={uploadContent}
                   onChange={(e) => setUploadContent(e.target.value)}
                   required
-                  className="flex min-h-[180px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring font-mono"
+                  className="flex min-h-[180px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   placeholder="Paste document content here, or import a file above..."
                 />
               </div>
               {uploadContent && (
-                <div className="flex gap-4 text-xs font-mono text-muted-foreground bg-accent/30 px-3 py-2 rounded-md">
+                <div className="flex gap-4 text-xs text-muted-foreground bg-muted/30 px-3 py-2 rounded-md">
                   <span>{uploadContent.length.toLocaleString()} chars</span>
                   <span>{uploadContent.split(/\s+/).length.toLocaleString()} words</span>
                   <span>~{Math.ceil(uploadContent.length / 500)} chunks</span>
@@ -339,17 +339,17 @@ export default function Rag() {
       {/* Stats bar */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Documents", value: documents?.length ?? 0, icon: FileText, color: "text-violet-400", bg: "bg-violet-500/10" },
-          { label: "Chunks", value: totalChunks, icon: Hash, color: "text-blue-400", bg: "bg-blue-500/10" },
-          { label: "Storage", value: totalSize > 1024 ? `${(totalSize / 1024).toFixed(1)}kb` : `${totalSize}b`, icon: Layers, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-        ].map(({ label, value, icon: Icon, color, bg }) => (
-          <div key={label} className="flex items-center gap-3 p-3 sm:p-4 rounded-xl border border-white/5 bg-slate-900/40">
-            <div className={`p-2 rounded-lg ${bg} hidden sm:flex`}>
-              <Icon className={`w-4 h-4 ${color}`} />
+          { label: "Documents", value: documents?.length ?? 0, icon: FileText },
+          { label: "Chunks",    value: totalChunks,                icon: Hash  },
+          { label: "Storage",   value: totalSize > 1024 ? `${(totalSize / 1024).toFixed(1)} KB` : `${totalSize} B`, icon: Layers },
+        ].map(({ label, value, icon: Icon }) => (
+          <div key={label} className="flex items-center gap-3 p-3 sm:p-4 rounded-xl border border-border bg-card">
+            <div className="p-2 rounded-lg bg-primary/10 hidden sm:flex">
+              <Icon className="w-4 h-4 text-primary" />
             </div>
             <div>
-              <p className={`text-lg sm:text-xl font-bold font-mono ${color}`}>{value}</p>
-              <p className="text-xs text-muted-foreground font-mono">{label}</p>
+              <p className="text-lg sm:text-xl font-bold text-foreground tabular-nums">{value}</p>
+              <p className="text-xs text-muted-foreground">{label}</p>
             </div>
           </div>
         ))}
@@ -389,34 +389,32 @@ export default function Rag() {
 
             {dragStatus === "uploading" ? (
               <>
-                <Loader2 className="w-8 h-8 mx-auto mb-3 text-primary animate-spin" />
-                <p className="text-sm font-mono text-primary">{dragMsg}</p>
+                <Loader2 className="w-7 h-7 mx-auto mb-3 text-primary animate-spin" />
+                <p className="text-sm text-primary">{dragMsg}</p>
               </>
             ) : dragStatus === "done" ? (
               <>
-                <CheckCircle2 className="w-8 h-8 mx-auto mb-3 text-green-400" />
-                <p className="text-sm font-mono text-green-400">{dragMsg}</p>
+                <CheckCircle2 className="w-7 h-7 mx-auto mb-3 text-emerald-400" />
+                <p className="text-sm text-emerald-400">{dragMsg}</p>
               </>
             ) : dragStatus === "error" ? (
               <>
-                <AlertCircle className="w-8 h-8 mx-auto mb-3 text-red-400" />
-                <p className="text-sm font-mono text-red-400">{dragMsg}</p>
+                <AlertCircle className="w-7 h-7 mx-auto mb-3 text-red-400" />
+                <p className="text-sm text-red-400">{dragMsg}</p>
               </>
             ) : isDragging ? (
               <>
-                <CloudUpload className="w-10 h-10 mx-auto mb-3 text-primary animate-bounce" />
-                <p className="text-base font-mono text-primary font-medium">Drop to upload & index instantly</p>
+                <CloudUpload className="w-8 h-8 mx-auto mb-3 text-primary" />
+                <p className="text-sm text-primary font-medium">Drop to upload and index</p>
               </>
             ) : (
               <>
-                <CloudUpload className="w-8 h-8 mx-auto mb-3 text-muted-foreground" />
-                <p className="text-sm font-mono text-muted-foreground">
-                  <span className="text-primary font-medium">Drag & drop</span> a file here, or{" "}
-                  <span className="text-primary font-medium underline">click to browse</span>
+                <CloudUpload className="w-7 h-7 mx-auto mb-3 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">
+                  <span className="text-foreground font-medium">Drag & drop</span> a file, or{" "}
+                  <span className="text-primary font-medium">click to browse</span>
                 </p>
-                <p className="text-xs font-mono text-muted-foreground/60 mt-1">
-                  PDF · DOCX · TXT · MD · CSV · JSON — real text extraction + vector indexing
-                </p>
+                <p className="text-xs text-muted-foreground/50 mt-1">PDF · DOCX · TXT · MD · CSV · JSON</p>
               </>
             )}
           </div>
@@ -427,7 +425,7 @@ export default function Rag() {
                 <Database className="w-5 h-5 text-primary" />
                 Indexed Repository
                 {documents?.length ? (
-                  <span className="ml-auto text-xs font-mono text-muted-foreground font-normal">
+                  <span className="ml-auto text-xs text-muted-foreground font-normal">
                     {documents.length} document{documents.length !== 1 ? "s" : ""}
                   </span>
                 ) : null}
@@ -437,10 +435,10 @@ export default function Rag() {
               {isLoading ? (
                 <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
               ) : documents?.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground font-mono border border-dashed border-border rounded-lg bg-background/50">
+                <div className="text-center py-12 text-muted-foreground border border-dashed border-border rounded-lg">
                   <FileText className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                  <p>Repository is empty</p>
-                  <p className="text-xs mt-1 opacity-60">Drag & drop a file above or click "ADD_DOCUMENT"</p>
+                  <p className="text-sm">No documents yet</p>
+                  <p className="text-xs mt-1 opacity-60">Drag & drop a file above or click "Add Document"</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -460,7 +458,7 @@ export default function Rag() {
                               {doc.content.slice(0, 120)}...
                             </p>
                           )}
-                          <div className="flex flex-wrap items-center gap-3 mt-2 text-xs font-mono text-muted-foreground">
+                          <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Hash className="w-3 h-3" /> {doc.chunkCount} chunks
                             </span>
@@ -470,7 +468,7 @@ export default function Rag() {
                             <span>{format(new Date(doc.createdAt), "MMM d, yyyy")}</span>
                             {doc.indexed ? (
                               <span className="text-green-500 flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3" /> INDEXED
+                                <CheckCircle2 className="w-3 h-3" /> Indexed
                               </span>
                             ) : (
                               <span className="text-orange-500 animate-pulse flex items-center gap-1">
@@ -514,7 +512,7 @@ export default function Rag() {
                 <Search className="w-4 h-4 text-primary" />
                 Semantic Search
               </CardTitle>
-              <CardDescription className="font-mono text-xs">Test RAG retrieval accuracy</CardDescription>
+              <CardDescription className="text-xs">Test RAG retrieval accuracy</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={(e) => { e.preventDefault(); if (searchQuery) searchMutation.mutate({ data: { query: searchQuery } }); }} className="space-y-3">
@@ -524,7 +522,7 @@ export default function Rag() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Enter query..."
-                    className="pl-9 font-mono text-sm bg-background"
+                    className="pl-9 text-sm bg-background"
                   />
                 </div>
                 <Button
@@ -545,11 +543,11 @@ export default function Rag() {
               {searchMutation.data && (
                 <div className="mt-5 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-medium font-mono text-muted-foreground uppercase tracking-widest">BM25 Results</h4>
-                    <span className="text-[10px] font-mono text-muted-foreground">{searchMutation.data.length} match{searchMutation.data.length !== 1 ? "es" : ""}</span>
+                    <h4 className="text-xs font-medium text-muted-foreground">Results</h4>
+                    <span className="text-[10px] text-muted-foreground">{searchMutation.data.length} match{searchMutation.data.length !== 1 ? "es" : ""}</span>
                   </div>
                   {searchMutation.data.length === 0 ? (
-                    <div className="text-xs text-center text-muted-foreground font-mono py-4 bg-accent/20 rounded-lg">No matches in knowledge base.</div>
+                    <div className="text-xs text-center text-muted-foreground py-4 bg-muted/30 rounded-lg">No matches in knowledge base.</div>
                   ) : (
                     searchMutation.data.map((res: { title: string; score: number; snippet?: string; content?: string; rank?: number; chunkCount?: number }, i: number) => {
                       const maxScore = searchMutation.data![0].score || 1;
@@ -558,21 +556,21 @@ export default function Rag() {
                         <div key={i} className="p-3 rounded-lg bg-accent/30 border border-border text-sm space-y-2">
                           <div className="flex justify-between items-center gap-2">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[10px] font-mono text-muted-foreground shrink-0">#{res.rank ?? i+1}</span>
+                              <span className="text-[10px] text-muted-foreground/60 shrink-0">#{res.rank ?? i+1}</span>
                               <span className="font-medium text-primary text-xs truncate">{res.title}</span>
                             </div>
-                            <span className="font-mono text-[10px] text-muted-foreground shrink-0 bg-accent px-1.5 py-0.5 rounded">
-                              BM25: {res.score?.toFixed(2)}
+                            <span className="text-[10px] text-muted-foreground shrink-0 bg-muted px-1.5 py-0.5 rounded">
+                              {res.score?.toFixed(2)}
                             </span>
                           </div>
                           <div className="h-1 bg-accent rounded-full overflow-hidden">
                             <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
                           </div>
-                          <p className="text-xs text-muted-foreground leading-relaxed font-mono">
+                          <p className="text-xs text-muted-foreground leading-relaxed">
                             {res.snippet || (res.content || "").slice(0, 200)}
                           </p>
                           {res.chunkCount !== undefined && (
-                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60 font-mono">
+                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
                               <Hash className="w-3 h-3" />{res.chunkCount} chunks in document
                             </div>
                           )}
@@ -588,7 +586,7 @@ export default function Rag() {
           {/* How RAG works */}
           <Card className="glass-panel border-primary/20">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-mono text-muted-foreground uppercase tracking-widest">How RAG Works</CardTitle>
+              <CardTitle className="text-sm font-medium text-foreground">How RAG Works</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {[
@@ -598,9 +596,9 @@ export default function Rag() {
                 { step: "4", label: "Generate", desc: "AI responds with grounded, accurate answers" },
               ].map((item) => (
                 <div key={item.step} className="flex items-start gap-3">
-                  <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-[10px] font-mono font-bold shrink-0 mt-0.5">{item.step}</span>
+                  <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-semibold shrink-0 mt-0.5">{item.step}</span>
                   <div>
-                    <p className="text-xs font-medium font-mono text-foreground">{item.label}</p>
+                    <p className="text-xs font-medium text-foreground">{item.label}</p>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">{item.desc}</p>
                   </div>
                 </div>

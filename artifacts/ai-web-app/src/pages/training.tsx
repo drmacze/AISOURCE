@@ -211,11 +211,11 @@ function AutoTrainingPanel() {
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="w-4 h-4 text-primary animate-pulse" />
             Live Auto-Training Engine
-            <span className="text-xs font-mono font-normal text-muted-foreground ml-1">
+            <span className="text-xs font-normal text-muted-foreground ml-1">
               — 24/7 knowledge acquisition
             </span>
             {status?.currentlyCycling && (
-              <span className="flex items-center gap-1 text-xs font-mono px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+              <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">
                 <Loader2 className="w-3 h-3 animate-spin" /> cycling…
               </span>
             )}
@@ -223,7 +223,7 @@ function AutoTrainingPanel() {
           <div className="flex items-center gap-2">
             <Button
               variant="outline" size="sm"
-              className="gap-1.5 font-mono text-xs h-7"
+              className="gap-1.5 text-xs h-7"
               onClick={handleRunCycle}
               disabled={running || status?.currentlyCycling}
             >
@@ -233,7 +233,7 @@ function AutoTrainingPanel() {
             <Button
               size="sm"
               variant={status?.running ? "destructive" : "default"}
-              className="gap-1.5 font-mono text-xs h-7"
+              className="gap-1.5 text-xs h-7"
               onClick={handleToggle}
             >
               {status?.running ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
@@ -252,15 +252,15 @@ function AutoTrainingPanel() {
             { label: "Dedup Cache", value: status?.totalDedupCacheSize?.toLocaleString() ?? "—", sub: "unique hashes", color: "text-purple-400" },
           ].map((s) => (
             <div key={s.label} className="p-3 rounded-lg border border-border bg-background/50 text-center">
-              <div className={`text-xl font-bold font-mono ${s.color}`}>{String(s.value)}</div>
-              <div className="text-[10px] font-mono text-muted-foreground mt-0.5">{s.label}</div>
+              <div className={`text-xl font-bold tabular-nums ${s.color}`}>{String(s.value)}</div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">{s.label}</div>
               <div className="text-[9px] text-muted-foreground/60">{s.sub}</div>
             </div>
           ))}
         </div>
 
         {/* Connection badges */}
-        <div className="flex flex-wrap gap-2 text-[10px] font-mono">
+        <div className="flex flex-wrap gap-2 text-[10px]">
           <span className={`flex items-center gap-1 px-2 py-1 rounded border ${status?.githubConnected ? "border-green-500/40 bg-green-500/10 text-green-400" : "border-yellow-500/40 bg-yellow-500/10 text-yellow-400"}`}>
             <Github className="w-3 h-3" />
             {status?.githubToken ?? "GitHub"}
@@ -288,7 +288,7 @@ function AutoTrainingPanel() {
         {/* Source breakdown */}
         {dbStats?.sourceBreakdown && Object.keys(dbStats.sourceBreakdown).length > 0 && (
           <div>
-            <p className="text-xs font-mono text-muted-foreground mb-2">Sample distribution by source ({totalFromBreakdown} total)</p>
+            <p className="text-xs text-muted-foreground mb-2">Sample distribution by source ({totalFromBreakdown} total)</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
               {Object.entries(dbStats.sourceBreakdown)
                 .sort(([, a], [, b]) => b - a)
@@ -296,7 +296,7 @@ function AutoTrainingPanel() {
                   const meta = SOURCE_META[src] || { icon: <Database className="w-3 h-3" />, label: src, color: "text-muted-foreground" };
                   const pct = totalFromBreakdown > 0 ? Math.round((cnt / totalFromBreakdown) * 100) : 0;
                   return (
-                    <div key={src} className="flex items-center gap-2 p-2 rounded border border-border bg-background/40 text-[10px] font-mono">
+                    <div key={src} className="flex items-center gap-2 p-2 rounded border border-border bg-background/40 text-[10px]">
                       <span className={meta.color}>{meta.icon}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-baseline gap-1">
@@ -315,10 +315,10 @@ function AutoTrainingPanel() {
         )}
 
         {/* Schedule info + controls */}
-        <div className="flex flex-wrap gap-3 text-[10px] font-mono text-muted-foreground border-t border-border pt-3">
+        <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground border-t border-border pt-3">
           <span>Last: <span className="text-foreground">{status?.lastCycleAt ? format(new Date(status.lastCycleAt), "HH:mm:ss") : "—"}</span></span>
           <span>Next: <span className="text-foreground">{status?.nextCycleAt ? format(new Date(status.nextCycleAt), "HH:mm:ss") : "—"}</span></span>
-          <span>Status: <span className={status?.running ? "text-green-400" : "text-yellow-400"}>{status?.running ? "● RUNNING" : "○ PAUSED"}</span></span>
+          <span>Status: <span className={status?.running ? "text-green-400" : "text-yellow-400"}>{status?.running ? "● Running" : "○ Paused"}</span></span>
           <div className="ml-auto flex gap-2">
             <button className="text-primary hover:text-primary/80 underline-offset-2 hover:underline" onClick={() => setShowSources(!showSources)}>
               {showSources ? "▲ sources" : "▼ sources"}
@@ -335,7 +335,7 @@ function AutoTrainingPanel() {
         {/* Source toggle panel */}
         {showSources && (
           <div className="border border-border rounded-lg bg-background/40 p-3 space-y-2">
-            <p className="text-xs font-mono font-medium text-muted-foreground flex items-center gap-1.5">
+            <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
               <Power className="w-3 h-3" /> Source Controls — toggle data streams on/off
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
@@ -347,7 +347,7 @@ function AutoTrainingPanel() {
                   <button
                     key={src}
                     onClick={() => handleToggleSource(src, !enabled)}
-                    className={`flex items-center gap-2 p-2 rounded border text-[10px] font-mono transition-all ${
+                    className={`flex items-center gap-2 p-2 rounded border text-[10px] transition-all ${
                       enabled
                         ? "border-primary/30 bg-primary/5 hover:bg-primary/10"
                         : "border-border bg-background/20 opacity-50 hover:opacity-70"
@@ -371,65 +371,65 @@ function AutoTrainingPanel() {
         {/* Config panel */}
         {showConfig && (
           <div className="border border-blue-500/20 rounded-lg bg-blue-500/5 p-3 space-y-3">
-            <p className="text-xs font-mono font-medium text-blue-400 flex items-center gap-1.5">
+            <p className="text-xs font-medium text-blue-400 flex items-center gap-1.5">
               <Settings className="w-3 h-3" /> Engine Configuration
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Main cycle interval (minutes)
+                <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Main cycle interval (min)
                 </label>
                 <input
                   type="number" min="1" max="1440"
                   value={configInterval}
                   onChange={(e) => setConfigInterval(e.target.value)}
-                  className="w-full h-7 px-2 rounded border border-border bg-background text-xs font-mono text-foreground"
+                  className="w-full h-7 px-2 rounded border border-border bg-background text-xs text-foreground"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
-                  <Zap className="w-3 h-3" /> Micro cycle interval (seconds)
+                <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <Zap className="w-3 h-3" /> Micro cycle interval (sec)
                 </label>
                 <input
                   type="number" min="10" max="3600"
                   value={configMicro}
                   onChange={(e) => setConfigMicro(e.target.value)}
-                  className="w-full h-7 px-2 rounded border border-border bg-background text-xs font-mono text-foreground"
+                  className="w-full h-7 px-2 rounded border border-border bg-background text-xs text-foreground"
                 />
               </div>
             </div>
             <div className="flex items-start gap-4">
               <div className="space-y-1 flex-1">
-                <label className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
+                <label className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <Target className="w-3 h-3" /> Auto-trigger training after N new samples
                 </label>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setAutoTriggerEnabled(!autoTriggerEnabled)}
-                    className={`text-[10px] font-mono px-2 py-1 rounded border transition-colors ${
+                    className={`text-[10px] px-2 py-1 rounded border transition-colors ${
                       autoTriggerEnabled
                         ? "border-green-500/40 bg-green-500/10 text-green-400"
                         : "border-border text-muted-foreground"
                     }`}
                   >
-                    {autoTriggerEnabled ? "● ENABLED" : "○ DISABLED"}
+                    {autoTriggerEnabled ? "● Enabled" : "○ Disabled"}
                   </button>
                   <input
                     type="number" min="50" max="100000"
                     value={autoTriggerThreshold}
                     onChange={(e) => setAutoTriggerThreshold(e.target.value)}
                     disabled={!autoTriggerEnabled}
-                    className="w-24 h-7 px-2 rounded border border-border bg-background text-xs font-mono text-foreground disabled:opacity-40"
+                    className="w-24 h-7 px-2 rounded border border-border bg-background text-xs text-foreground disabled:opacity-40"
                   />
                   {status?.config?.autoTrigger.enabled && (
-                    <span className="text-[10px] font-mono text-muted-foreground">
+                    <span className="text-[10px] text-muted-foreground">
                       {status.config.autoTrigger.samplesCollected}/{status.config.autoTrigger.threshold} collected
                     </span>
                   )}
                 </div>
               </div>
             </div>
-            <Button size="sm" className="h-7 text-xs font-mono gap-1.5" onClick={handleSaveConfig} disabled={configSaving}>
+            <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handleSaveConfig} disabled={configSaving}>
               {configSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
               Save Config
             </Button>
@@ -962,14 +962,14 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
         <CardTitle className="flex items-center gap-2 text-base">
           <Brain className="w-4 h-4 text-violet-400" />
           HuggingFace AutoTrain
-          <span className="text-[10px] font-mono font-normal text-muted-foreground ml-1">
+          <span className="text-[10px] font-normal text-muted-foreground ml-1">
             fine-tuning di GPU HF — gratis
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* HF Token Status */}
-        <div className={`flex items-center gap-2 p-2.5 rounded border text-xs font-mono ${
+        <div className={`flex items-center gap-2 p-2.5 rounded border text-xs ${
           hfInfo?.configured
             ? "border-green-500/30 bg-green-500/5 text-green-400"
             : "border-amber-500/30 bg-amber-500/5 text-amber-400"
@@ -986,12 +986,12 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
         {/* Manual username input — shown when token valid but profile not accessible */}
         {needsUsername && (
           <div className="space-y-1">
-            <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Username HuggingFace</label>
+            <label className="text-[10px] text-muted-foreground">Username HuggingFace</label>
             <Input
               placeholder="contoh: johndoe  (lihat huggingface.co/settings/profile)"
               value={manualUsername}
               onChange={(e) => setManualUsername(e.target.value)}
-              className="h-8 text-xs font-mono"
+              className="h-8 text-xs"
             />
             {manualUsername && (
               <p className="text-[10px] text-muted-foreground">
@@ -1003,19 +1003,19 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* Step 1 */}
-          <div className="space-y-3 p-3 rounded border border-white/5 bg-white/2">
-            <p className="text-xs font-semibold text-white flex items-center gap-1.5">
+          <div className="space-y-3 p-3 rounded border border-border bg-background/30">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
               <span className="w-5 h-5 rounded-full bg-violet-500/20 text-violet-400 text-[10px] flex items-center justify-center font-bold">1</span>
               Push Dataset ke HF Hub
             </p>
             <div className="space-y-2">
               <Select value={selectedDatasetId} onValueChange={setSelectedDatasetId} disabled={notConfigured ?? false}>
-                <SelectTrigger className="h-8 text-xs font-mono">
+                <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder="Pilih dataset…" />
                 </SelectTrigger>
                 <SelectContent>
                   {(datasets ?? []).map((d) => (
-                    <SelectItem key={d.id} value={String(d.id)} className="text-xs font-mono">{d.name}</SelectItem>
+                    <SelectItem key={d.id} value={String(d.id)} className="text-xs">{d.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1023,7 +1023,7 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
                 placeholder="Nama repo HF (opsional)"
                 value={repoName}
                 onChange={(e) => setRepoName(e.target.value)}
-                className="h-8 text-xs font-mono"
+                className="h-8 text-xs"
                 disabled={notConfigured ?? false}
               />
               <Button
@@ -1038,7 +1038,7 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
               </Button>
             </div>
             {pushResult && (
-              <div className={`p-2 rounded text-[11px] font-mono ${pushResult.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+              <div className={`p-2 rounded text-[11px] ${pushResult.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
                 {pushResult.ok
                   ? <><CheckCircle2 className="w-3 h-3 inline mr-1" />{pushResult.samplesUploaded} samples → <a href={pushResult.repoUrl} target="_blank" rel="noreferrer" className="underline">{pushResult.repoId}</a></>
                   : <><AlertCircle className="w-3 h-3 inline mr-1" />{pushResult.error}</>
@@ -1048,27 +1048,27 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
           </div>
 
           {/* Step 2 */}
-          <div className="space-y-3 p-3 rounded border border-white/5 bg-white/2">
-            <p className="text-xs font-semibold text-white flex items-center gap-1.5">
+          <div className="space-y-3 p-3 rounded border border-border bg-background/30">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
               <span className="w-5 h-5 rounded-full bg-violet-500/20 text-violet-400 text-[10px] flex items-center justify-center font-bold">2</span>
               Launch AutoTrain di GPU HF
             </p>
             <div className="space-y-2">
               <Select value={selectedBase} onValueChange={setSelectedBase} disabled={!pushResult?.ok}>
-                <SelectTrigger className="h-8 text-xs font-mono">
+                <SelectTrigger className="h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {baseModels.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs font-mono">
+                    <SelectItem key={m.id} value={m.id} className="text-xs">
                       {m.label} {m.recommended ? "⭐" : ""} · {m.vram} VRAM
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <div className="flex items-center gap-2">
-                <label className="text-[11px] font-mono text-muted-foreground shrink-0">Epochs</label>
-                <Input value={epochs} onChange={(e) => setEpochs(e.target.value)} className="h-8 text-xs font-mono" type="number" min="1" max="10" disabled={!pushResult?.ok} />
+                <label className="text-[11px] text-muted-foreground shrink-0">Epochs</label>
+                <Input value={epochs} onChange={(e) => setEpochs(e.target.value)} className="h-8 text-xs" type="number" min="1" max="10" disabled={!pushResult?.ok} />
               </div>
               <Button
                 size="sm" className="w-full gap-1.5 text-xs bg-violet-600 hover:bg-violet-700 text-white"
@@ -1082,7 +1082,7 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
               </Button>
             </div>
             {trainResult && (
-              <div className={`p-2 rounded text-[11px] font-mono space-y-1 ${trainResult.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+              <div className={`p-2 rounded text-[11px] space-y-1 ${trainResult.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
                 {trainResult.ok ? (
                   <>
                     <div><CheckCircle2 className="w-3 h-3 inline mr-1" />
@@ -1119,7 +1119,7 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
           </div>
         </div>
 
-        <p className="text-[10px] text-muted-foreground font-mono text-center">
+        <p className="text-[10px] text-muted-foreground text-center">
           Training berjalan di <b className="text-violet-400">GPU HuggingFace</b> — 0% RAM lokal digunakan. Model hasil training otomatis tersimpan di HF Hub kamu.
         </p>
       </CardContent>
@@ -1308,7 +1308,7 @@ function QuickCreateWizard() {
               }`}>
                 {step > s.n ? <CheckCircle2 className="w-4 h-4" /> : s.n}
               </div>
-              <span className={`text-[10px] font-mono ${step === s.n ? "text-primary" : "text-muted-foreground"}`}>{s.label}</span>
+              <span className={`text-[10px] ${step === s.n ? "text-primary" : "text-muted-foreground"}`}>{s.label}</span>
             </div>
             {idx < 3 && <div className={`h-0.5 flex-1 mb-5 transition-all ${step > s.n ? "bg-primary/50" : "bg-border"}`} />}
           </React.Fragment>
@@ -1338,7 +1338,7 @@ function QuickCreateWizard() {
             <div className="space-y-2">
               <label className="text-sm font-medium">Model Dasar</label>
               <Select value={baseModel} onValueChange={setBaseModel}>
-                <SelectTrigger className="bg-background font-mono text-sm">
+                <SelectTrigger className="bg-background text-sm">
                   <SelectValue placeholder="Pilih model yang sudah ter-install..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -1465,7 +1465,7 @@ function QuickCreateWizard() {
                     onChange={(e) => setBulkText(e.target.value)}
                     rows={10}
                     placeholder={"Apa itu AI?|||AI adalah kecerdasan buatan yang dibuat oleh manusia.\nBagaimana cara kerja neural network?|||Neural network terdiri dari lapisan-lapisan neuron buatan yang saling terhubung..."}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
                 {parsedBulk.length > 0 && (
@@ -1528,7 +1528,7 @@ function QuickCreateWizard() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Jumlah Epoch</label>
-                <span className="text-sm font-mono text-primary font-bold">{epochs}</span>
+                <span className="text-sm text-primary font-bold tabular-nums">{epochs}</span>
               </div>
               <input
                 type="range"
@@ -1538,7 +1538,7 @@ function QuickCreateWizard() {
                 onChange={(e) => setEpochs(Number(e.target.value))}
                 className="w-full accent-primary"
               />
-              <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
+              <div className="flex justify-between text-[10px] text-muted-foreground">
                 <span>1 (cepat)</span>
                 <span>5 (seimbang)</span>
                 <span>10 (maksimal)</span>
@@ -1554,7 +1554,7 @@ function QuickCreateWizard() {
                     key={r}
                     type="button"
                     onClick={() => setLoraRank(r)}
-                    className={`py-2 rounded border text-sm font-mono transition-all ${
+                    className={`py-2 rounded border text-sm transition-all ${
                       loraRank === r ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:border-primary/40"
                     }`}
                   >
@@ -1569,9 +1569,9 @@ function QuickCreateWizard() {
 
             {/* Estimate */}
             <div className="p-3 rounded border border-border bg-background/50 text-xs text-muted-foreground space-y-1">
-              <div className="flex justify-between"><span>Jumlah data</span><span className="text-foreground font-mono">{allSamples.length} pasang</span></div>
-              <div className="flex justify-between"><span>Epoch</span><span className="text-foreground font-mono">{epochs}×</span></div>
-              <div className="flex justify-between"><span>Estimasi waktu</span><span className="text-primary font-mono">~{estimatedMinutes < 1 ? "< 1" : estimatedMinutes} menit</span></div>
+              <div className="flex justify-between"><span>Jumlah data</span><span className="text-foreground tabular-nums">{allSamples.length} pasang</span></div>
+              <div className="flex justify-between"><span>Epoch</span><span className="text-foreground tabular-nums">{epochs}×</span></div>
+              <div className="flex justify-between"><span>Estimasi waktu</span><span className="text-primary tabular-nums">~{estimatedMinutes < 1 ? "< 1" : estimatedMinutes} menit</span></div>
             </div>
 
             <div className="flex gap-3">
@@ -1598,7 +1598,7 @@ function QuickCreateWizard() {
             {/* Summary */}
             {!launching && !launchLog.length && (
               <div className="space-y-2 p-4 rounded-lg border border-border bg-background/50">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Ringkasan</p>
+                <p className="text-xs font-medium text-muted-foreground mb-3">Ringkasan</p>
                 {[
                   { label: "Nama Model", value: modelName },
                   { label: "Base Model", value: baseModel || "tinyllama" },
@@ -1618,7 +1618,7 @@ function QuickCreateWizard() {
 
             {/* Launch log */}
             {launchLog.length > 0 && (
-              <div className="space-y-1.5 p-3 rounded-lg border border-border bg-background/80 font-mono text-xs max-h-52 overflow-y-auto">
+              <div className="space-y-1.5 p-3 rounded-lg border border-border bg-background/80 text-xs max-h-52 overflow-y-auto font-mono">
                 {launchLog.map((l, i) => (
                   <div key={i} className={l.startsWith("❌") ? "text-destructive" : l.startsWith("🎉") ? "text-green-400" : "text-foreground"}>{l}</div>
                 ))}
@@ -1630,8 +1630,8 @@ function QuickCreateWizard() {
             {jobId && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span className="font-mono">JOB_{String(jobId).padStart(4, "0")}</span>
-                  <span className={`capitalize font-mono ${jobStatus === "completed" ? "text-green-400" : jobStatus === "failed" ? "text-destructive" : "text-primary"}`}>{jobStatus}</span>
+                  <span className="font-mono text-muted-foreground">JOB_{String(jobId).padStart(4, "0")}</span>
+                  <span className={`capitalize ${jobStatus === "completed" ? "text-green-400" : jobStatus === "failed" ? "text-destructive" : "text-primary"}`}>{jobStatus}</span>
                 </div>
                 <Progress value={jobProgress} className="h-2" />
                 <p className="text-xs text-muted-foreground text-right">{jobProgress}%</p>
@@ -1639,7 +1639,7 @@ function QuickCreateWizard() {
             )}
 
             {launchError && (
-              <div className="p-3 rounded border border-destructive/30 bg-destructive/5 text-destructive text-xs font-mono">{launchError}</div>
+              <div className="p-3 rounded border border-destructive/30 bg-destructive/5 text-destructive text-xs">{launchError}</div>
             )}
 
             {launchDone && jobStatus === "completed" && (
@@ -1864,29 +1864,29 @@ export default function Training() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold font-sans tracking-tight mb-1">Training Hub</h1>
-          <p className="text-muted-foreground font-mono text-sm">
+          <p className="text-muted-foreground text-sm">
             Fine-tuning pipelines · Model registry · Ollama CLI · Model catalogue
           </p>
         </div>
         <div className="flex gap-2">
           <Dialog open={registerModelOpen} onOpenChange={setRegisterModelOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5 font-mono text-xs">
-                <Plus className="w-3.5 h-3.5" /> REGISTER_MODEL
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <Plus className="w-3.5 h-3.5" /> Register Model
               </Button>
             </DialogTrigger>
             <DialogContent className="border-border bg-card">
               <DialogHeader><DialogTitle>Register AI Model</DialogTitle></DialogHeader>
               <form onSubmit={handleRegisterModel} className="space-y-4 pt-3">
                 <div className="space-y-2">
-                  <label className="text-xs font-mono text-muted-foreground">MODEL_NAME</label>
-                  <Input value={rmName} onChange={(e) => setRmName(e.target.value)} required className="font-mono text-sm bg-background" placeholder="e.g. MyModel-v1" />
+                  <label className="text-xs text-muted-foreground">Model Name</label>
+                  <Input value={rmName} onChange={(e) => setRmName(e.target.value)} required className="text-sm bg-background" placeholder="e.g. MyModel-v1" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <label className="text-xs font-mono text-muted-foreground">TYPE</label>
+                    <label className="text-xs text-muted-foreground">Type</label>
                     <Select value={rmType} onValueChange={(v) => setRmType(v as typeof rmType)}>
-                      <SelectTrigger className="font-mono text-sm bg-background"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="text-sm bg-background"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {["llm","embedding","classification","summarization","custom"].map(t => (
                           <SelectItem key={t} value={t}>{t}</SelectItem>
@@ -1895,17 +1895,17 @@ export default function Training() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-mono text-muted-foreground">VERSION</label>
-                    <Input value={rmVersion} onChange={(e) => setRmVersion(e.target.value)} className="font-mono text-sm bg-background" />
+                    <label className="text-xs text-muted-foreground">Version</label>
+                    <Input value={rmVersion} onChange={(e) => setRmVersion(e.target.value)} className="text-sm bg-background" />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-mono text-muted-foreground">BASE_ARCH (Ollama model name)</label>
-                  <Input value={rmArch} onChange={(e) => setRmArch(e.target.value)} className="font-mono text-sm bg-background" placeholder="tinyllama, qwen2.5:1.5b, ..." />
+                  <label className="text-xs text-muted-foreground">Base Architecture (Ollama model name)</label>
+                  <Input value={rmArch} onChange={(e) => setRmArch(e.target.value)} className="text-sm bg-background" placeholder="tinyllama, qwen2.5:1.5b, ..." />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-mono text-muted-foreground">DESCRIPTION</label>
-                  <Input value={rmDesc} onChange={(e) => setRmDesc(e.target.value)} className="font-mono text-sm bg-background" />
+                  <label className="text-xs text-muted-foreground">Description</label>
+                  <Input value={rmDesc} onChange={(e) => setRmDesc(e.target.value)} className="text-sm bg-background" />
                 </div>
                 <Button type="submit" className="w-full" disabled={registerModelMutation.isPending || !rmName}>
                   {registerModelMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
@@ -1917,8 +1917,8 @@ export default function Training() {
 
           <Dialog open={startJobOpen} onOpenChange={(v) => { setStartJobOpen(v); if (!v) setAutoConfigInfo(null); }}>
             <DialogTrigger asChild>
-              <Button className="gap-2 font-mono" variant="default">
-                <Play className="w-4 h-4" /> START_JOB
+              <Button className="gap-2" variant="default">
+                <Play className="w-4 h-4" /> Start Job
               </Button>
             </DialogTrigger>
             <DialogContent className="border-border bg-card max-w-lg">
@@ -1926,9 +1926,9 @@ export default function Training() {
               <form onSubmit={handleStartJob} className="space-y-4 pt-2">
                 {/* Model selector */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-muted-foreground">BASE_MODEL</label>
+                  <label className="text-xs text-muted-foreground">Base Model</label>
                   <Select value={jobModelId} onValueChange={handleModelSelectForJob}>
-                    <SelectTrigger className="font-mono text-sm bg-background"><SelectValue placeholder="Select registered model" /></SelectTrigger>
+                    <SelectTrigger className="text-sm bg-background"><SelectValue placeholder="Select registered model" /></SelectTrigger>
                     <SelectContent>
                       {models?.map((m) => (
                         <SelectItem key={m.id} value={m.id.toString()}>
@@ -1938,7 +1938,7 @@ export default function Training() {
                     </SelectContent>
                   </Select>
                   {autoConfigInfo && (
-                    <div className="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-2 py-1.5 rounded border border-cyan-500/20 leading-relaxed">
+                    <div className="text-[10px] text-cyan-400 bg-cyan-500/10 px-2 py-1.5 rounded border border-cyan-500/20 leading-relaxed">
                       <span className="text-cyan-300 font-bold">Family: {autoConfigInfo.family}</span> · Template: {autoConfigInfo.chatTemplate}<br />
                       {autoConfigInfo.notes}
                     </div>
@@ -1947,9 +1947,9 @@ export default function Training() {
 
                 {/* Dataset selector */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-muted-foreground">DATASET</label>
+                  <label className="text-xs text-muted-foreground">Dataset</label>
                   <Select value={jobDatasetId} onValueChange={setJobDatasetId}>
-                    <SelectTrigger className="font-mono text-sm bg-background"><SelectValue placeholder="Select dataset" /></SelectTrigger>
+                    <SelectTrigger className="text-sm bg-background"><SelectValue placeholder="Select dataset" /></SelectTrigger>
                     <SelectContent>
                       {datasets?.map((d) => (
                         <SelectItem key={d.id} value={d.id.toString()}>
@@ -1962,7 +1962,7 @@ export default function Training() {
 
                 {/* Backend selector */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-mono text-muted-foreground">TRAINING_BACKEND</label>
+                  <label className="text-xs text-muted-foreground">Training Backend</label>
                   <div className="grid grid-cols-2 gap-2">
                     {([
                       { value: "local_cpu", label: "Local CPU", icon: "🖥️", desc: "Real LoRA, CPU (slower)" },
@@ -1978,7 +1978,7 @@ export default function Training() {
                             : "border-border bg-background text-muted-foreground hover:border-primary/50"
                         }`}
                       >
-                        <div className="text-sm font-mono">{b.icon} {b.label}</div>
+                        <div className="text-sm">{b.icon} {b.label}</div>
                         <div className="text-[10px] mt-0.5 opacity-70">{b.desc}</div>
                       </button>
                     ))}
@@ -1987,16 +1987,16 @@ export default function Training() {
 
                 {/* LoRA hyperparameters */}
                 <div className="p-3 rounded-lg border border-border bg-accent/20 space-y-3">
-                  <div className="text-xs font-mono text-muted-foreground font-semibold">LORA_HYPERPARAMETERS</div>
+                  <div className="text-xs text-muted-foreground font-medium">LoRA Hyperparameters</div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-mono text-muted-foreground">EPOCHS</label>
-                      <Input type="number" min="1" max="20" value={jobEpochs} onChange={(e) => setJobEpochs(e.target.value)} className="font-mono text-sm bg-background h-8" />
+                      <label className="text-[10px] text-muted-foreground">Epochs</label>
+                      <Input type="number" min="1" max="20" value={jobEpochs} onChange={(e) => setJobEpochs(e.target.value)} className="text-sm bg-background h-8" />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-mono text-muted-foreground">LORA_RANK (r)</label>
+                      <label className="text-[10px] text-muted-foreground">LoRA Rank (r)</label>
                       <Select value={jobLoraRank} onValueChange={setJobLoraRank}>
-                        <SelectTrigger className="font-mono text-sm bg-background h-8"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="text-sm bg-background h-8"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {["4","8","16","32","64"].map((r) => (
                             <SelectItem key={r} value={r}>r={r}{r === "16" ? " (default)" : r === "4" ? " (fast)" : r === "64" ? " (detailed)" : ""}</SelectItem>
@@ -2005,9 +2005,9 @@ export default function Training() {
                       </Select>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-mono text-muted-foreground">LEARNING_RATE</label>
+                      <label className="text-[10px] text-muted-foreground">Learning Rate</label>
                       <Select value={jobLearningRate} onValueChange={setJobLearningRate}>
-                        <SelectTrigger className="font-mono text-sm bg-background h-8"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="text-sm bg-background h-8"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {[["0.0001","1e-4 (conservative)"],["0.0002","2e-4 (default)"],["0.0005","5e-4 (aggressive)"],["0.001","1e-3 (fast)"]].map(([v, l]) => (
                             <SelectItem key={v} value={v}>{l}</SelectItem>
@@ -2016,9 +2016,9 @@ export default function Training() {
                       </Select>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-mono text-muted-foreground">BATCH_SIZE</label>
+                      <label className="text-[10px] text-muted-foreground">Batch Size</label>
                       <Select value={jobBatchSize} onValueChange={setJobBatchSize}>
-                        <SelectTrigger className="font-mono text-sm bg-background h-8"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="text-sm bg-background h-8"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {[["1","1 (memory safe)"],["2","2 (default)"],["4","4 (faster)"],["8","8 (GPU)"]].map(([v, l]) => (
                             <SelectItem key={v} value={v}>{l}</SelectItem>
@@ -2029,7 +2029,7 @@ export default function Training() {
                   </div>
                 </div>
 
-                <div className="text-[10px] text-muted-foreground font-mono bg-primary/5 px-3 py-2 rounded border border-primary/20">
+                <div className="text-[10px] text-muted-foreground bg-primary/5 px-3 py-2 rounded border border-primary/20">
                   ⚡ <span className="text-primary">Real LoRA fine-tuning</span> — actual gradient descent using PEFT + transformers.
                   Saves adapter weights to disk + registers in Ollama.
                 </div>
@@ -2060,7 +2060,7 @@ export default function Training() {
             }`}
           >
             <span>{t.label}</span>
-            <span className="text-[10px] font-mono opacity-60">{t.desc}</span>
+            <span className="text-[10px] opacity-60">{t.desc}</span>
           </button>
         ))}
       </div>
