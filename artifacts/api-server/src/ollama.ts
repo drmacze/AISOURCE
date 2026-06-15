@@ -297,12 +297,14 @@ export async function generateOllamaResponse(
 }
 
 export async function isOllamaOnline(): Promise<boolean> {
-  try {
-    const res = await fetch(`${OLLAMA_HOST}/api/version`, { signal: AbortSignal.timeout(2000) });
-    return res.ok;
-  } catch {
-    return false;
+  // Try /api/version first (preferred), then /api/tags as fallback
+  for (const path of ["/api/version", "/api/tags"]) {
+    try {
+      const res = await fetch(`${OLLAMA_HOST}${path}`, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) return true;
+    } catch { /* try next */ }
   }
+  return false;
 }
 
 // ─── Streaming response ────────────────────────────────────────────────────────

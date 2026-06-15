@@ -619,28 +619,42 @@ class WaBotManager {
 
           try { await sock.sendPresenceUpdate("composing", jid); } catch { /* ignore */ }
 
-          const { text: reply, provider, modelUsed } = await generateWithFallback(
-            text, undefined, buildSystemPrompt(this.config)
-          );
+          let reply = "";
+          let modelInfo = "unknown/unknown";
+
+          try {
+            const result = await generateWithFallback(
+              text, undefined, buildSystemPrompt(this.config)
+            );
+            reply     = result.text;
+            modelInfo = `${result.provider}/${result.model}`;
+          } catch (e) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            console.error(`[WaBot] AI generation failed for ${jid}: ${errMsg.slice(0, 200)}`);
+            reply     = "⚠️ Maaf, semua layanan AI sedang tidak tersedia saat ini. Silakan coba beberapa saat lagi.";
+            modelInfo = "fallback/unavailable";
+          }
 
           const finalReply = reply.trim() + buildFooter(this.config) + "\n\nBalas \"+1\" 👍 atau \"-1\" 👎 untuk beri feedback";
           await sock.sendMessage(jid, { text: finalReply }, { quoted: msg });
           try { await sock.sendPresenceUpdate("paused", jid); } catch { /* ignore */ }
 
-          // BLOK A3: store feedback session for attribution
-          if (!this.feedbackSessions) this.feedbackSessions = new Map();
-          this.feedbackSessions.set(jid, {
-            aiReplyText: reply.trim().slice(0, 500),
-            model: `${provider}/${modelUsed}`,
-            ts: Date.now(),
-          });
-          setTimeout(() => { this.feedbackSessions?.delete(jid); }, 5 * 60_000);
+          // BLOK A3: store feedback session for attribution (only for real AI replies)
+          if (modelInfo !== "fallback/unavailable") {
+            if (!this.feedbackSessions) this.feedbackSessions = new Map();
+            this.feedbackSessions.set(jid, {
+              aiReplyText: reply.trim().slice(0, 500),
+              model: modelInfo,
+              ts: Date.now(),
+            });
+            setTimeout(() => { this.feedbackSessions?.delete(jid); }, 5 * 60_000);
+          }
 
           this.status.messageCount = (this.status.messageCount || 0) + 1;
           const logEntry: WaBotLog = {
             ts: Date.now(), from: jid, name: senderName, isGroup,
             message: text, reply: finalReply,
-            model: `${provider}/${modelUsed}`,
+            model: modelInfo,
           };
           this.logs.push(logEntry);
           if (this.logs.length > 500) this.logs = this.logs.slice(-500);

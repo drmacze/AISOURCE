@@ -398,9 +398,22 @@ class TgBotManager {
 
     if (!this.config.autoReply) return;
 
-    const { text: aiReply, provider, modelUsed } = await generateWithFallback(
-      text, undefined, buildSystemPrompt(this.config)
-    );
+    let aiReply = "";
+    let modelInfo = "unknown/unknown";
+
+    try {
+      const result = await generateWithFallback(
+        text, undefined, buildSystemPrompt(this.config)
+      );
+      aiReply    = result.text;
+      modelInfo  = `${result.provider}/${result.model}`;
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      console.error(`[TgBot] AI generation failed for chat ${chatId}: ${errMsg.slice(0, 200)}`);
+      // Send a friendly fallback so the user knows the bot received their message
+      aiReply   = "⚠️ Maaf, semua layanan AI sedang tidak tersedia saat ini. Silakan coba beberapa saat lagi.";
+      modelInfo = "fallback/unavailable";
+    }
 
     // Plain text footer (no Markdown) because AI output may contain special chars
     // that break Telegram's legacy Markdown parser
@@ -408,19 +421,21 @@ class TgBotManager {
     const finalReply = aiReply.trim() + footer;
     await sendAIReply(this.config.token, chatId, finalReply, msg.message_id);
 
-    // BLOK A2: Store feedback session for attribution
-    this.feedbackSessions.set(chatId, {
-      aiReplyText: aiReply.trim().slice(0, 500),
-      model: `${provider}/${modelUsed}`,
-      ts: Date.now(),
-    });
-    // Auto-expire feedback sessions after 5 minutes
-    setTimeout(() => { this.feedbackSessions.delete(chatId); }, 5 * 60_000);
+    // BLOK A2: Store feedback session for attribution (only for real AI replies)
+    if (modelInfo !== "fallback/unavailable") {
+      this.feedbackSessions.set(chatId, {
+        aiReplyText: aiReply.trim().slice(0, 500),
+        model: modelInfo,
+        ts: Date.now(),
+      });
+      // Auto-expire feedback sessions after 5 minutes
+      setTimeout(() => { this.feedbackSessions.delete(chatId); }, 5 * 60_000);
+    }
 
     this.status.messageCount = (this.status.messageCount || 0) + 1;
     const logEntry: TgBotLog = {
       ts: Date.now(), from: String(chatId), name, isGroup,
-      message: text, reply: finalReply, model: `${provider}/${modelUsed}`,
+      message: text, reply: finalReply, model: modelInfo,
     };
     this.logs.push(logEntry);
     if (this.logs.length > 500) this.logs = this.logs.slice(-500);

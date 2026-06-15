@@ -70,9 +70,9 @@ function buildChain(): ProviderSlot[] {
     {
       name: "ollama",
       model: process.env.OLLAMA_DEFAULT_MODEL || OLLAMA_DEFAULT_MODEL,
-      isAvailable: async () => {
-        try { return await isOllamaOnline(); } catch { return false; }
-      },
+      // Ollama is always tried as last resort — let the actual generation fail if it's truly down.
+      // Skipping it here means the bot goes completely silent when cloud providers have no API keys.
+      isAvailable: () => true,
     },
   ];
 }
