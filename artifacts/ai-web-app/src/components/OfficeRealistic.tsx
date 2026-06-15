@@ -1345,6 +1345,12 @@ export function OfficeRealistic({
   propsRef.current = { activeThreads, agentEmotions, agentStatuses, selectedAgent, onSelectAgent };
   const cam = useRef({ zoom:1.0, panX:0, panY:0, drag:false, lx:0, ly:0, pinchDist:0 });
   const mmBounds = useRef({ x:0, y:0, w:0, h:0, floorSplit:0, tileW:0, tileH:0 });
+  // Smooth camera follow state
+  const camAnim = useRef({
+    tx: 0, ty: 0, tz: 1.0, // target pan X/Y and zoom
+    followId: null as string|null, // agent being followed (continuous tracking)
+    panLatch: false, // true once initial pan-to-agent completes
+  });
 
   // Simulation tick
   useEffect(() => {
@@ -1370,6 +1376,32 @@ export function OfficeRealistic({
       const W=canvas!.width, H=canvas!.height;
       timeRef.current += 0.016;
       const time = timeRef.current;
+
+      // ── Smooth camera follow / pan animation ──────────────────────────────
+      const anim = camAnim.current;
+      if (anim.followId) {
+        const ag = agentsRef.current.get(anim.followId);
+        if (ag) {
+          const CX0f=W*0.5-TW2*2, CY0f=H*0.5-(36*TH2+1.6*TH2-FLOOR_H)*0.5;
+          // Match the same draw-floor logic as the render loop (elevator interpolation)
+          const drawFloor = (ag.macro==="in_elevator"||ag.macro==="in_elevator_return")
+            ? elvRef.current.carY : ag.floor;
+          const sp = iso(ag.x, ag.z, drawFloor, CX0f, CY0f);
+          anim.tx = W/2 - sp.x;
+          anim.ty = H/2 - sp.y;
+        }
+      }
+      // Lerp camera toward target (easing factor 0.09 ≈ ~0.5 s settle time)
+      if (anim.followId || (!anim.panLatch)) {
+        const ease = 0.09;
+        cam.current.panX += (anim.tx - cam.current.panX) * ease;
+        cam.current.panY += (anim.ty - cam.current.panY) * ease;
+        cam.current.zoom += (anim.tz - cam.current.zoom) * ease;
+        // Mark initial pan complete when we're close enough
+        if (!anim.panLatch && Math.hypot(anim.tx - cam.current.panX, anim.ty - cam.current.panY) < 1) {
+          anim.panLatch = true;
+        }
+      }
 
       // ── Background
       c.fillStyle = PAL.sky; c.fillRect(0,0,W,H);
@@ -1466,6 +1498,25 @@ export function OfficeRealistic({
       c.fillStyle="#4a6878"; c.font="7px 'Space Mono',monospace";
       c.fillText(`${elvRef.current.carY>0.5?"Floor 2":"Floor 1"} · ${elvRef.current.doorState}`, 22, 95);
 
+      // Follow-mode HUD badge
+      const followId = camAnim.current.followId;
+      if (followId) {
+        const followAg = agentsRef.current.get(followId);
+        const followName = followAg?.name ?? followId;
+        const followColor = followAg?.appear.shirt ?? "#50c8ff";
+        const badgeW = 180, badgeH = 24, badgeX = W/2 - badgeW/2, badgeY = 12;
+        c.fillStyle="rgba(8,10,24,0.90)";
+        c.strokeStyle=followColor+"cc"; c.lineWidth=1.2;
+        c.beginPath(); c.roundRect(badgeX, badgeY, badgeW, badgeH, 6); c.fill(); c.stroke();
+        c.fillStyle=followColor;
+        c.font="bold 8px 'Space Mono',monospace"; c.textAlign="center"; c.textBaseline="middle";
+        c.fillText(`📍 Following: ${followName}`, W/2, badgeY + badgeH/2);
+        // Drag-to-stop hint (smaller text below badge)
+        c.fillStyle="rgba(140,160,180,0.7)";
+        c.font="6.5px 'Space Mono',monospace";
+        c.fillText("drag to release", W/2, badgeY + badgeH + 7);
+      }
+
       // Active meeting topic
       const topic=propsRef.current.activeThreads.find(t=>t.active)?.topic;
       if (topic) {
@@ -1479,8 +1530,8 @@ export function OfficeRealistic({
       c.fillStyle="rgba(8,10,20,0.75)"; c.strokeStyle="rgba(40,60,100,0.6)"; c.lineWidth=1;
       c.beginPath(); c.roundRect(12, H-48, 198, 36, 6); c.fill(); c.stroke();
       c.fillStyle="#3a5068"; c.font="7px 'Space Mono',monospace"; c.textAlign="left"; c.textBaseline="middle";
-      c.fillText("✋ Drag to pan  ·  🤏 Pinch to zoom", 20, H-36);
-      c.fillText("🖱 Drag to pan  ·  Scroll to zoom  ·  Click agent", 20, H-24);
+      c.fillText("✋ Drag to pan  ·  🤏 Pinch to zoom  ·  Tap agent to follow", 20, H-36);
+      c.fillText("🖱 Drag to pan  ·  Scroll to zoom  ·  Click agent to follow", 20, H-24);
 
       // ── MINIMAP ─────────────────────────────────────────────────────
       const MM_W=160, MM_H=120;
@@ -1557,6 +1608,32 @@ export function OfficeRealistic({
     return () => { running=false; };
   }, []);
 
+  // When selectedAgent changes from outside (e.g. agent list panel), pan-and-follow
+  useEffect(() => {
+    if (!selectedAgent) {
+      camAnim.current.followId = null;
+      camAnim.current.panLatch = true;
+      return;
+    }
+    // Don't restart if already following this same agent
+    if (camAnim.current.followId === selectedAgent) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const W2=canvas.width, H2=canvas.height;
+    const CX0=W2*0.5-TW2*2, CY0=H2*0.5-(36*TH2+1.6*TH2-FLOOR_H)*0.5;
+    const ag = agentsRef.current.get(selectedAgent);
+    if (ag) {
+      const drawFloor = (ag.macro==="in_elevator"||ag.macro==="in_elevator_return")
+        ? elvRef.current.carY : ag.floor;
+      const sp = iso(ag.x, ag.z, drawFloor, CX0, CY0);
+      camAnim.current.tx = W2/2 - sp.x;
+      camAnim.current.ty = H2/2 - sp.y;
+      camAnim.current.tz = Math.max(1.6, cam.current.zoom);
+      camAnim.current.panLatch = false;
+      camAnim.current.followId = selectedAgent;
+    }
+  }, [selectedAgent]);
+
   // Canvas resize
   useEffect(() => {
     const canvas=canvasRef.current; if(!canvas) return;
@@ -1589,7 +1666,11 @@ export function OfficeRealistic({
   },[navigateTo]);
 
   // Mouse events
-  const handleMouseDown=useCallback((e:React.MouseEvent)=>{ cam.current.drag=true; cam.current.lx=e.clientX; cam.current.ly=e.clientY; },[]);
+  const handleMouseDown=useCallback((e:React.MouseEvent)=>{
+    cam.current.drag=true; cam.current.lx=e.clientX; cam.current.ly=e.clientY;
+    // Stop following when user manually pans
+    camAnim.current.followId=null; camAnim.current.panLatch=true;
+  },[]);
   const handleMouseMove=useCallback((e:React.MouseEvent)=>{ if(!cam.current.drag) return; cam.current.panX+=e.clientX-cam.current.lx; cam.current.lx=e.clientX; cam.current.panY+=e.clientY-cam.current.ly; cam.current.ly=e.clientY; },[]);
   const handleMouseUp=useCallback(()=>{ cam.current.drag=false; },[]);
   const handleWheel=useCallback((e:React.WheelEvent)=>{ e.preventDefault(); cam.current.zoom=Math.max(0.35,Math.min(4.5,cam.current.zoom*(1-e.deltaY*0.0012))); },[]);
@@ -1603,8 +1684,11 @@ export function OfficeRealistic({
       const px=e.touches[0]!.clientX-rect.left, py=e.touches[0]!.clientY-rect.top;
       if(tryMinimapNav(px,py)) return;
       cam.current.drag=true; cam.current.lx=e.touches[0]!.clientX; cam.current.ly=e.touches[0]!.clientY;
+      // Stop following on manual touch pan
+      camAnim.current.followId=null; camAnim.current.panLatch=true;
     } else if(e.touches.length===2){
       cam.current.drag=false;
+      camAnim.current.followId=null; camAnim.current.panLatch=true;
       cam.current.pinchDist=Math.hypot(e.touches[0]!.clientX-e.touches[1]!.clientX,e.touches[0]!.clientY-e.touches[1]!.clientY);
     }
   },[tryMinimapNav]);
@@ -1639,7 +1723,30 @@ export function OfficeRealistic({
       const d=Math.hypot(sp.x-mx,sp.y-my+40);
       if(d<bestD){ bestD=d; best=ag.id; }
     }
-    if(best) propsRef.current.onSelectAgent(best);
+    if (best) {
+      propsRef.current.onSelectAgent(best);
+      // Start smooth follow for the clicked agent
+      const canvas2 = canvasRef.current;
+      if (canvas2) {
+        const W2=canvas2.width, H2=canvas2.height;
+        const CX0=W2*0.5-TW2*2, CY0=H2*0.5-(36*TH2+1.6*TH2-FLOOR_H)*0.5;
+        const ag = agentsRef.current.get(best);
+        if (ag) {
+          const drawFloor = (ag.macro==="in_elevator"||ag.macro==="in_elevator_return")
+            ? elvRef.current.carY : ag.floor;
+          const sp = iso(ag.x, ag.z, drawFloor, CX0, CY0);
+          camAnim.current.tx = W2/2 - sp.x;
+          camAnim.current.ty = H2/2 - sp.y;
+          camAnim.current.tz = Math.max(1.6, cam.current.zoom); // zoom in at least 1.6×
+          camAnim.current.panLatch = false; // trigger lerp until settled
+          camAnim.current.followId = best;  // then track continuously
+        }
+      }
+    } else {
+      // Click empty space — deselect and stop following
+      camAnim.current.followId = null;
+      camAnim.current.panLatch = true;
+    }
   },[tryMinimapNav]);
 
   return (
