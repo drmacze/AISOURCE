@@ -81,6 +81,32 @@ function useOllamaModels() {
   });
 }
 
+interface CustomAiModel {
+  id: number;
+  name: string;
+  type: string;
+  status: string;
+  version: string;
+  ollamaName: string | null;
+  baseOllamaModel: string | null;
+  architecture: string | null;
+  description: string | null;
+  parameterCount: string | null;
+  quantization: string | null;
+}
+
+function useCustomModels() {
+  return useQuery<CustomAiModel[]>({
+    queryKey: ["custom-ai-models"],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/api/ai-models`);
+      if (!res.ok) return [];
+      return res.json() as Promise<CustomAiModel[]>;
+    },
+    refetchInterval: 10000,
+  });
+}
+
 function useSystemMemory() {
   return useQuery<{ freeGB: number; totalGB: number }>({
     queryKey: ["system-memory"],
@@ -182,6 +208,7 @@ export default function Chat() {
     { query: { enabled: !!activeId, queryKey: getGetConversationQueryKey(activeId || 0) } }
   );
   const { data: ollamaModels, isLoading: loadingModels } = useOllamaModels();
+  const { data: customModels } = useCustomModels();
   const { data: systemMemory } = useSystemMemory();
 
   const allModels = React.useMemo(() => {
@@ -190,8 +217,20 @@ export default function Chat() {
     const kimi  = KIMI_MODELS.map((m) => ({ ...m, size: 0, parameterSize: "1T", modified: "" }));
     const groq  = GROQ_MODELS.map((m) => ({ ...m, size: 0, parameterSize: "", modified: "", quantization: "", family: "" }));
     const or    = OPENROUTER_MODELS.map((m) => ({ ...m, size: 0, parameterSize: "", modified: "", quantization: "", family: "" }));
-    return [...local, ...groq, ...or, ...kimi, ...cloud];
-  }, [ollamaModels]);
+    // Custom models from Training Hub — route through Ollama using ollamaName
+    const custom = (customModels || [])
+      .filter((m) => m.status === "active" && m.ollamaName)
+      .map((m) => ({
+        name: `custom:${m.id}:${m.ollamaName}`,
+        provider: "custom" as const,
+        size: 0,
+        parameterSize: m.parameterCount || "custom",
+        quantization: m.quantization || "",
+        family: m.architecture || "custom",
+        modified: "",
+      }));
+    return [...local, ...custom, ...groq, ...or, ...kimi, ...cloud];
+  }, [ollamaModels, customModels]);
 
   // Sync model state when conversation loads or model list changes
   React.useEffect(() => {
@@ -273,17 +312,28 @@ export default function Chat() {
     createMutation.mutate({ data: { title: "New Conversation", model } });
   };
 
+  // For custom models (format "custom:id:ollamaName"), extract the actual Ollama model name
+  const resolveOllamaName = (modelName: string): string => {
+    if (modelName.startsWith("custom:")) {
+      const parts = modelName.split(":");
+      return parts.slice(2).join(":"); // ollamaName may itself contain colons
+    }
+    return modelName;
+  };
+
   const handleSwitchModel = async (model: string) => {
     if (!activeId || switchingModel) return;
     setSwitchingModel(true);
     setModelDropdownOpen(false);
     setPuterError(null);
     const entry = allModels.find((m) => m.name === model);
+    // For custom models, persist the ollamaName so the backend can invoke it via Ollama
+    const persistedModel = resolveOllamaName(model);
     try {
       const res = await fetch(`${BASE}/api/conversations/${activeId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model }),
+        body: JSON.stringify({ model: persistedModel }),
       });
       if (res.ok) {
         setSelectedModel(model);
@@ -652,7 +702,7 @@ export default function Chat() {
           </p>
           {loadingModels ? (
             <div className="text-xs text-muted-foreground animate-pulse">Loading…</div>
-          ) : (ollamaModels || []).length === 0 ? (
+          ) : (ollamaModels || []).length === 0 && (customModels || []).length === 0 ? (
             <div className="text-xs text-muted-foreground">No models installed</div>
           ) : (
             <div className="space-y-1">
@@ -668,6 +718,32 @@ export default function Chat() {
                   <span className="text-muted-foreground ml-2 shrink-0">{m.parameterSize}</span>
                 </div>
               ))}
+              {(customModels || []).map((m) => {
+                const modelKey = m.status === "active" && m.ollamaName
+                  ? `custom:${m.id}:${m.ollamaName}`
+                  : null;
+                const isActive = modelKey ? modelKey === activeModel : false;
+                return (
+                  <div
+                    key={`custom-${m.id}`}
+                    onClick={() => modelKey && activeId && handleSwitchModel(modelKey)}
+                    className={`flex items-center justify-between px-2 py-1.5 rounded text-xs transition-colors ${
+                      modelKey ? "cursor-pointer hover:bg-accent/50" : "cursor-not-allowed opacity-50"
+                    } ${isActive ? "bg-primary/10 text-primary" : ""}`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-violet-400"></span>
+                      <span className="text-foreground/80 truncate">{m.name}</span>
+                    </div>
+                    <span className={`ml-2 shrink-0 text-[10px] ${
+                      m.status === "active" ? "text-green-400" :
+                      m.status === "training" ? "text-yellow-400" : "text-muted-foreground"
+                    }`}>
+                      {m.status === "active" ? "ready" : m.status === "training" ? "…" : "idle"}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -820,6 +896,51 @@ export default function Chat() {
                               })}
                             </div>
                           )}
+                          {/* Custom Training Hub Models */}
+                          {(customModels || []).length > 0 && (
+                            <div>
+                              <div className="px-3 py-1 text-[10px] text-muted-foreground/50 uppercase tracking-widest font-semibold border-t border-border mt-1 pt-2">
+                                Training Hub · Custom
+                              </div>
+                              {(customModels || []).map((m) => {
+                                const modelKey = m.status === "active" && m.ollamaName
+                                  ? `custom:${m.id}:${m.ollamaName}`
+                                  : null;
+                                const isActive = modelKey ? modelKey === activeModel : false;
+                                const isReady = m.status === "active" && !!m.ollamaName;
+                                return (
+                                  <button
+                                    key={m.id}
+                                    onClick={() => modelKey && handleSwitchModel(modelKey)}
+                                    disabled={!isReady}
+                                    className={`w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors ${
+                                      !isReady ? "opacity-50 cursor-not-allowed" :
+                                      isActive ? "bg-accent text-primary hover:bg-accent/80" :
+                                      "hover:bg-accent/50 text-foreground"
+                                    }`}
+                                  >
+                                    <div className="flex flex-col">
+                                      <span className="text-sm font-medium">{m.name}</span>
+                                      <span className="text-xs text-muted-foreground mt-0.5">
+                                        {m.description || m.type}
+                                        {m.ollamaName ? ` · ${m.ollamaName}` : ""}
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-col items-end ml-2 shrink-0">
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                                        m.status === "active" ? "border-green-500/40 bg-green-500/10 text-green-400" :
+                                        m.status === "training" ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-400" :
+                                        "border-border bg-muted text-muted-foreground"
+                                      }`}>
+                                        {m.status === "active" ? "ready" : m.status === "training" ? "training…" : "inactive"}
+                                      </span>
+                                      {isActive && <span className="text-[10px] text-primary mt-0.5 font-medium">Active</span>}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                           {/* Groq Models */}
                           <div>
                             <div className="px-3 py-1 text-[10px] text-muted-foreground/50 uppercase tracking-widest font-semibold border-t border-border mt-1 pt-2">
@@ -941,7 +1062,7 @@ export default function Chat() {
                       )}
                       <div className="px-3 py-2 border-t border-border">
                         <p className="text-[10px] text-muted-foreground/50">
-                          Groq · OpenRouter · Kimi K2 · Puter · Ollama Local
+                          Groq · OpenRouter · Kimi K2 · Puter · Ollama Local · Training Hub
                         </p>
                       </div>
                     </motion.div>

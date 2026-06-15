@@ -1727,6 +1727,40 @@ export default function Training() {
   const [cliOpen, setCliOpen] = useState(true);
   const [mainTab, setMainTab] = useState<"quick" | "advanced">("quick");
 
+  // Activate model for chat
+  const [activateModelId, setActivateModelId] = useState<number | null>(null);
+  const [activateOllamaName, setActivateOllamaName] = useState("");
+  const [activatingModel, setActivatingModel] = useState(false);
+
+  const handleActivateModel = async () => {
+    if (!activateModelId) return;
+    setActivatingModel(true);
+    try {
+      await fetch(`${BASE}/api/ai-models/${activateModelId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "active",
+          ollamaName: activateOllamaName.trim() || undefined,
+        }),
+      });
+      queryClient.invalidateQueries({ queryKey: getListModelsQueryKey() });
+      setActivateModelId(null);
+      setActivateOllamaName("");
+    } finally {
+      setActivatingModel(false);
+    }
+  };
+
+  const handleDeactivateModel = async (id: number) => {
+    await fetch(`${BASE}/api/ai-models/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "inactive" }),
+    });
+    queryClient.invalidateQueries({ queryKey: getListModelsQueryKey() });
+  };
+
   // New feature state
   const [qualityReport, setQualityReport] = useState<{ datasetId: number; datasetName: string; report: QualityReport } | null>(null);
   const [importUrlDialogDatasetId, setImportUrlDialogDatasetId] = useState<number | null>(null);
@@ -2479,7 +2513,7 @@ export default function Training() {
               ) : (
                 <div className="space-y-2">
                   {models.map((m) => (
-                    <div key={m.id} className="p-2.5 rounded border border-border bg-background">
+                    <div key={m.id} className="p-2.5 rounded border border-border bg-background space-y-1.5">
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-mono font-medium">{m.name}</p>
                         <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
@@ -2488,13 +2522,83 @@ export default function Training() {
                           : "bg-muted text-muted-foreground"
                         }`}>{m.status}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground font-mono mt-0.5">{m.type} · {m.version}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{m.type} · {m.version}</p>
+                      {m.ollamaName && (
+                        <p className="text-[10px] text-primary/70 font-mono">ollama: {m.ollamaName}</p>
+                      )}
+                      <div className="flex gap-1.5 pt-0.5">
+                        {m.status !== "active" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2 text-[10px] font-mono gap-1 text-green-400 border-green-500/30 hover:bg-green-500/10"
+                            onClick={() => { setActivateModelId(m.id); setActivateOllamaName(m.ollamaName ?? ""); }}
+                          >
+                            <Zap className="w-2.5 h-2.5" /> Activate for Chat
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 px-2 text-[10px] font-mono gap-1 text-muted-foreground"
+                            onClick={() => handleDeactivateModel(m.id)}
+                          >
+                            Deactivate
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </CardContent>
           </Card>
+
+          {/* Activate Model Dialog */}
+          <Dialog open={activateModelId !== null} onOpenChange={(open) => { if (!open) setActivateModelId(null); }}>
+            <DialogContent className="border-border bg-card max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-green-400" />
+                  Activate Model for Chat
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                <p className="text-sm text-muted-foreground">
+                  Link this model to an installed Ollama model so it appears in the Chat model selector.
+                </p>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-mono text-muted-foreground">OLLAMA_MODEL_NAME</label>
+                  <Input
+                    value={activateOllamaName}
+                    onChange={(e) => setActivateOllamaName(e.target.value)}
+                    placeholder="e.g. tinyllama:latest or custom-model"
+                    className="font-mono text-sm bg-background"
+                    list="ollama-models-list"
+                  />
+                  <datalist id="ollama-models-list">
+                    {(ollamaModels || []).map((m) => (
+                      <option key={m.name} value={m.name} />
+                    ))}
+                  </datalist>
+                  <p className="text-[10px] text-muted-foreground">
+                    Leave empty to use the base model. Must match an installed Ollama model name.
+                  </p>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    onClick={handleActivateModel}
+                    disabled={activatingModel}
+                    className="flex-1 gap-1.5 bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {activatingModel ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                    Activate
+                  </Button>
+                  <Button variant="outline" onClick={() => setActivateModelId(null)}>Cancel</Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 

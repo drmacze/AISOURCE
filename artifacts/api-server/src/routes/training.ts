@@ -382,6 +382,37 @@ router.post("/ai-models", async (req, res) => {
   res.status(201).json(row);
 });
 
+router.patch("/ai-models/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const body = req.body as {
+    status?: "active" | "inactive" | "training";
+    ollamaName?: string;
+    description?: string;
+    version?: string;
+    architecture?: string;
+    parameterCount?: string;
+    quantization?: string;
+  };
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  if (body.status !== undefined) updates.status = body.status;
+  if (body.ollamaName !== undefined) updates.ollamaName = body.ollamaName;
+  if (body.description !== undefined) updates.description = body.description;
+  if (body.version !== undefined) updates.version = body.version;
+  if (body.architecture !== undefined) updates.architecture = body.architecture;
+  if (body.parameterCount !== undefined) updates.parameterCount = body.parameterCount;
+  if (body.quantization !== undefined) updates.quantization = body.quantization;
+  const [row] = await db
+    .update(aiModelsTable)
+    .set(updates)
+    .where(eq(aiModelsTable.id, id))
+    .returning();
+  if (!row) {
+    res.status(404).json({ error: "Model not found" });
+    return;
+  }
+  res.json(row);
+});
+
 router.delete("/ai-models/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const [row] = await db
