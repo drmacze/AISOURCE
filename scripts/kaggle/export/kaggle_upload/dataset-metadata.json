@@ -1,0 +1,9 @@
+{
+  "title": "DLavie OS Training Dataset",
+  "id": "dlavie/dlavie-training-dataset",
+  "licenses": [
+    {
+      "name": "CC0-1.0"
+    }
+  ]
+}
