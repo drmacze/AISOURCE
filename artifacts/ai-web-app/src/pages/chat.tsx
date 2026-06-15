@@ -186,6 +186,9 @@ export default function Chat() {
   const [streamingText, setStreamingText] = React.useState("");
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [streamPhase, setStreamPhase] = React.useState<"init" | "tokens">("init");
+  const streamStartRef = React.useRef<number | null>(null);
+  const streamTokenCountRef = React.useRef(0);
+  const [streamTokPerSec, setStreamTokPerSec] = React.useState<number | null>(null);
   const [selectedModel, setSelectedModel] = React.useState<string>("");
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false);
   const [switchingModel, setSwitchingModel] = React.useState(false);
@@ -358,6 +361,9 @@ export default function Chat() {
     setStreamPhase("init");
     setRagIndicator(false);
     setPuterError(null);
+    streamStartRef.current = null;
+    streamTokenCountRef.current = 0;
+    setStreamTokPerSec(null);
 
     queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(activeId) });
 
@@ -495,6 +501,11 @@ export default function Chat() {
               setStreamingText(accumulated);
               setStreamPhase("tokens");
               if (!ragIndicator && accumulated.length > 30) setRagIndicator(true);
+              // Track tokens/second
+              if (streamStartRef.current === null) streamStartRef.current = Date.now();
+              streamTokenCountRef.current += 1;
+              const elapsed = (Date.now() - streamStartRef.current) / 1000;
+              if (elapsed > 0.5) setStreamTokPerSec(Math.round(streamTokenCountRef.current / elapsed));
             }
 
             if (data.done) break;
@@ -1199,7 +1210,19 @@ export default function Chat() {
                             <animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite" />
                           </circle>
                         </svg>
-                        {streamPhase === "init" ? "Initializing…" : activeModel.split(":").pop()?.split("/").pop()}
+                        {streamPhase === "init" ? "Initializing…" : (
+                          <span className="flex items-center gap-2">
+                            <span>{activeModel.split(":").pop()?.split("/").pop()}</span>
+                            {streamTokPerSec !== null && (
+                              <span className="flex items-center gap-1 font-mono text-primary/80">
+                                <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                                  <path d="M1 7 L3 1 L5 5 L7 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                                {streamTokPerSec} tok/s
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </span>
                     </div>
                   </motion.div>
