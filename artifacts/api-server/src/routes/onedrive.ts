@@ -296,6 +296,54 @@ router.post("/onedrive/sync-to-rag", async (req: Request, res: Response) => {
   }
 });
 
+// ─── Re-embed: fix old random embeddings for OneDrive documents ──────────────
+
+router.post("/onedrive/re-embed", async (_req: Request, res: Response) => {
+  try {
+    const rows = await db.execute(sql`
+      SELECT id, content FROM documents
+      WHERE source LIKE 'onedrive:%'
+      AND (embedding IS NULL OR embedding_model IS NULL OR embedding_model != 'sentence-transformers/all-MiniLM-L6-v2')
+      ORDER BY id ASC
+      LIMIT 200
+    `);
+
+    const docs = rows.rows as Array<{ id: number; content: string }>;
+    if (docs.length === 0) {
+      res.json({ message: "All OneDrive documents already have real embeddings", updated: 0 });
+      return;
+    }
+
+    let updated = 0;
+    let failed = 0;
+
+    for (const doc of docs) {
+      const vec = await generateEmbedding((doc.content as string).slice(0, 512));
+      if (vec) {
+        await db.execute(sql`
+          UPDATE documents
+          SET embedding = ${pgVector(vec)}::vector,
+              embedding_model = 'sentence-transformers/all-MiniLM-L6-v2'
+          WHERE id = ${doc.id}
+        `);
+        updated++;
+      } else {
+        failed++;
+      }
+    }
+
+    res.json({
+      message: `Re-embedding complete`,
+      updated,
+      failed,
+      total: docs.length,
+      note: failed > 0 ? "Some failed — ensure HF_TOKEN is set in Settings" : "All done ✅",
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 // ─── Download proxy ───────────────────────────────────────────────────────────
 
 router.get("/onedrive/download/:id", async (req: Request, res: Response) => {

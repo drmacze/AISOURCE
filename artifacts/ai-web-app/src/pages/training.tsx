@@ -1127,6 +1127,561 @@ function HFAutoTrainPanel({ datasets }: { datasets?: Array<{ id: number; name: s
   );
 }
 
+// ── Quick Create Wizard ───────────────────────────────────────────────────────
+type QCStep = 1 | 2 | 3 | 4;
+
+interface QCSample { input: string; output: string }
+
+function QuickCreateWizard() {
+  const queryClient = useQueryClient();
+  const BASE = (window as Window & { _apiBase?: string })._apiBase || getApiBase();
+
+  const { data: ollamaModels } = useOllamaModels();
+
+  const createDataset = useCreateTrainingDataset();
+  const registerModel = useRegisterModel();
+  const addSample = useAddTrainingSample();
+  const startJob = useStartTrainingJob();
+
+  // Wizard step state
+  const [step, setStep] = useState<QCStep>(1);
+
+  // Step 1
+  const [modelName, setModelName] = useState("");
+  const [baseModel, setBaseModel] = useState("");
+  const [taskType, setTaskType] = useState("instruction_following");
+
+  // Step 2
+  const [addMode, setAddMode] = useState<"manual" | "bulk">("manual");
+  const [manualInput, setManualInput] = useState("");
+  const [manualOutput, setManualOutput] = useState("");
+  const [samples, setSamples] = useState<QCSample[]>([]);
+  const [bulkText, setBulkText] = useState("");
+
+  // Step 3
+  const [backend, setBackend] = useState<"local_cpu" | "hf_api">("local_cpu");
+  const [epochs, setEpochs] = useState(3);
+  const [loraRank, setLoraRank] = useState(16);
+
+  // Step 4 launch
+  const [launching, setLaunching] = useState(false);
+  const [launchLog, setLaunchLog] = useState<string[]>([]);
+  const [launchDone, setLaunchDone] = useState(false);
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [jobProgress, setJobProgress] = useState(0);
+  const [jobStatus, setJobStatus] = useState<string>("");
+  const [launchError, setLaunchError] = useState("");
+
+  // Parsed bulk samples
+  const parsedBulk: QCSample[] = bulkText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.includes("|||"))
+    .map((line) => {
+      const idx = line.indexOf("|||");
+      return { input: line.slice(0, idx).trim(), output: line.slice(idx + 3).trim() };
+    })
+    .filter((s) => s.input && s.output);
+
+  const allSamples = addMode === "manual" ? samples : parsedBulk;
+
+  const addManualSample = () => {
+    if (!manualInput.trim() || !manualOutput.trim()) return;
+    setSamples((prev) => [...prev, { input: manualInput.trim(), output: manualOutput.trim() }]);
+    setManualInput("");
+    setManualOutput("");
+  };
+
+  const removeSample = (i: number) => setSamples((prev) => prev.filter((_, idx) => idx !== i));
+
+  const log = (msg: string) => setLaunchLog((prev) => [...prev, msg]);
+
+  const handleLaunch = async () => {
+    if (allSamples.length === 0) return;
+    setLaunching(true);
+    setLaunchError("");
+    setLaunchLog([]);
+    try {
+      log("📁 Membuat dataset training...");
+      const dsResult = await createDataset.mutateAsync({
+        data: { name: `${modelName.trim()}_data`, description: `Dataset untuk ${modelName}`, taskType },
+      });
+      const dsId = (dsResult as { id: number }).id;
+      log(`✅ Dataset dibuat (ID: ${dsId})`);
+
+      log("🤖 Mendaftarkan model...");
+      const mdResult = await registerModel.mutateAsync({
+        data: {
+          name: modelName.trim(),
+          type: "llm",
+          version: "v1.0",
+          architecture: baseModel || "tinyllama",
+          ollamaName: baseModel || "tinyllama",
+          baseOllamaModel: baseModel || "tinyllama",
+          description: `Model ${taskType} — dibuat via Quick Create`,
+        },
+      });
+      const mdId = (mdResult as { id: number }).id;
+      log(`✅ Model didaftarkan (ID: ${mdId})`);
+
+      log(`📝 Menambahkan ${allSamples.length} sampel data...`);
+      for (let i = 0; i < allSamples.length; i++) {
+        const s = allSamples[i];
+        await addSample.mutateAsync({ id: dsId, data: { input: s.input, output: s.output } });
+        if ((i + 1) % 5 === 0 || i === allSamples.length - 1) {
+          log(`  → ${i + 1}/${allSamples.length} sampel ditambahkan`);
+        }
+      }
+
+      log("🚀 Memulai proses fine-tuning LoRA...");
+      const jobResult = await startJob.mutateAsync({
+        data: {
+          modelId: mdId,
+          datasetId: dsId,
+          epochs,
+          trainingBackend: backend,
+          loraRank,
+          learningRate: 0.0002,
+          batchSize: 2,
+          maxSeqLength: 512,
+        },
+      });
+      const jId = (jobResult as { id: number }).id;
+      setJobId(jId);
+      log(`✅ Training job dimulai (ID: ${jId})`);
+
+      queryClient.invalidateQueries({ queryKey: getListTrainingJobsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListTrainingDatasetsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getListModelsQueryKey() });
+
+      // Poll progress
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetch(`${BASE}/api/training-jobs/${jId}`);
+          const job = await r.json() as { status: string; progress: number };
+          setJobProgress(Math.round((job.progress ?? 0) * 100));
+          setJobStatus(job.status);
+          if (job.status === "completed" || job.status === "failed") {
+            clearInterval(poll);
+            setLaunchDone(true);
+            log(job.status === "completed" ? "🎉 Training selesai! Model siap digunakan." : `❌ Training gagal.`);
+          }
+        } catch { /* ignore poll errors */ }
+      }, 2500);
+    } catch (e) {
+      setLaunchError(String(e));
+      log(`❌ Error: ${String(e)}`);
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  const estimatedMinutes = Math.round(allSamples.length * epochs * 0.15);
+
+  const taskOptions = [
+    { value: "instruction_following", label: "Ikuti Instruksi" },
+    { value: "chat", label: "Percakapan / Chat" },
+    { value: "code_generation", label: "Generate Kode" },
+    { value: "qa", label: "Tanya Jawab (Q&A)" },
+    { value: "summarization", label: "Ringkasan Teks" },
+    { value: "reasoning", label: "Penalaran / Reasoning" },
+  ];
+
+  const step1Valid = modelName.trim().length >= 2 && (baseModel || true);
+  const step2Valid = allSamples.length >= 1;
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      {/* Step indicator */}
+      <div className="flex items-center gap-0 mb-8">
+        {([
+          { n: 1, label: "Model" },
+          { n: 2, label: "Data" },
+          { n: 3, label: "Konfigurasi" },
+          { n: 4, label: "Launch" },
+        ] as const).map((s, idx) => (
+          <React.Fragment key={s.n}>
+            <div className="flex flex-col items-center gap-1 flex-1">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
+                step === s.n ? "bg-primary text-primary-foreground ring-2 ring-primary/30"
+                : step > s.n ? "bg-primary/30 text-primary" : "bg-muted text-muted-foreground"
+              }`}>
+                {step > s.n ? <CheckCircle2 className="w-4 h-4" /> : s.n}
+              </div>
+              <span className={`text-[10px] font-mono ${step === s.n ? "text-primary" : "text-muted-foreground"}`}>{s.label}</span>
+            </div>
+            {idx < 3 && <div className={`h-0.5 flex-1 mb-5 transition-all ${step > s.n ? "bg-primary/50" : "bg-border"}`} />}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* ── STEP 1: Model Info ─────────────────────────────────────────── */}
+      {step === 1 && (
+        <Card className="glass-panel">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Brain className="w-4 h-4 text-primary" /> Nama & Base Model
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Beri nama modelmu dan pilih model dasar yang akan dilatih ulang.</p>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Nama Model AI</label>
+              <Input
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+                placeholder="Contoh: Asisten Toko Online, DLavie Chat Bot..."
+                className="bg-background"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Model Dasar</label>
+              <Select value={baseModel} onValueChange={setBaseModel}>
+                <SelectTrigger className="bg-background font-mono text-sm">
+                  <SelectValue placeholder="Pilih model yang sudah ter-install..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {ollamaModels && ollamaModels.length > 0 ? (
+                    ollamaModels.map((m) => (
+                      <SelectItem key={m.name} value={m.name}>{m.name}</SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="tinyllama">tinyllama (default — selalu tersedia)</SelectItem>
+                  )}
+                  <SelectItem value="tinyllama">tinyllama (1B, cepat)</SelectItem>
+                  <SelectItem value="qwen2.5:1.5b">qwen2.5:1.5b (1.5B, bagus)</SelectItem>
+                  <SelectItem value="qwen2.5:3b">qwen2.5:3b (3B, lebih pintar)</SelectItem>
+                  <SelectItem value="llama3.2:3b">llama3.2:3b (3B, Meta)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Tidak ada di daftar? Download dulu dari tab <b>Catalogue</b>, lalu kembali ke sini.</p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Tujuan / Task</label>
+              <div className="grid grid-cols-2 gap-2">
+                {taskOptions.map((t) => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => setTaskType(t.value)}
+                    className={`p-2.5 rounded-lg border text-left text-sm transition-all ${
+                      taskType === t.value
+                        ? "border-primary bg-primary/10 text-primary font-medium"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/40"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Button onClick={() => setStep(2)} disabled={!step1Valid} className="w-full gap-2">
+              Selanjutnya <ChevronRight className="w-4 h-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── STEP 2: Data Training ──────────────────────────────────────── */}
+      {step === 2 && (
+        <Card className="glass-panel">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Database className="w-4 h-4 text-primary" /> Data Training
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Masukkan contoh pertanyaan &amp; jawaban. Minimal 1 pasang, makin banyak makin pintar.</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Mode toggle */}
+            <div className="flex gap-1 p-1 rounded-lg bg-muted">
+              {(["manual", "bulk"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setAddMode(m)}
+                  className={`flex-1 py-1.5 rounded text-sm font-medium transition-all ${
+                    addMode === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}
+                >
+                  {m === "manual" ? "✍️ Manual" : "📋 Tempel Massal"}
+                </button>
+              ))}
+            </div>
+
+            {addMode === "manual" ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Pertanyaan / Input</label>
+                  <textarea
+                    value={manualInput}
+                    onChange={(e) => setManualInput(e.target.value)}
+                    rows={3}
+                    placeholder="Contoh: Apa itu machine learning?"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Jawaban / Output</label>
+                  <textarea
+                    value={manualOutput}
+                    onChange={(e) => setManualOutput(e.target.value)}
+                    rows={3}
+                    placeholder="Contoh: Machine learning adalah cabang AI yang membuat komputer belajar dari data tanpa diprogram secara eksplisit."
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={addManualSample}
+                  disabled={!manualInput.trim() || !manualOutput.trim()}
+                  className="w-full gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Tambah Pasangan Data
+                </Button>
+                {samples.length > 0 && (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    <p className="text-xs text-muted-foreground font-medium">{samples.length} pasang data ditambahkan:</p>
+                    {samples.map((s, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2.5 rounded border border-border bg-background/50 text-xs">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-muted-foreground truncate">Q: {s.input}</p>
+                          <p className="text-foreground truncate">A: {s.output}</p>
+                        </div>
+                        <button onClick={() => removeSample(i)} className="text-muted-foreground hover:text-destructive shrink-0">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Tempel data (format: input|||output per baris)</label>
+                  <textarea
+                    value={bulkText}
+                    onChange={(e) => setBulkText(e.target.value)}
+                    rows={10}
+                    placeholder={"Apa itu AI?|||AI adalah kecerdasan buatan yang dibuat oleh manusia.\nBagaimana cara kerja neural network?|||Neural network terdiri dari lapisan-lapisan neuron buatan yang saling terhubung..."}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                {parsedBulk.length > 0 && (
+                  <div className="flex items-center gap-2 p-2.5 rounded border border-primary/30 bg-primary/5 text-sm text-primary">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    {parsedBulk.length} pasang data berhasil dikenali
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <Button variant="outline" onClick={() => setStep(1)} className="gap-2">
+                <ChevronRight className="w-4 h-4 rotate-180" /> Kembali
+              </Button>
+              <Button onClick={() => setStep(3)} disabled={!step2Valid} className="flex-1 gap-2">
+                Selanjutnya ({allSamples.length} data) <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── STEP 3: Konfigurasi ────────────────────────────────────────── */}
+      {step === 3 && (
+        <Card className="glass-panel">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Settings className="w-4 h-4 text-primary" /> Konfigurasi Training
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Semua nilai sudah diset optimal. Ubah hanya jika perlu.</p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Backend */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Metode Training</label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { value: "local_cpu", icon: "🖥️", title: "Local CPU", desc: "Gratis, lebih lambat. Cocok untuk dataset kecil." },
+                  { value: "hf_api", icon: "🤗", title: "HuggingFace GPU", desc: "Butuh HF_TOKEN. Jauh lebih cepat." },
+                ] as const).map((b) => (
+                  <button
+                    key={b.value}
+                    type="button"
+                    onClick={() => setBackend(b.value)}
+                    className={`p-3 rounded-lg border text-left transition-all ${
+                      backend === b.value
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-background hover:border-primary/40"
+                    }`}
+                  >
+                    <div className="text-base mb-1">{b.icon} <span className="text-sm font-medium">{b.title}</span></div>
+                    <div className="text-[11px] text-muted-foreground leading-relaxed">{b.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Epochs */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Jumlah Epoch</label>
+                <span className="text-sm font-mono text-primary font-bold">{epochs}</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={epochs}
+                onChange={(e) => setEpochs(Number(e.target.value))}
+                className="w-full accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
+                <span>1 (cepat)</span>
+                <span>5 (seimbang)</span>
+                <span>10 (maksimal)</span>
+              </div>
+            </div>
+
+            {/* LoRA Rank */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">LoRA Rank</label>
+              <div className="grid grid-cols-4 gap-2">
+                {([4, 8, 16, 32] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setLoraRank(r)}
+                    className={`py-2 rounded border text-sm font-mono transition-all ${
+                      loraRank === r ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:border-primary/40"
+                    }`}
+                  >
+                    r={r}
+                    {r === 4 && <div className="text-[9px] opacity-60">cepat</div>}
+                    {r === 16 && <div className="text-[9px] opacity-60">default</div>}
+                    {r === 32 && <div className="text-[9px] opacity-60">detail</div>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Estimate */}
+            <div className="p-3 rounded border border-border bg-background/50 text-xs text-muted-foreground space-y-1">
+              <div className="flex justify-between"><span>Jumlah data</span><span className="text-foreground font-mono">{allSamples.length} pasang</span></div>
+              <div className="flex justify-between"><span>Epoch</span><span className="text-foreground font-mono">{epochs}×</span></div>
+              <div className="flex justify-between"><span>Estimasi waktu</span><span className="text-primary font-mono">~{estimatedMinutes < 1 ? "< 1" : estimatedMinutes} menit</span></div>
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setStep(2)} className="gap-2">
+                <ChevronRight className="w-4 h-4 rotate-180" /> Kembali
+              </Button>
+              <Button onClick={() => setStep(4)} className="flex-1 gap-2">
+                Lanjut ke Review <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── STEP 4: Launch ─────────────────────────────────────────────── */}
+      {step === 4 && (
+        <Card className="glass-panel">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Zap className="w-4 h-4 text-primary" /> Review & Launch
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {/* Summary */}
+            {!launching && !launchLog.length && (
+              <div className="space-y-2 p-4 rounded-lg border border-border bg-background/50">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Ringkasan</p>
+                {[
+                  { label: "Nama Model", value: modelName },
+                  { label: "Base Model", value: baseModel || "tinyllama" },
+                  { label: "Task", value: taskOptions.find((t) => t.value === taskType)?.label || taskType },
+                  { label: "Jumlah Data", value: `${allSamples.length} pasang` },
+                  { label: "Training", value: backend === "local_cpu" ? "Local CPU" : "HuggingFace GPU" },
+                  { label: "Epoch", value: `${epochs}× (LoRA r=${loraRank})` },
+                  { label: "Estimasi Waktu", value: `~${estimatedMinutes < 1 ? "< 1" : estimatedMinutes} menit` },
+                ].map((row) => (
+                  <div key={row.label} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{row.label}</span>
+                    <span className="font-medium text-foreground">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Launch log */}
+            {launchLog.length > 0 && (
+              <div className="space-y-1.5 p-3 rounded-lg border border-border bg-background/80 font-mono text-xs max-h-52 overflow-y-auto">
+                {launchLog.map((l, i) => (
+                  <div key={i} className={l.startsWith("❌") ? "text-destructive" : l.startsWith("🎉") ? "text-green-400" : "text-foreground"}>{l}</div>
+                ))}
+                {launching && <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin" /> Memproses...</div>}
+              </div>
+            )}
+
+            {/* Job progress bar */}
+            {jobId && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span className="font-mono">JOB_{String(jobId).padStart(4, "0")}</span>
+                  <span className={`capitalize font-mono ${jobStatus === "completed" ? "text-green-400" : jobStatus === "failed" ? "text-destructive" : "text-primary"}`}>{jobStatus}</span>
+                </div>
+                <Progress value={jobProgress} className="h-2" />
+                <p className="text-xs text-muted-foreground text-right">{jobProgress}%</p>
+              </div>
+            )}
+
+            {launchError && (
+              <div className="p-3 rounded border border-destructive/30 bg-destructive/5 text-destructive text-xs font-mono">{launchError}</div>
+            )}
+
+            {launchDone && jobStatus === "completed" && (
+              <div className="p-4 rounded-lg border border-green-500/30 bg-green-500/5 text-center space-y-2">
+                <CheckCircle2 className="w-8 h-8 text-green-400 mx-auto" />
+                <p className="text-green-400 font-medium">Model <b>{modelName}</b> berhasil dilatih!</p>
+                <p className="text-xs text-muted-foreground">Lihat di tab Advanced → Model Registry untuk menggunakannya.</p>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              {!launchLog.length && (
+                <Button variant="outline" onClick={() => setStep(3)} className="gap-2">
+                  <ChevronRight className="w-4 h-4 rotate-180" /> Kembali
+                </Button>
+              )}
+              {!launchDone && (
+                <Button
+                  onClick={handleLaunch}
+                  disabled={launching || launchLog.length > 0}
+                  className="flex-1 gap-2"
+                >
+                  {launching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                  {launchLog.length > 0 ? "Sedang Berjalan..." : "🚀 Mulai Training Sekarang"}
+                </Button>
+              )}
+              {launchDone && (
+                <Button variant="outline" onClick={() => {
+                  setStep(1); setModelName(""); setBaseModel(""); setSamples([]); setBulkText("");
+                  setLaunchLog([]); setLaunchDone(false); setJobId(null); setJobProgress(0); setJobStatus(""); setLaunchError("");
+                }} className="w-full gap-2">
+                  <Plus className="w-4 h-4" /> Buat Model Lagi
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ── Main Training Hub Page ───────────────────────────────────────────────────
 export default function Training() {
   const queryClient = useQueryClient();
@@ -1170,6 +1725,7 @@ export default function Training() {
   const [modelFilter, setModelFilter] = useState<string>("all");
   const [catalogueSearch, setCatalogueSearch] = useState("");
   const [cliOpen, setCliOpen] = useState(true);
+  const [mainTab, setMainTab] = useState<"quick" | "advanced">("quick");
 
   // New feature state
   const [qualityReport, setQualityReport] = useState<{ datasetId: number; datasetName: string; report: QualityReport } | null>(null);
@@ -1488,9 +2044,35 @@ export default function Training() {
         </div>
       </div>
 
-      {/* ── Live Auto-Training Engine ────────────────────────────────────── */}
-      <AutoTrainingPanel />
+      {/* ── Tab Navigation ───────────────────────────────────────────────── */}
+      <div className="flex gap-1 p-1 rounded-xl bg-muted/60 border border-border w-fit">
+        {([
+          { id: "quick", label: "⚡ Quick Create", desc: "Wizard 4 langkah" },
+          { id: "advanced", label: "🔬 Advanced", desc: "Semua fitur lengkap" },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setMainTab(t.id)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex flex-col items-start gap-0.5 ${
+              mainTab === t.id
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span>{t.label}</span>
+            <span className="text-[10px] font-mono opacity-60">{t.desc}</span>
+          </button>
+        ))}
+      </div>
 
+      {/* ── Quick Create Wizard ───────────────────────────────────────────── */}
+      {mainTab === "quick" && <QuickCreateWizard />}
+
+      {/* ── Advanced: Live Auto-Training Engine ──────────────────────────── */}
+      {mainTab === "advanced" && <AutoTrainingPanel />}
+
+      {/* ── Advanced: Main grid ──────────────────────────────────────────── */}
+      {mainTab === "advanced" && <div className="space-y-6">
       {/* ── Main grid ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
@@ -2253,6 +2835,9 @@ export default function Training() {
 
       {/* ── BLOK M: Knowledge Graph ──────────────────────────────────────── */}
       <KnowledgeGraphPanel BASE={BASE} />
+
+      </div>}
+      {/* end advanced tab wrapper */}
 
     </div>
   );
