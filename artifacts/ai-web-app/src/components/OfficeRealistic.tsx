@@ -10,7 +10,7 @@
  *  • Pan/zoom/touch/click · minimap navigation
  */
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 
 // ═══════════════════════════════════════════════════════════════════════
 //  TYPES
@@ -1352,6 +1352,24 @@ export function OfficeRealistic({
     panLatch: false, // true once initial pan-to-agent completes
   });
 
+  const [focusFloor, setFocusFloor] = useState<0|1>(1); // which floor the UI highlights
+
+  const navigateToFloor = useCallback((floor: 0|1) => {
+    setFocusFloor(floor);
+    camAnim.current.followId = null;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const W = canvas.width, H = canvas.height;
+    const CX0 = W*0.5-TW2*2, CY0 = H*0.5-(36*TH2+1.6*TH2-FLOOR_H)*0.5;
+    // Aim at center of each floor's main zone
+    const [wx, wz] = floor === 1 ? [9, 7] : [6, 6];
+    const sp = iso(wx, wz, floor, CX0, CY0);
+    camAnim.current.tx = W/2 - sp.x;
+    camAnim.current.ty = H/2 - sp.y;
+    camAnim.current.tz = 1.1;
+    camAnim.current.panLatch = false;
+  }, []);
+
   // Simulation tick
   useEffect(() => {
     const id = setInterval(() => {
@@ -1749,25 +1767,75 @@ export function OfficeRealistic({
     }
   },[tryMinimapNav]);
 
+  // Floor button shared style builder
+  const floorBtnStyle = (floor: 0|1): React.CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "7px 11px",
+    borderRadius: 8,
+    border: focusFloor === floor
+      ? "1.5px solid rgba(0,220,130,0.7)"
+      : "1.5px solid rgba(60,80,120,0.5)",
+    background: focusFloor === floor
+      ? "rgba(0,180,100,0.18)"
+      : "rgba(8,12,28,0.82)",
+    color: focusFloor === floor ? "#00e688" : "#6a8ab0",
+    fontFamily: "'Space Mono', monospace",
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    cursor: "pointer",
+    backdropFilter: "blur(6px)",
+    boxShadow: focusFloor === floor
+      ? "0 0 10px rgba(0,200,110,0.25)"
+      : "none",
+    transition: "all 0.18s ease",
+    whiteSpace: "nowrap",
+    userSelect: "none",
+  });
+
   return (
-    <canvas
-      ref={canvasRef}
-      onClick={handleClick}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onWheel={handleWheel}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      style={{
-        width:"100%", height:"100%", display:"block",
-        cursor: cam.current.drag ? "grabbing" : "grab",
-        touchAction:"none", userSelect:"none",
-        background: PAL.sky,
-      }}
-    />
+    <div style={{ position:"relative", width:"100%", height:"100%" }}>
+      <canvas
+        ref={canvasRef}
+        onClick={handleClick}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{
+          width:"100%", height:"100%", display:"block",
+          cursor: cam.current.drag ? "grabbing" : "grab",
+          touchAction:"none", userSelect:"none",
+          background: PAL.sky,
+        }}
+      />
+
+      {/* ── Floor Navigation Buttons ──────────────────────────────── */}
+      <div style={{
+        position:"absolute",
+        top: 12,
+        right: 14,
+        display:"flex",
+        flexDirection:"column",
+        gap: 6,
+        zIndex: 10,
+      }}>
+        <button style={floorBtnStyle(1)} onClick={() => navigateToFloor(1)}>
+          <span style={{ fontSize:14 }}>🏢</span>
+          <span>Floor 2 — Office</span>
+        </button>
+        <button style={floorBtnStyle(0)} onClick={() => navigateToFloor(0)}>
+          <span style={{ fontSize:14 }}>🏬</span>
+          <span>Floor 1 — Lobby</span>
+        </button>
+      </div>
+    </div>
   );
 }
 
