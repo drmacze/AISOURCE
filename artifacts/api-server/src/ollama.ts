@@ -158,7 +158,7 @@ export async function startOllamaServer(): Promise<void> {
       ...extraEnv,
       OLLAMA_ORIGINS: "*",
       OLLAMA_HOST: "127.0.0.1:11434",
-      OLLAMA_KEEP_ALIVE: "5m0s",
+      OLLAMA_KEEP_ALIVE: "30m",
       OLLAMA_MAX_LOADED_MODELS: "1",
       OLLAMA_NUM_PARALLEL: "1",
       OLLAMA_FLASH_ATTENTION: "1",
@@ -350,30 +350,8 @@ export async function streamOllamaResponse(
     ? `${sysPromptStream}\n\nRelevant knowledge base context:\n\n${ragContext}\n\n---\nUser: ${prompt}\nAssistant:`
     : `${sysPromptStream}\n\nUser: ${prompt}\nAssistant:`;
 
-  const ollamaOnline = await isOllamaOnline();
-  if (!ollamaOnline) {
-    try {
-      const { streamHFResponse, isHFConfigured } = await import("./huggingface");
-      if (isHFConfigured()) {
-        console.log("[DLavie OS] Ollama offline — streaming via HuggingFace");
-        let fullHFText = "";
-        for await (const token of streamHFResponse(fullPrompt, "mistralai/Mistral-7B-Instruct-v0.3", { maxTokens: 256 })) {
-          fullHFText += token;
-          safeWrite({ token, done: false, source: "huggingface" });
-        }
-        safeWrite({ token: "", done: true, fullText: fullHFText, source: "huggingface" });
-        if (!res.writableEnded) res.end();
-        return;
-      }
-    } catch (hfErr) {
-      console.warn("[DLavie OS] HF stream fallback failed:", hfErr);
-    }
-    const fallback = await generateFallbackResponse(prompt);
-    safeWrite({ token: fallback, done: true, fullText: fallback });
-    if (!res.writableEnded) res.end();
-    return;
-  }
-
+  // Go straight to generate — no pre-ping needed; errors are handled in the catch block below.
+  // Removing the isOllamaOnline() round-trip saves ~200–500ms before the first token.
   try {
     const response = await withRetry(() =>
       fetch(`${OLLAMA_HOST}/api/generate`, {
@@ -427,6 +405,32 @@ export async function streamOllamaResponse(
   } catch (error) {
     console.error("Streaming error:", error);
     const code = error instanceof OllamaError ? error.code : classifyFetchError(error);
+
+    // If Ollama is offline, try HuggingFace streaming fallback before giving up
+    if (code === "OFFLINE" || code === "TIMEOUT" || code === "UNKNOWN") {
+      try {
+        const { streamHFResponse, isHFConfigured } = await import("./huggingface");
+        if (isHFConfigured()) {
+          console.log("[DLavie OS] Ollama offline — streaming via HuggingFace fallback");
+          let fullHFText = "";
+          for await (const token of streamHFResponse(fullPrompt, "mistralai/Mistral-7B-Instruct-v0.3", { maxTokens: 256 })) {
+            fullHFText += token;
+            safeWrite({ token, done: false, source: "huggingface" });
+          }
+          safeWrite({ token: "", done: true, fullText: fullHFText, source: "huggingface" });
+          if (!res.writableEnded) res.end();
+          return;
+        }
+      } catch (hfErr) {
+        console.warn("[DLavie OS] HF stream fallback failed:", hfErr);
+      }
+      // Last resort: rule-based fallback
+      const fallback = await generateFallbackResponse(prompt);
+      safeWrite({ token: fallback, done: true, fullText: fallback });
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
     const hint = error instanceof OllamaError ? error.hint : ERROR_HINTS[code];
     const message = error instanceof OllamaError ? error.message : (error instanceof Error ? error.message : "Unknown error");
     safeWrite({ error: { code, message, hint }, done: true, errorCode: code, hint });

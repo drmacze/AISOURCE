@@ -505,14 +505,12 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
         .join("\n")
     : "";
 
-  // Get RAG context (vector search → BM25 fallback)
-  const ragContext = await retrieveRAGContext(body.content);
-
-  // Inject web search context for factual/current queries
-  let webContext: string | undefined;
-  if (looksLikeWebQuery(body.content)) {
-    webContext = await retrieveWebContext(body.content);
-  }
+  // Run RAG + web search in parallel — both are independent, no need to wait sequentially
+  const isWebQuery = looksLikeWebQuery(body.content);
+  const [ragContext, webContext] = await Promise.all([
+    retrieveRAGContext(body.content),
+    isWebQuery ? retrieveWebContext(body.content) : Promise.resolve(undefined),
+  ]);
 
   // Merge contexts: history + knowledge base + web search
   const contextParts: string[] = [];
