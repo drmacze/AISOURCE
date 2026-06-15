@@ -21,8 +21,14 @@ import {
   deleteFile,
   createFolder,
 } from "../onedrive";
-import { desc } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import crypto from "crypto";
+import { generateEmbedding } from "./documents";
+
+/** Convert number[] to PostgreSQL vector literal, matching documents.ts format */
+function pgVector(vec: number[]): string {
+  return `[${vec.join(",")}]`;
+}
 
 const router: IRouter = Router();
 
@@ -243,13 +249,33 @@ router.post("/onedrive/sync-to-rag", async (req: Request, res: Response) => {
 
         const docId = crypto.randomUUID();
         for (const chunk of chunks.slice(0, 30)) {
-          const embedding = Array.from({ length: 1536 }, () => Math.random() * 2 - 1);
-          await db.insert(documentsTable).values({
-            title: `[OneDrive] ${file.name}`,
-            content: chunk,
-            source: `onedrive:${file.id}`,
-            embedding: JSON.stringify(embedding),
-          }).onConflictDoNothing();
+          // Insert document row first (without embedding)
+          const inserted = await db
+            .insert(documentsTable)
+            .values({
+              title: `[OneDrive] ${file.name}`,
+              content: chunk,
+              source: `onedrive:${file.id}`,
+            })
+            .onConflictDoNothing()
+            .returning({ id: documentsTable.id });
+
+          // Generate real embedding via HuggingFace sentence-transformers and update
+          // Falls back gracefully (document still searchable via BM25) if HF unavailable
+          const rowId = inserted[0]?.id;
+          if (rowId != null) {
+            generateEmbedding(chunk.slice(0, 512))
+              .then((vec) => {
+                if (!vec) return;
+                return db.execute(sql`
+                  UPDATE documents
+                  SET embedding = ${pgVector(vec)}::vector,
+                      embedding_model = 'sentence-transformers/all-MiniLM-L6-v2'
+                  WHERE id = ${rowId}
+                `);
+              })
+              .catch(() => { /* non-fatal: BM25 fallback still works */ });
+          }
         }
 
         results.push({ name: file.name, ok: true, chunks: chunks.length });

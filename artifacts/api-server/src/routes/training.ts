@@ -574,6 +574,7 @@ export async function runRealFineTuning(
     maxSeqLength: number;
   }
 ): Promise<void> {
+  // Phase 0/4: Job accepted — mark running immediately so UI shows progress
   await db
     .update(trainingJobsTable)
     .set({ status: "running", startedAt: new Date(), progress: 0.02 })
@@ -585,7 +586,7 @@ export async function runRealFineTuning(
     .where(eq(aiModelsTable.id, model.id));
 
   try {
-    // 1. Load samples
+    // Phase 1/4: Load & validate training samples from DB
     const samples = await db
       .select()
       .from(trainingSamplesTable)
@@ -596,11 +597,18 @@ export async function runRealFineTuning(
       throw new Error("No valid samples (need input + output pairs). Add samples to the dataset first.");
     }
 
-    // 2. Check cancellation
+    await db
+      .update(trainingJobsTable)
+      .set({ progress: 0.04 })
+      .where(eq(trainingJobsTable.id, jobId));
+
+    console.log(`[Training] Job ${jobId}: loaded ${validSamples.length} valid samples from dataset "${dataset.name}"`);
+
+    // Check cancellation before expensive disk operations
     const [preCheck] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, jobId));
     if (preCheck.status === "failed") return;
 
-    // 3. Export dataset to JSONL
+    // Phase 2/4: Export dataset to JSONL on disk
     const WORKSPACE = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
     const jobDir = join(WORKSPACE, ".training-artifacts", `job-${jobId}`);
     const datasetPath = join(jobDir, "dataset.jsonl");
@@ -619,11 +627,12 @@ export async function runRealFineTuning(
     );
     writeFileSync(datasetPath, jsonlLines.join("\n") + "\n", "utf8");
 
-    console.log(`[Training] Job ${jobId}: exported ${validSamples.length} samples to ${datasetPath}`);
+    console.log(`[Training] Job ${jobId}: exported ${validSamples.length} samples → ${datasetPath}`);
 
+    // Phase 3/4: Dataset on disk — Python process about to be spawned
     await db
       .update(trainingJobsTable)
-      .set({ progress: 0.05 })
+      .set({ progress: 0.07 })
       .where(eq(trainingJobsTable.id, jobId));
 
     // 4. Determine base model
@@ -651,7 +660,8 @@ export async function runRealFineTuning(
       ...(hfToken ? ["--hf-token", hfToken] : []),
     ];
 
-    console.log(`[Training] Job ${jobId}: spawning Python LoRA fine-tuning (backend: ${opts.backend})`);
+    // Phase 4/4: Python LoRA fine-tuning — real progress streamed via JSON events on stdout
+    console.log(`[Training] Job ${jobId}: spawning Python LoRA fine-tuning (backend: ${opts.backend}, samples: ${validSamples.length})`);
 
     const lossHistory: Array<{ step: number; epoch: number; loss: number }> = [];
 

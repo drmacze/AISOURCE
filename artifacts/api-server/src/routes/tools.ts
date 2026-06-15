@@ -293,20 +293,28 @@ router.post("/tools/keywords", (req, res) => {
   const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 10);
   const allWords = text.toLowerCase().replace(/[^a-z0-9\s'-]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
 
-  // TF calculation
+  // TF: raw count per term
   const tf: Record<string, number> = {};
   for (const w of allWords) tf[w] = (tf[w] || 0) + 1;
 
-  // IDF: simulate with sentence-level presence
+  // Augmented TF normalization: 0.5 + 0.5 * (freq / maxFreq)
+  // Prevents bias toward longer documents (standard double-normalization K=0.5)
+  const maxFreq = Math.max(...Object.values(tf), 1);
+
+  // IDF: sentence-level document frequency (industry-standard approach for
+  // single-document keyword extraction — sentences serve as the "document corpus")
+  // Formula: log((N+1)/(df+1)) + 1 with Laplace smoothing
   const idf: Record<string, number> = {};
+  const N = Math.max(sentences.length, 1);
   for (const word of Object.keys(tf)) {
-    const inSentences = sentences.filter((s) => s.toLowerCase().includes(word)).length;
-    idf[word] = Math.log((sentences.length + 1) / (inSentences + 1)) + 1;
+    const df = sentences.filter((s) => s.toLowerCase().includes(word)).length;
+    idf[word] = Math.log((N + 1) / (df + 1)) + 1;
   }
 
+  // TF-IDF score with augmented normalization
   const tfidf = Object.entries(tf).map(([word, freq]) => ({
     keyword: word,
-    score: Math.round(freq * (idf[word] || 1) * 100) / 100,
+    score: Math.round((0.5 + 0.5 * (freq / maxFreq)) * (idf[word] || 1) * 100) / 100,
     frequency: freq,
   })).sort((a, b) => b.score - a.score).slice(0, Math.min(topK, 30));
 
