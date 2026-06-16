@@ -364,8 +364,9 @@ router.get("/ollama-models", async (_req, res) => {
       ...m,
       sizeMB: Math.round(m.size / (1024 * 1024)),
     })));
-  } catch (err) {
-    res.status(500).json(errorBody(err));
+  } catch (_err) {
+    // Ollama not available (e.g. production/cloud env) — return empty list, not 500
+    res.json([]);
   }
 });
 
@@ -374,8 +375,9 @@ router.get("/ollama/models", async (_req, res) => {
   try {
     const models = await listOllamaModels();
     res.json({ models: models.map((m) => ({ ...m, sizeMB: Math.round(m.size / (1024 * 1024)) })) });
-  } catch (err) {
-    res.status(500).json(errorBody(err));
+  } catch (_err) {
+    // Ollama not available (production env) — return empty list
+    res.json({ models: [] });
   }
 });
 

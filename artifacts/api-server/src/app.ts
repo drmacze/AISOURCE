@@ -92,16 +92,46 @@ registerObjectStorageRoutes(app);
 // ─── Static frontend (production only) ───────────────────────────────────────
 // In production the Vite app is pre-built; serve it from the API process so
 // a single port (5000) handles both the API and the web UI.
-const WORKSPACE_ROOT = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
-const FRONTEND_DIST = path.join(WORKSPACE_ROOT, "artifacts", "ai-web-app", "dist", "public");
+//
+// Path resolution strategy (tries in order):
+//   1. process.cwd() — most reliable; run command never changes CWD
+//   2. REPL_HOME env — Replit workspace root env var
+//   3. HOME env — fallback home dir
+//   4. Hardcoded Replit default
+const candidateRoots = [
+  process.cwd(),
+  process.env.REPL_HOME,
+  process.env.HOME,
+  "/home/runner/workspace",
+].filter(Boolean) as string[];
 
-if (process.env.NODE_ENV === "production" && existsSync(FRONTEND_DIST)) {
-  app.use(express.static(FRONTEND_DIST, { index: false }));
-  // SPA fallback — all non-API routes return index.html
-  app.get("/{*path}", (_req: Request, res: Response) => {
-    res.sendFile(path.join(FRONTEND_DIST, "index.html"));
-  });
-  logger.info({ dir: FRONTEND_DIST }, "Serving static frontend");
+const FRONTEND_DIST = candidateRoots
+  .map((root) => path.join(root, "artifacts", "ai-web-app", "dist", "public"))
+  .find(existsSync) ?? path.join(candidateRoots[0], "artifacts", "ai-web-app", "dist", "public");
+
+if (process.env.NODE_ENV === "production") {
+  if (existsSync(FRONTEND_DIST)) {
+    app.use(express.static(FRONTEND_DIST, { index: false }));
+    // SPA fallback — all non-API routes serve index.html (client-side routing)
+    app.get("/{*path}", (_req: Request, res: Response) => {
+      res.sendFile(path.join(FRONTEND_DIST, "index.html"));
+    });
+    logger.info({ dir: FRONTEND_DIST }, "Serving static frontend ✅");
+  } else {
+    // Frontend build not found — show a helpful error page instead of blank
+    logger.error({ tried: candidateRoots.map((r) => path.join(r, "artifacts/ai-web-app/dist/public")) }, "Frontend build NOT found ❌");
+    app.get("/{*path}", (_req: Request, res: Response) => {
+      res.status(503).send(
+        `<!DOCTYPE html><html><head><title>DLavie OS — Build Missing</title>
+        <style>body{background:#0a0f1a;color:#a0aec0;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+        .box{text-align:center;padding:40px;border:1px solid #1a2744;border-radius:12px}
+        h1{color:#4ade80;font-size:1.5rem;margin-bottom:12px}code{color:#facc15;background:#1a2744;padding:4px 8px;border-radius:4px}</style></head>
+        <body><div class="box"><h1>DLavie OS</h1><p>Frontend build not found.</p>
+        <p>Run <code>pnpm --filter @workspace/ai-web-app run build</code> first.</p>
+        <p>API is running — <a href="/api/healthz" style="color:#4ade80">/api/healthz</a></p></div></body></html>`
+      );
+    });
+  }
 }
 
 // ─── Error handler ────────────────────────────────────────────────────────────
