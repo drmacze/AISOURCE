@@ -40,6 +40,7 @@ import distillationRouter from "./distillation";
 import redteamRouter from "./redteam";
 import knowledgeGraphRouter from "./knowledge-graph-routes";
 import intentRouter from "./intent";
+import kaggleRouter from "./kaggle";
 
 
 const router: IRouter = Router();
@@ -155,5 +156,8 @@ router.use(redteamRouter);
 
 // BLOK M — Knowledge Graph (relational entity graph for RAG)
 router.use(knowledgeGraphRouter);
+
+// Kaggle — full Kaggle integration (dataset sync, kernel management, GPU training)
+router.use(kaggleRouter);
 
 export default router;

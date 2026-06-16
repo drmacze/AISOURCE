@@ -548,6 +548,18 @@ const SKILL_POOLS: Record<string, string[]> = {
     "Preparing meeting agenda for next sprint",
     "Distributing work packages to specialist agents",
   ],
+  kaggle: [
+    "Syncing training dataset to Kaggle Hub",
+    "Triggering LoRA fine-tuning kernel on Kaggle GPU",
+    "Monitoring kernel execution status and progress",
+    "Downloading trained model from completed kernel output",
+    "Checking Kaggle GPU quota availability (30hr/week)",
+    "Collaborating with Trainer agent on dataset quality",
+    "Validating kernel notebook configuration",
+    "Reporting training metrics and results to team",
+    "Pushing updated notebook with latest improvements",
+    "Comparing Kaggle model quality with current Ollama model",
+  ],
 };
 
 /** Pick a random skill from an agent's pool — eliminates idle time */
@@ -2876,7 +2888,155 @@ async function tickModelOps() {
   }
 }
 
-// ── AGENT 22: CO-DEVELOPER ────────────────────────────────────────────────────
+// ── AGENT 23: KAGGLE AGENT ───────────────────────────────────────────────────
+async function tickKaggle() {
+  const kaggleUser = process.env.KAGGLE_USERNAME || "";
+  const kaggleKey  = process.env.KAGGLE_KEY      || "";
+  const configured = !!(kaggleUser && kaggleKey);
+
+  const task    = pickTask("kaggle");
+  const thought = await agentThink("kaggle", "Kaggle Agent",
+    "I own the Kaggle GPU pipeline end-to-end. I sync datasets, trigger training kernels, monitor progress, download models, and report results.",
+    [
+      `Kaggle configured: ${configured}`,
+      configured ? `Username: ${kaggleUser}` : "⚠️ KAGGLE_USERNAME / KAGGLE_KEY not set",
+      `Current task: ${task}`,
+    ]
+  );
+
+  if (!configured) {
+    await heartbeat("kaggle", "🏅 Kaggle Agent", "idle", "Waiting for credentials — add KAGGLE_USERNAME + KAGGLE_KEY in Settings");
+    return;
+  }
+
+  await heartbeat("kaggle", "🏅 Kaggle Agent", "working", thought ?? task);
+  await recordMetric("kaggle", "configured", "1", kaggleUser);
+
+  const BASE_URL_LOCAL = `http://127.0.0.1:${process.env.PORT || 3000}`;
+
+  // ── Task 1: Check Kaggle status ────────────────────────────────────────────
+  try {
+    const statusRes = await fetch(`${BASE_URL_LOCAL}/api/kaggle/status`, { signal: AbortSignal.timeout(10_000) });
+    if (statusRes.ok) {
+      const status = await statusRes.json() as { configured?: boolean; message?: string };
+      if (!status.configured) {
+        await sendMail("kaggle", "orchestrator", "⚠️ Kaggle API tidak aktif",
+          `Kaggle status check gagal: ${status.message}. Kemungkinan nomor HP belum diverifikasi di kaggle.com/settings.`,
+          "normal"
+        );
+        await heartbeat("kaggle", "🏅 Kaggle Agent", "error", status.message || "API unreachable");
+        return;
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  // ── Task 2: Sync dataset periodically (every 6 ticks ≈ 30 min) ────────────
+  const { count } = await import("drizzle-orm");
+  const { trainingSamplesTable: st, trainingDatasetsTable: dt } = await import("@workspace/db");
+
+  try {
+    const [totalSamples] = await db.select({ c: count() }).from(st);
+    const sampleCount = totalSamples?.c ?? 0;
+
+    // Check last sync time from worker memory
+    const mem = await loadMemory("kaggle");
+    const lastSyncStr = mem.notes?.match(/lastSync:(\d+)/)?.[1];
+    const lastSync    = lastSyncStr ? Number(lastSyncStr) : 0;
+    const sinceSync   = Date.now() - lastSync;
+    const shouldSync  = sinceSync > 25 * 60_000; // sync every 25 min
+
+    if (shouldSync && sampleCount > 100) {
+      log("kaggle", `📤 Syncing ${sampleCount} samples to Kaggle...`);
+      const syncRes = await fetch(`${BASE_URL_LOCAL}/api/kaggle/dataset/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ datasetId: 1 }),
+        signal: AbortSignal.timeout(90_000),
+      });
+
+      if (syncRes.ok) {
+        const syncData = await syncRes.json() as { ok?: boolean; samplesUploaded?: number; datasetUrl?: string };
+        if (syncData.ok) {
+          log("kaggle", `✅ Dataset synced: ${syncData.samplesUploaded} samples → ${syncData.datasetUrl}`);
+          await recordMetric("kaggle", "dataset_synced", String(syncData.samplesUploaded), syncData.datasetUrl || "");
+          await sendMail("kaggle", "trainer",
+            `📦 Dataset synced to Kaggle (${syncData.samplesUploaded} samples)`,
+            `Dataset DLavie OS berhasil disync ke Kaggle.\n\nURL: ${syncData.datasetUrl}\nSamples: ${syncData.samplesUploaded}\n\nKernel training siap dijalankan dari Training Hub.`,
+            "normal"
+          );
+          await saveMemory("kaggle", `Dataset synced — ${syncData.samplesUploaded} samples`, `lastSync:${Date.now()}`);
+        }
+      } else {
+        log("kaggle", `⚠️ Dataset sync failed: HTTP ${syncRes.status}`);
+      }
+    } else if (!shouldSync) {
+      log("kaggle", `⏭️ Skipping sync — last synced ${Math.round(sinceSync / 60_000)}min ago`);
+    }
+  } catch (e) {
+    log("kaggle", `❌ Dataset sync error: ${String(e).slice(0, 100)}`);
+  }
+
+  // ── Task 3: Check kernel status ────────────────────────────────────────────
+  const kernelSlug = "dlavie-os-lora-finetuning";
+  try {
+    const statusRes = await fetch(
+      `${BASE_URL_LOCAL}/api/kaggle/kernels/${kaggleUser}/${kernelSlug}/status`,
+      { signal: AbortSignal.timeout(15_000) }
+    );
+
+    if (statusRes.ok) {
+      const kStatus = await statusRes.json() as { status?: string; failureMessage?: string; completenessPercent?: number; raw?: string };
+      const ks = kStatus.status || kStatus.raw || "unknown";
+      log("kaggle", `🔍 Kernel ${kernelSlug}: ${ks}`);
+      await recordMetric("kaggle", "kernel_status", ks, kernelSlug);
+
+      if (ks === "complete" || ks === "Complete") {
+        await sendMail("kaggle", "trainer",
+          "🎉 Kaggle kernel training selesai!",
+          `Kernel LoRA training DLavie OS telah selesai di Kaggle GPU.\n\nKernel: ${kernelSlug}\nStatus: complete\n\nDownload model dari: https://kaggle.com/code/${kaggleUser}/${kernelSlug}\n\nLihat output di Training Hub → Kaggle Agent panel.`,
+          "high"
+        );
+        await sendMail("kaggle", "orchestrator",
+          "🏅 Kaggle GPU training complete",
+          `LoRA model selesai ditraining. Model tersedia di Kaggle output. Trainer agent telah dinotifikasi.`,
+          "normal"
+        );
+      } else if (ks === "error" || ks === "Error") {
+        await sendMail("kaggle", "trainer",
+          "❌ Kaggle kernel error",
+          `Training gagal.\nKernel: ${kernelSlug}\nError: ${kStatus.failureMessage || "unknown"}\n\nPeriksa log di: https://kaggle.com/code/${kaggleUser}/${kernelSlug}`,
+          "high"
+        );
+      }
+    }
+  } catch (e) {
+    log("kaggle", `⚠️ Kernel status check failed: ${String(e).slice(0, 80)}`);
+  }
+
+  // ── Task 4: Check GPU quota ────────────────────────────────────────────────
+  try {
+    const quotaRes = await fetch(`${BASE_URL_LOCAL}/api/kaggle/quota`, { signal: AbortSignal.timeout(10_000) });
+    if (quotaRes.ok) {
+      const quota = await quotaRes.json() as { remainingHours?: number; usedHours?: number; message?: string };
+      await recordMetric("kaggle", "gpu_quota_remaining", String(quota.remainingHours ?? 0), "hours");
+      log("kaggle", `⏱️ GPU quota: ${quota.message || `${quota.remainingHours}hr remaining`}`);
+
+      if ((quota.remainingHours ?? 30) < 2) {
+        await sendMail("kaggle", "trainer",
+          "⚠️ Kaggle GPU quota hampir habis",
+          `Hanya tersisa ${quota.remainingHours}hr dari 30hr/minggu. Quota direset setiap Senin.`,
+          "high"
+        );
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  await heartbeat("kaggle", "🏅 Kaggle Agent", "idle", thought ?? "Monitoring Kaggle pipeline");
+
+  void dt;
+}
+
+// ── AGENT 22: CO-DEVELOPER ───────────────────────────────────────────────────
 async function tickCodev() {
   // Check pending mails from all agents to see if coordination is needed
   const recentMail = await db
@@ -3087,6 +3247,13 @@ const WORKERS: WorkerRegistration[] = [
     vision: "I monitor AI model quality 24/7. I detect quality drops, fire benchmarks, track model performance, and alert the team when a model needs retraining.",
     intervalMs: 2 * 60 * 1000, baseIntervalMs: 2 * 60 * 1000, priority: 2,
     tick: tickModelOps, lastRun: 0, running: false,
+  },
+  {
+    id: "kaggle",
+    displayName: "🏅 Kaggle Agent",
+    vision: "I own the Kaggle GPU pipeline end-to-end. I sync datasets, trigger training kernels, monitor progress, download models, and report results. No human clicks required.",
+    intervalMs: 5 * 60 * 1000, baseIntervalMs: 5 * 60 * 1000, priority: 2,
+    tick: tickKaggle, lastRun: 0, running: false,
   },
 ];
 

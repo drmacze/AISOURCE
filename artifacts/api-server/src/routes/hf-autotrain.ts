@@ -23,7 +23,29 @@ const HF_HUB   = "https://huggingface.co";
 const AT_API   = "https://api.autotrain.huggingface.co";
 
 function getHFToken(): string {
-  return process.env.HF_TOKEN || "";
+  // Check env first (covers both Replit secrets and settings-saved values)
+  const envToken = process.env.HF_TOKEN || "";
+  if (envToken) return envToken;
+
+  // Fallback: read directly from config file (catches hot-saves not yet in process.env)
+  try {
+    const { readFileSync, existsSync } = require("fs");
+    const { join } = require("path");
+    const cfgPath = join(process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace", ".dlavie-config.json");
+    if (existsSync(cfgPath)) {
+      const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as { secrets?: Record<string, string>; hfToken?: string };
+      const fromSecrets = cfg.secrets?.["HF_TOKEN"] || "";
+      const fromLegacy  = cfg.hfToken || "";
+      const found       = fromSecrets || fromLegacy;
+      if (found) {
+        // Apply to process.env so subsequent calls are faster
+        process.env.HF_TOKEN = found;
+        return found;
+      }
+    }
+  } catch { /* ignore */ }
+
+  return "";
 }
 
 function hfHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -36,58 +58,76 @@ function hfHeaders(extra: Record<string, string> = {}): Record<string, string> {
 
 function isHFReady(): boolean {
   const t = getHFToken();
-  return !!t && t.startsWith("hf_");
+  if (!t) return false;
+  // Accept all known HF token formats:
+  // hf_xxx (classic + fine-grained)
+  // api_org_xxx (org tokens)
+  // Any token >= 20 chars is treated as potentially valid
+  return t.startsWith("hf_") || t.startsWith("api_org_") || t.length >= 20;
 }
 
 // ─── GET /api/hf/autotrain/info ──────────────────────────────────────────────
 router.get("/hf/autotrain/info", async (_req: Request, res: Response) => {
-  if (!isHFReady()) {
+  const token = getHFToken();
+  if (!token) {
     return res.json({
       configured: false,
-      message: "HF_TOKEN belum diset. Tambahkan di Settings → API Keys.",
+      message: "HF_TOKEN belum diset. Tambahkan di Settings → API Keys → HuggingFace.",
     });
   }
 
-  // Token format valid — try whoami for extra info but don't fail if it errors
-  // (fine-grained/read-only tokens can still push datasets and launch AutoTrain)
+  if (!isHFReady()) {
+    return res.json({
+      configured: false,
+      message: `Token format tidak dikenali (${token.slice(0, 4)}…). Token HF harus mulai dengan "hf_".`,
+    });
+  }
+
+  // Token format valid — try whoami
+  let whoData: { name?: string; fullname?: string; plan?: { type?: string }; orgs?: Array<{ name: string }> } | null = null;
+  let whoStatus = 0;
+
   try {
     const whoRes = await fetch(`${HF_API}/whoami`, {
       headers: hfHeaders(),
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(8000),
     });
+    whoStatus = whoRes.status;
     if (whoRes.ok) {
-      const who = await whoRes.json() as {
-        name: string; fullname?: string; email?: string;
-        plan?: { type?: string }; orgs?: Array<{ name: string }>;
-      };
-      return res.json({
-        configured: true,
-        username:   who.name,
-        fullname:   who.fullname ?? who.name,
-        plan:       who.plan?.type ?? "free",
-        orgs:       (who.orgs ?? []).map((o) => o.name),
-      });
+      whoData = await whoRes.json() as typeof whoData;
     }
-    // whoami failed (e.g. fine-grained token / scoped token) — token still usable
+  } catch { /* network error — treat as configured */ }
+
+  // 401 = token definitively invalid
+  if (whoStatus === 401) {
     return res.json({
-      configured: true,
-      username:   null,
-      fullname:   null,
-      plan:       "unknown",
-      orgs:       [],
-      note:       "Token valid (format ok) — profil tidak tersedia. Masukkan username HF secara manual saat push dataset.",
-    });
-  } catch {
-    // Network error — optimistically return configured if format is valid
-    return res.json({
-      configured: true,
-      username:   null,
-      fullname:   null,
-      plan:       "unknown",
-      orgs:       [],
-      note:       "Tidak dapat verifikasi token ke HuggingFace (network). Token akan digunakan langsung.",
+      configured: false,
+      message: "Token tidak valid atau expired (HF mengembalikan 401). Generate token baru di huggingface.co/settings/tokens.",
     });
   }
+
+  // whoami succeeded
+  if (whoData?.name) {
+    return res.json({
+      configured: true,
+      username:   whoData.name,
+      fullname:   whoData.fullname ?? whoData.name,
+      plan:       whoData.plan?.type ?? "free",
+      orgs:       (whoData.orgs ?? []).map((o) => o.name),
+    });
+  }
+
+  // whoami unreachable / fine-grained token — token is still valid for API calls
+  return res.json({
+    configured: true,
+    username:   null,
+    fullname:   null,
+    plan:       "unknown",
+    orgs:       [],
+    note:       whoStatus === 403
+      ? "Token fine-grained — profil terbatas. Masukkan username HF secara manual di bawah."
+      : "Token aktif. Masukkan username HF secara manual (lihat huggingface.co/settings/profile).",
+  });
 });
 
 // ─── POST /api/hf/dataset/push ───────────────────────────────────────────────

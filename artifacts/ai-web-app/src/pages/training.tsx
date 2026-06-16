@@ -2605,6 +2605,9 @@ export default function Training() {
       {/* ── HF AutoTrain ─────────────────────────────────────────────────────── */}
       <HFAutoTrainPanel datasets={(datasets ?? []).map((d) => ({ id: d.id, name: d.name }))} />
 
+      {/* ── Kaggle GPU Pipeline ────────────────────────────────────────────────── */}
+      <KagglePanelSection />
+
       {/* ── Model Catalogue ──────────────────────────────────────────────────── */}
       <Card className="glass-panel">
         <CardHeader>
@@ -2941,9 +2944,292 @@ export default function Training() {
       <KnowledgeGraphPanel BASE={BASE} />
 
       </div>}
+
+
       {/* end advanced tab wrapper */}
 
     </div>
+  );
+}
+
+// ── KAGGLE PANEL ─────────────────────────────────────────────────────────────
+interface KaggleStatus { configured: boolean; username?: string; apiReachable?: boolean; message?: string }
+interface KaggleSyncResult { ok: boolean; repoRef?: string; datasetUrl?: string; samplesUploaded?: number; method?: string; error?: string }
+interface KaggleKernel { ref?: string; title?: string; status?: string; lastRunTime?: string; currentRunningVersion?: { sourceTitle?: string } }
+interface KaggleKernelStatus { status?: string; failureMessage?: string; completenessPercent?: number; raw?: string }
+interface KaggleRunResult { ok?: boolean; message?: string; kernelUrl?: string; error?: string; status?: string }
+
+function KagglePanelSection() {
+  const BASE = (window as Window & { _apiBase?: string })._apiBase || getApiBase();
+  const [open, setOpen] = useState(false);
+  const [status, setStatus]           = useState<KaggleStatus | null>(null);
+  const [kernels, setKernels]         = useState<KaggleKernel[]>([]);
+  const [kernelSlug, setKernelSlug]   = useState("dlavie-os-lora-finetuning");
+  const [kernelStatus, setKernelStatus] = useState<KaggleKernelStatus | null>(null);
+  const [syncResult, setSyncResult]   = useState<KaggleSyncResult | null>(null);
+  const [runResult, setRunResult]     = useState<KaggleRunResult | null>(null);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [runLoading, setRunLoading]   = useState(false);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [kernelsLoading, setKernelsLoading] = useState(false);
+
+  // Credentials form (if not configured)
+  const [credUser, setCredUser] = useState("");
+  const [credKey, setCredKey]   = useState("");
+  const [credLoading, setCredLoading] = useState(false);
+  const [credResult, setCredResult]   = useState<{ ok?: boolean; message?: string; error?: string } | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    setStatusLoading(true);
+    try {
+      const r = await fetch(`${BASE}/api/kaggle/status`);
+      const d = await r.json() as KaggleStatus;
+      setStatus(d);
+    } catch { /* ignore */ }
+    finally { setStatusLoading(false); }
+  }, [BASE]);
+
+  const fetchKernels = useCallback(async () => {
+    setKernelsLoading(true);
+    try {
+      const r = await fetch(`${BASE}/api/kaggle/kernels`);
+      const d = await r.json() as KaggleKernel[];
+      if (Array.isArray(d)) setKernels(d);
+    } catch { /* ignore */ }
+    finally { setKernelsLoading(false); }
+  }, [BASE]);
+
+  useEffect(() => {
+    if (open) { void fetchStatus(); void fetchKernels(); }
+  }, [open, fetchStatus, fetchKernels]);
+
+  const handleSaveCredentials = async () => {
+    if (!credUser.trim() || !credKey.trim()) return;
+    setCredLoading(true); setCredResult(null);
+    try {
+      const r = await fetch(`${BASE}/api/kaggle/credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: credUser.trim(), key: credKey.trim() }),
+      });
+      const d = await r.json() as { ok?: boolean; message?: string; error?: string };
+      setCredResult(d);
+      if (d.ok) { setCredUser(""); setCredKey(""); void fetchStatus(); }
+    } catch (e) { setCredResult({ error: String(e) }); }
+    finally { setCredLoading(false); }
+  };
+
+  const handleSync = async () => {
+    setSyncLoading(true); setSyncResult(null);
+    try {
+      const r = await fetch(`${BASE}/api/kaggle/dataset/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ datasetId: 1 }),
+      });
+      const d = await r.json() as KaggleSyncResult;
+      setSyncResult(d);
+    } catch (e) { setSyncResult({ ok: false, error: String(e) }); }
+    finally { setSyncLoading(false); }
+  };
+
+  const handleRun = async () => {
+    setRunLoading(true); setRunResult(null);
+    try {
+      const r = await fetch(`${BASE}/api/kaggle/kernels/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kernelSlug }),
+      });
+      const d = await r.json() as KaggleRunResult;
+      setRunResult(d);
+    } catch (e) { setRunResult({ error: String(e) }); }
+    finally { setRunLoading(false); }
+  };
+
+  const handleCheckStatus = async () => {
+    if (!status?.username) return;
+    try {
+      const r = await fetch(`${BASE}/api/kaggle/kernels/${status.username}/${kernelSlug}/status`);
+      const d = await r.json() as KaggleKernelStatus;
+      setKernelStatus(d);
+    } catch { /* ignore */ }
+  };
+
+  const ks = kernelStatus?.status || kernelStatus?.raw || "";
+  const ksColor = ks === "complete" || ks === "Complete" ? "text-green-400" :
+                  ks === "running"  || ks === "Running"  ? "text-blue-400 animate-pulse" :
+                  ks === "error"    || ks === "Error"    ? "text-red-400" :
+                  "text-muted-foreground";
+
+  return (
+    <Card className="glass-panel border-orange-500/20">
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-mono flex items-center gap-2">
+            <span className="text-base leading-none">🏅</span> KAGGLE_AGENT
+            <span className="text-[10px] font-normal text-orange-400/70 ml-1">GPU cloud training pipeline</span>
+          </CardTitle>
+          {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </div>
+      </CardHeader>
+
+      {open && (
+        <CardContent className="space-y-4">
+
+          {/* Status bar */}
+          <div className={`flex items-center gap-2 p-2.5 rounded border text-xs ${
+            status?.configured
+              ? "border-green-500/30 bg-green-500/5 text-green-400"
+              : "border-amber-500/30 bg-amber-500/5 text-amber-400"
+          }`}>
+            {statusLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> :
+             status?.configured
+               ? <><CheckCircle2 className="w-3.5 h-3.5 shrink-0" /><span>Terhubung sebagai <b>{status.username}</b></span></>
+               : <><AlertCircle className="w-3.5 h-3.5 shrink-0" /><span>{status?.message ?? "Memeriksa Kaggle…"}</span></>
+            }
+            <Button variant="ghost" size="sm" className="ml-auto h-6 text-[10px] font-mono" onClick={fetchStatus}>
+              <RefreshCw className="w-3 h-3" />
+            </Button>
+          </div>
+
+          {/* Credentials form (shown when not configured) */}
+          {status && !status.configured && (
+            <div className="space-y-2 p-3 rounded border border-amber-500/20 bg-amber-500/5">
+              <p className="text-[10px] font-mono text-amber-400">Masukkan Kaggle credentials (username + API key dari kaggle.com/settings/account)</p>
+              <div className="flex gap-2">
+                <Input value={credUser} onChange={e => setCredUser(e.target.value)}
+                  placeholder="kaggle username" className="h-7 text-xs font-mono bg-background flex-1" />
+                <Input value={credKey} onChange={e => setCredKey(e.target.value)}
+                  placeholder="API key (xxxxxxxxxxxxxxxx)" className="h-7 text-xs font-mono bg-background flex-[2]" type="password" />
+                <Button size="sm" className="h-7 text-xs font-mono" onClick={handleSaveCredentials} disabled={credLoading || !credUser || !credKey}>
+                  {credLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                </Button>
+              </div>
+              {credResult && (
+                <p className={`text-[10px] font-mono ${credResult.ok ? "text-green-400" : "text-red-400"}`}>
+                  {credResult.message || credResult.error}
+                </p>
+              )}
+              <p className="text-[10px] font-mono text-muted-foreground">Atau simpan via Settings → API Keys → KAGGLE_USERNAME + KAGGLE_KEY</p>
+            </div>
+          )}
+
+          {/* Main controls (shown when configured) */}
+          {status?.configured && (
+            <>
+              {/* Kernel slug */}
+              <div className="flex gap-2 items-end">
+                <div className="space-y-1 flex-1">
+                  <label className="text-[10px] font-mono text-muted-foreground">KERNEL SLUG</label>
+                  <Input value={kernelSlug} onChange={e => setKernelSlug(e.target.value)}
+                    className="h-8 font-mono text-xs bg-background" placeholder="username/kernel-name" />
+                </div>
+                <Button size="sm" variant="outline" className="h-8 text-xs font-mono gap-1" onClick={handleCheckStatus}>
+                  <Activity className="w-3 h-3" /> Status
+                </Button>
+              </div>
+
+              {/* Kernel status */}
+              {kernelStatus && (
+                <div className={`p-2 rounded border border-border bg-background/40 text-xs font-mono flex items-center gap-2 ${ksColor}`}>
+                  {ks === "running" || ks === "Running"  ? <Loader2 className="w-3 h-3 animate-spin shrink-0" /> :
+                   ks === "complete" || ks === "Complete" ? <CheckCircle2 className="w-3 h-3 shrink-0" /> :
+                   ks === "error" || ks === "Error" ? <AlertCircle className="w-3 h-3 shrink-0" /> :
+                   <Activity className="w-3 h-3 shrink-0" />}
+                  <span>Status: <b>{ks || "unknown"}</b></span>
+                  {kernelStatus.completenessPercent !== undefined && (
+                    <span className="text-muted-foreground ml-2">{kernelStatus.completenessPercent}%</span>
+                  )}
+                  {kernelStatus.failureMessage && (
+                    <span className="text-red-400 truncate ml-2">{kernelStatus.failureMessage}</span>
+                  )}
+                  {(ks === "complete" || ks === "Complete") && (
+                    <a href={`https://kaggle.com/code/${status.username}/${kernelSlug}/output`}
+                      target="_blank" rel="noreferrer"
+                      className="ml-auto text-green-400 hover:text-green-300 flex items-center gap-1">
+                      <Download className="w-3 h-3" /> Output
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {/* Action buttons row */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <p className="text-[10px] font-mono text-muted-foreground">1 · SYNC DATASET → KAGGLE</p>
+                  <Button size="sm" className="w-full h-8 text-xs font-mono gap-1.5 bg-orange-600 hover:bg-orange-500 text-white"
+                    onClick={handleSync} disabled={syncLoading}>
+                    {syncLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Database className="w-3 h-3" />}
+                    {syncLoading ? "Syncing…" : "Sync Dataset"}
+                  </Button>
+                  {syncResult && (
+                    <p className={`text-[10px] font-mono ${syncResult.ok ? "text-green-400" : "text-red-400"}`}>
+                      {syncResult.ok
+                        ? `✓ ${syncResult.samplesUploaded} samples → ${syncResult.repoRef}`
+                        : `✗ ${syncResult.error?.slice(0, 80)}`}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-[10px] font-mono text-muted-foreground">2 · RUN TRAINING KERNEL</p>
+                  <Button size="sm" className="w-full h-8 text-xs font-mono gap-1.5 bg-green-700 hover:bg-green-600 text-white"
+                    onClick={handleRun} disabled={runLoading}>
+                    {runLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                    {runLoading ? "Starting…" : "Run GPU Training"}
+                  </Button>
+                  {runResult && (
+                    <p className={`text-[10px] font-mono ${runResult.ok ? "text-green-400" : runResult.status === "running" ? "text-blue-400" : "text-red-400"}`}>
+                      {runResult.message || runResult.error}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Kernel links */}
+              <div className="flex gap-2 flex-wrap">
+                <a href={`https://kaggle.com/datasets/${status.username}/dlavie-training-dataset`}
+                  target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-orange-400 transition-colors">
+                  <Database className="w-3 h-3" /> Dataset Kaggle
+                </a>
+                <a href={`https://kaggle.com/code/${status.username}/${kernelSlug}`}
+                  target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-green-400 transition-colors">
+                  <ExternalLink className="w-3 h-3" /> Kernel Notebook
+                </a>
+                <a href={`https://kaggle.com/code/${status.username}/${kernelSlug}/output`}
+                  target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-blue-400 transition-colors">
+                  <Download className="w-3 h-3" /> Download Output
+                </a>
+              </div>
+
+              {/* Kernels list */}
+              {kernels.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">Recent Kernels</p>
+                  <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+                    {kernels.slice(0, 8).map((k, i) => (
+                      <div key={i} className="flex items-center gap-2 p-1.5 rounded border border-border/50 bg-background/30 text-xs font-mono">
+                        <span className="text-muted-foreground truncate flex-1">{k.title || k.ref || "—"}</span>
+                        <span className={`text-[10px] shrink-0 ${
+                          k.status === "complete" ? "text-green-400" :
+                          k.status === "running"  ? "text-blue-400" :
+                          k.status === "error"    ? "text-red-400"  : "text-muted-foreground"
+                        }`}>{k.status || "—"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {kernelsLoading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground mx-auto" />}
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
@@ -3006,7 +3292,7 @@ function CapabilityRadarPanel({ BASE, models }: { BASE: string; models: { id: nu
                   radar.grade === "B" ? "bg-blue-500/20 text-blue-400" :
                   radar.grade === "C" ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"
                 }`}>Grade: {radar.grade}</span>
-                <span className="text-[10px] font-mono text-muted-foreground">{format(new Date(radar.ranAt), "HH:mm:ss")}</span>
+                <span className="text-[10px] font-mono text-muted-foreground">{(() => { try { return format(new Date(radar.ranAt), "HH:mm:ss"); } catch { return "–"; } })()}</span>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {DIMS.map(dim => {
@@ -3214,13 +3500,16 @@ function DistillationPanel({ BASE }: { BASE: string }) {
   const [targetModel, setTargetModel] = useState("tinyllama");
   const [count, setCount] = useState("10");
 
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   const fetchJobs = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setFetchError(null);
     try {
       const res = await fetch(`${BASE}/api/distillation/jobs`);
-      const data = await res.json() as DistillJob[];
-      setJobs(data);
-    } catch { /* ignore */ }
+      if (!res.ok) { setFetchError(`HTTP ${res.status}`); setLoading(false); return; }
+      const data = await res.json() as unknown;
+      setJobs(Array.isArray(data) ? (data as DistillJob[]) : []);
+    } catch (e) { setFetchError(String(e)); }
     finally { setLoading(false); }
   }, [BASE]);
 
@@ -3271,6 +3560,7 @@ function DistillationPanel({ BASE }: { BASE: string }) {
               {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />} Distill
             </Button>
           </form>
+          {fetchError && <p className="text-xs text-red-400 font-mono text-center py-2">⚠ {fetchError}</p>}
           {loading ? <Loader2 className="w-5 h-5 animate-spin text-primary mx-auto" /> :
            !jobs.length ? (
             <p className="text-xs text-muted-foreground font-mono text-center py-4 border border-dashed border-border rounded-lg">No distillation jobs yet</p>
@@ -3397,16 +3687,18 @@ function KnowledgeGraphPanel({ BASE }: { BASE: string }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   const fetchData = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setFetchError(null);
     try {
       const [entRes, statRes] = await Promise.all([
-        fetch(`${BASE}/api/kg/entities?limit=30`).then(r => r.json()) as Promise<KGEntity[]>,
-        fetch(`${BASE}/api/kg/stats`).then(r => r.json()) as Promise<KGStats>,
+        fetch(`${BASE}/api/kg/entities?limit=30`).then(r => r.ok ? r.json() : []) as Promise<unknown>,
+        fetch(`${BASE}/api/kg/stats`).then(r => r.ok ? r.json() : null) as Promise<KGStats | null>,
       ]);
-      setEntities(entRes);
-      setStats(statRes);
-    } catch { /* ignore */ }
+      setEntities(Array.isArray(entRes) ? (entRes as KGEntity[]) : []);
+      if (statRes && typeof statRes === "object" && !Array.isArray(statRes)) setStats(statRes as KGStats);
+    } catch (e) { setFetchError(String(e)); }
     finally { setLoading(false); }
   }, [BASE]);
 
@@ -3452,6 +3744,7 @@ function KnowledgeGraphPanel({ BASE }: { BASE: string }) {
               <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} />
             </Button>
           </div>
+          {fetchError && <p className="text-xs text-red-400 font-mono text-center py-2">⚠ {fetchError}</p>}
           {loading ? <Loader2 className="w-5 h-5 animate-spin text-primary mx-auto" /> :
            !filtered.length ? (
             <p className="text-xs text-muted-foreground font-mono text-center py-4 border border-dashed border-border rounded-lg">
