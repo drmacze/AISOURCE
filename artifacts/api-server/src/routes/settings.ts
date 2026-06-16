@@ -13,6 +13,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { logger } from "../lib/logger.js";
+import { resetHFTokenInvalid } from "../huggingface.js";
 
 const router: IRouter = Router();
 
@@ -257,6 +258,11 @@ router.post("/settings/secrets", (req: Request, res: Response) => {
 
   // Apply immediately to running process
   process.env[envName] = trimmed;
+
+  // If HF_TOKEN was updated, clear the 30-min invalid cache so the new token is tried immediately
+  if (envName === "HF_TOKEN") {
+    resetHFTokenInvalid();
+  }
 
   logger.info({ name: envName }, "Secret saved and applied to process.env");
 

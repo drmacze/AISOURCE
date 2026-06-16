@@ -69,6 +69,13 @@ export function markHFTokenInvalid(durationMs = 30 * 60 * 1000): void {
   console.warn(`[HF] Token marked invalid for ${durationMs / 60000} min — update HF_TOKEN to re-enable`);
 }
 
+/** Reset the invalid flag immediately — call this when a new HF_TOKEN is saved */
+export function resetHFTokenInvalid(): void {
+  hfTokenInvalid = false;
+  hfTokenInvalidUntil = 0;
+  console.info("[HF] Token invalid flag cleared — will re-probe on next request");
+}
+
 /**
  * Probe HuggingFace to verify the token is valid.
  * Call once at startup to avoid wasting time on every inference call.
