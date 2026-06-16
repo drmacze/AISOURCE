@@ -73,6 +73,259 @@ app.options("/{*path}", cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+// ─── .well-known — ChatGPT Actions manifest files ─────────────────────────────
+app.get("/.well-known/ai-plugin.json", (req: Request, res: Response) => {
+  const host = `${req.protocol}://${req.get("host")}`;
+  res.setHeader("Content-Type", "application/json");
+  res.json({
+    schema_version: "v1",
+    name_for_human: "DLavie OS",
+    name_for_model: "dlavie_os",
+    description_for_human: "DLavie OS AI Command Center — Read, write, and edit AI conversations, documents, and training data.",
+    description_for_model: "Use this plugin to interact with DLavie OS. You can read, create, edit, and delete conversations, documents, and training samples. You can also search the knowledge base and trigger Kaggle GPU training.",
+    auth: { type: "none" },
+    api: { type: "openapi", url: `${host}/.well-known/openapi.yaml` },
+    logo_url: `${host}/favicon.svg`,
+    contact_email: "admin@dlavie.ai",
+    legal_info_url: `${host}/`,
+  });
+});
+
+app.get("/.well-known/openapi.yaml", (req: Request, res: Response) => {
+  const host = `${req.protocol}://${req.get("host")}`;
+  res.setHeader("Content-Type", "text/yaml; charset=utf-8");
+  res.send(`openapi: "3.1.0"
+info:
+  title: DLavie OS API
+  description: DLavie OS AI Command Center — Read, write, and edit AI conversations, documents, training data, and trigger Kaggle GPU training.
+  version: "2.0.0"
+servers:
+  - url: ${host}
+    description: DLavie OS
+paths:
+  /api/chatgpt/status:
+    get:
+      operationId: getStatus
+      summary: System status
+      description: Get DLavie OS system status and data statistics. No auth required.
+      responses:
+        "200":
+          description: System status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  stats:
+                    type: object
+                    properties:
+                      conversations: { type: integer }
+                      documents: { type: integer }
+                      trainingSamples: { type: integer }
+  /api/chatgpt/conversations:
+    get:
+      operationId: listConversations
+      summary: List conversations
+      description: List all chat conversations in DLavie OS (newest first, max 50)
+      responses:
+        "200":
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        title: { type: string }
+                        createdAt: { type: string }
+                        updatedAt: { type: string }
+    post:
+      operationId: createConversation
+      summary: Create a new conversation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, description: "Conversation title" }
+      responses:
+        "201":
+          description: Created conversation
+  /api/chatgpt/conversations/{id}:
+    get:
+      operationId: getConversation
+      summary: Get conversation with messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Conversation with all messages
+    delete:
+      operationId: deleteConversation
+      summary: Delete a conversation and all its messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Deleted successfully
+  /api/chatgpt/conversations/{id}/messages:
+    post:
+      operationId: addMessage
+      summary: Add a message to a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                role:
+                  type: string
+                  enum: [user, assistant]
+                  default: user
+                content: { type: string, description: "Message text" }
+      responses:
+        "201":
+          description: Message added
+  /api/chatgpt/documents:
+    get:
+      operationId: listDocuments
+      summary: List all documents in knowledge base
+      responses:
+        "200":
+          description: List of documents
+    post:
+      operationId: createDocument
+      summary: Create a new document
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, content]
+              properties:
+                title: { type: string }
+                content: { type: string }
+                type: { type: string, default: text }
+      responses:
+        "201":
+          description: Created document
+  /api/chatgpt/documents/{id}:
+    patch:
+      operationId: editDocument
+      summary: Edit a document (title or content)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                content: { type: string }
+      responses:
+        "200":
+          description: Updated document
+    delete:
+      operationId: deleteDocument
+      summary: Delete a document
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Deleted successfully
+  /api/chatgpt/search:
+    get:
+      operationId: searchKnowledgeBase
+      summary: Search knowledge base by keyword
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+          description: Search query
+      responses:
+        "200":
+          description: Search results
+  /api/chatgpt/training:
+    get:
+      operationId: listTrainingSamples
+      summary: List training samples
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Training samples
+    post:
+      operationId: addTrainingSample
+      summary: Add a new training sample (input/output pair)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input, output]
+              properties:
+                input: { type: string, description: "Training input / question" }
+                output: { type: string, description: "Expected output / answer" }
+                datasetId: { type: integer, description: "Dataset ID (optional, uses first dataset if omitted)" }
+      responses:
+        "201":
+          description: Training sample added
+  /api/chatgpt/kaggle/sync:
+    post:
+      operationId: syncKaggleDataset
+      summary: Sync training dataset to Kaggle
+      description: Uploads all training samples from DLavie OS database to the Kaggle dataset for GPU training.
+      responses:
+        "200":
+          description: Sync result with number of samples uploaded
+  /api/chatgpt/kaggle/train:
+    post:
+      operationId: runKaggleTraining
+      summary: Trigger GPU training on Kaggle
+      description: Launches the LoRA fine-tuning kernel on Kaggle GPU. Returns training URL.
+      responses:
+        "200":
+          description: Training job started or queued
+`);
+});
+
 // ─── Health check (for Replit deployment probe) ───────────────────────────────
 app.get("/api/healthz", (_req, res) => {
   res.json({

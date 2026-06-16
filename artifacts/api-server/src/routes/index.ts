@@ -41,6 +41,7 @@ import redteamRouter from "./redteam";
 import knowledgeGraphRouter from "./knowledge-graph-routes";
 import intentRouter from "./intent";
 import kaggleRouter from "./kaggle";
+import chatgptActionsRouter from "./chatgpt-actions";
 
 
 const router: IRouter = Router();
@@ -159,5 +160,8 @@ router.use(knowledgeGraphRouter);
 
 // Kaggle — full Kaggle integration (dataset sync, kernel management, GPU training)
 router.use(kaggleRouter);
+
+// ChatGPT Actions — read/write/edit conversations, documents, training data via ChatGPT
+router.use(chatgptActionsRouter);
 
 export default router;

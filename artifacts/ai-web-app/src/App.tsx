@@ -29,6 +29,7 @@ import BotsPage from "@/pages/bots";
 import BrandKitPage from "@/pages/brand-kit";
 import OpenClawPage from "@/pages/openclaw";
 import AgentCommandCenter from "@/pages/agent";
+import ChatGPTIntegrationPage from "@/pages/chatgpt";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,6 +70,7 @@ function Router() {
         <Route path="/brand-kit" component={BrandKitPage} />
         <Route path="/whatsapp" component={WhatsAppPage} />
         <Route path="/wa-bot" component={WaBotPage} />
+        <Route path="/chatgpt" component={ChatGPTIntegrationPage} />
         <Route path="/openclaw">
           <Redirect to="/agent" />
         </Route>

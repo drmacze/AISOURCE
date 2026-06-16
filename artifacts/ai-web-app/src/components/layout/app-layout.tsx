@@ -27,6 +27,7 @@ import {
   HardDrive,
   Palette,
   Rabbit,
+  Plug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
@@ -85,9 +86,10 @@ const NAV_GROUPS = [
   {
     label: "Integrations",
     items: [
-      { href: "/bots",      label: "Bot Center", icon: Bot      },
-      { href: "/brand-kit", label: "Brand Kit",  icon: Palette  },
-      { href: "/storage",   label: "OneDrive",   icon: HardDrive},
+      { href: "/bots",      label: "Bot Center",     icon: Bot      },
+      { href: "/brand-kit", label: "Brand Kit",      icon: Palette  },
+      { href: "/storage",   label: "OneDrive",       icon: HardDrive},
+      { href: "/chatgpt",   label: "ChatGPT Actions", icon: Plug     },
     ],
   },
   {
