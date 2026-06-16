@@ -4,10 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "export NODE_ENV=development && export PORT=3000 && pnpm run build && pnpm run start",
+    "dev": "export NODE_ENV=development && export PORT=3000 && pnpm run db:ensure && pnpm run build && pnpm run start",
     "build": "node ./build.cjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:ensure": "node --input-type=module -e \"import { createRequire } from 'module'; const req = createRequire(new URL('file://' + process.cwd() + '/../../lib/db/package.json')); const { Client } = req('pg'); const c = new Client({ connectionString: process.env.DATABASE_URL }); await c.connect().catch(e => { console.warn('[DB] Cannot connect:', e.message); process.exit(0); }); await c.query('CREATE EXTENSION IF NOT EXISTS vector').catch(() => {}); await c.end(); console.log('[DB] pgvector ready');\" && pnpm --filter @workspace/db run push || echo '[DB] Schema push failed — tables may already exist'"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.21.0",

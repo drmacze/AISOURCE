@@ -3,6 +3,7 @@ import { mkdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import app from "./app.js";
 import { logger } from "./lib/logger.js";
+import { initDatabase } from "./lib/db-init.js";
 import { startOllamaServer } from "./ollama.js";
 import { startAutoTraining, startMicroTraining } from "./autotraining.js";
 import { startGateway as startOpenClaw } from "./openclaw-manager.js";
@@ -132,6 +133,11 @@ logger.info({ intervalHours: AUTO_TRAIN_INTERVAL_MS / 3600000 }, "DLavie OS auto
 const MICRO_TRAIN_INTERVAL_MS = Number(process.env.MICRO_TRAIN_INTERVAL_MS) || 60_000;
 startMicroTraining(MICRO_TRAIN_INTERVAL_MS);
 logger.info({ intervalSec: MICRO_TRAIN_INTERVAL_MS / 1000 }, "Micro-training started (EN + ID/AR/FR/ES)");
+
+// ─── Database initialization (pgvector + schema push) ─────────────────────────
+// Runs synchronously before the server accepts any requests.
+// Ensures all tables and extensions are created on every cold start.
+await initDatabase();
 
 // ─── Server (bind 0.0.0.0 for Replit deployment) ─────────────────────────────
 app.listen(port, "0.0.0.0", (err?: Error) => {
