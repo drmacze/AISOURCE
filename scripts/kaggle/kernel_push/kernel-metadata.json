@@ -1,0 +1,13 @@
+{
+  "id": "dlavie/dlavie-os-lora-finetuning",
+  "title": "DLavie OS — LoRA Fine-Tuning",
+  "code_file": "notebook.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": false,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": ["dlavie/dlavie-training-dataset"],
+  "competition_sources": [],
+  "kernel_sources": []
+}
