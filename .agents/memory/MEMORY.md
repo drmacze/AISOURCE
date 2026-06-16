@@ -20,3 +20,4 @@
 - [Agent 5-improvement system](agent-improvements.md) — worker memory: `agentWorkerMemoriesTable` (NOT `agentMemoriesTable` — that's in agent.ts with different schema); context board: `systemContextTable`; subtasks: `agentSubtasksTable`; priority 1-4 on WorkerRegistration; adaptive setTimeout scheduler
 - [DB schema conflict: agentMemoriesTable](agent-improvements.md#conflict) — agent.ts already exports `agentMemoriesTable`; worker memory table must be named `agentWorkerMemoriesTable` / `agent_worker_memories`
 - [Express route prefix bug](express-route-prefix.md) — app.use("/api", router) already adds /api; new route files MUST define paths WITHOUT /api prefix (e.g. "/feedback" not "/api/feedback")
+- [Missing route aliases](route-aliases.md) — agent-workers.ts calls `/api/health` (not `/api/healthz`); openclaw-manager.ts calls `/api/resources` (not `/api/system/resources`); both aliases added in health.ts and resources.ts

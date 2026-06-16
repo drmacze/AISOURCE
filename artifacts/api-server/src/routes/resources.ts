@@ -56,7 +56,7 @@ function selfMemMB(): number {
 }
 
 // ── Route ─────────────────────────────────────────────────────────────────────
-router.get("/system/resources", async (_req, res) => {
+async function getResources(res: import("express").Response) {
   try {
     // CPU: two samples 600ms apart for real usage
     const cpuA = readCpuSample();
@@ -130,6 +130,9 @@ router.get("/system/resources", async (_req, res) => {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
   }
-});
+}
+
+router.get("/system/resources", (_req, res) => getResources(res));
+router.get("/resources", (_req, res) => getResources(res));
 
 export default router;

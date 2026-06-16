@@ -1389,7 +1389,7 @@ router.get("/hf/datasets/search", async (req: Request, res: Response) => {
     }>;
     res.json({ datasets, total: datasets.length, query, hfConnected: !!process.env.HF_TOKEN });
   } catch (e) {
-    res.status(500).json({ error: `HuggingFace API error: ${e}. Check HF_TOKEN.` });
+    res.json({ datasets: [], total: 0, query, hfConnected: false, error: `HuggingFace API unavailable: ${e}` });
   }
 });
 
