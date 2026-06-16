@@ -7,7 +7,9 @@
   "is_private": false,
   "enable_gpu": true,
   "enable_internet": true,
-  "dataset_sources": ["dlavie/dlavie-training-dataset"],
+  "dataset_sources": [
+    "dlavie/dlavie-training-dataset"
+  ],
   "competition_sources": [],
   "kernel_sources": []
 }
