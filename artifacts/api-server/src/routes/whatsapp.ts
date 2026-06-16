@@ -15,8 +15,8 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { whatsappConfigTable, whatsappMessagesTable } from "@workspace/db";
 import { desc, eq, count } from "drizzle-orm";
-import { generateWithFallback } from "../lib/provider-chain";
-import { logger } from "../lib/logger";
+import { generateWithFallback } from "../lib/provider-chain.js";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 

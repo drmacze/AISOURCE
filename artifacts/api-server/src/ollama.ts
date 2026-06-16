@@ -33,17 +33,19 @@ export type OllamaErrorCode =
   | "BAD_RESPONSE"
   | "NO_MODELS"
   | "BAD_INPUT"
+  | "INSUFFICIENT_MEMORY"
   | "UNKNOWN";
 
 const ERROR_HINTS: Record<OllamaErrorCode, string> = {
-  OFFLINE:      "Ollama is not running. The server should auto-start — wait a few seconds and retry.",
-  TIMEOUT:      "Request timed out. Large models may need more time, or Ollama is under load.",
-  DISK_FULL:    "Disk is full. Free up space or configure a custom storage path in Storage Settings.",
-  NOT_FOUND:    "Model not found. Pull it from the Model Catalogue first.",
-  BAD_RESPONSE: "Ollama returned an unexpected response. Try restarting the server.",
-  NO_MODELS:    "No models are installed. Go to the Model Catalogue and download one (e.g. TinyLlama).",
-  BAD_INPUT:    "The request parameters are invalid. Check the input and try again.",
-  UNKNOWN:      "An unexpected error occurred with the Ollama engine.",
+  OFFLINE:             "Ollama is not running. The server should auto-start — wait a few seconds and retry.",
+  TIMEOUT:             "Request timed out. Large models may need more time, or Ollama is under load.",
+  DISK_FULL:           "Disk is full. Free up space or configure a custom storage path in Storage Settings.",
+  NOT_FOUND:           "Model not found. Pull it from the Model Catalogue first.",
+  BAD_RESPONSE:        "Ollama returned an unexpected response. Try restarting the server.",
+  NO_MODELS:           "No models are installed. Go to the Model Catalogue and download one (e.g. TinyLlama).",
+  BAD_INPUT:           "The request parameters are invalid. Check the input and try again.",
+  INSUFFICIENT_MEMORY: "Not enough RAM to run the model. Install a smaller model (e.g. tinyllama) or free up system memory.",
+  UNKNOWN:             "An unexpected error occurred with the Ollama engine.",
 };
 
 export class OllamaError extends Error {
@@ -409,7 +411,7 @@ export async function streamOllamaResponse(
     // If Ollama is offline, try HuggingFace streaming fallback before giving up
     if (code === "OFFLINE" || code === "TIMEOUT" || code === "UNKNOWN") {
       try {
-        const { streamHFResponse, isHFConfigured } = await import("./huggingface");
+        const { streamHFResponse, isHFConfigured } = await import("./huggingface.js");
         if (isHFConfigured()) {
           console.log("[DLavie OS] Ollama offline — streaming via HuggingFace fallback");
           let fullHFText = "";
@@ -442,7 +444,7 @@ export async function streamOllamaResponse(
 
 async function generateFallbackResponse(input: string): Promise<string> {
   try {
-    const { generateHFResponse, isHFConfigured } = await import("./huggingface");
+    const { generateHFResponse, isHFConfigured } = await import("./huggingface.js");
     if (isHFConfigured()) {
       console.log("[DLavie OS] Ollama offline — falling back to HuggingFace Inference API");
       return await generateHFResponse(input, "mistralai/Mistral-7B-Instruct-v0.3", { maxTokens: 256 });

@@ -11,7 +11,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { conversationsTable, messagesTable, documentsTable, promptsTable } from "@workspace/db";
 import { like, or, desc, sql } from "drizzle-orm";
-import { isGroqConfigured, getGroqKey, GROQ_BASE_URL } from "../groq";
+import { isGroqConfigured, getGroqKey, GROQ_BASE_URL } from "../groq.js";
 
 const router: IRouter = Router();
 

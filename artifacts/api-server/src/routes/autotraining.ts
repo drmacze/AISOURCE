@@ -16,8 +16,8 @@ import {
   getAutoTrainingConfig,
   updateAutoTrainingConfig,
   type TrainingEvent,
-} from "../autotraining";
-import { checkGitHubRateLimit, isGitHubConfigured } from "../github-datasets";
+} from "../autotraining.js";
+import { checkGitHubRateLimit, isGitHubConfigured } from "../github-datasets.js";
 import { db } from "@workspace/db";
 import { trainingSamplesTable, trainingDatasetsTable } from "@workspace/db";
 import { count, desc } from "drizzle-orm";

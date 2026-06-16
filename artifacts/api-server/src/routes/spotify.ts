@@ -203,7 +203,7 @@ router.get("/spotify/callback", async (req: Request, res: Response) => {
 
 // ─── Pin a track ──────────────────────────────────────────────────────────────
 router.get("/spotify/pin/:trackId", async (req: Request, res: Response) => {
-  const trackId = req.params["trackId"];
+  const trackId = req.params["trackId"] as string;
   const oembed = await oembedTrack(trackId);
   if (!oembed) {
     res.status(404).json({ error: "Could not fetch track info" });

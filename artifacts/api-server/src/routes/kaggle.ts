@@ -20,7 +20,7 @@ import { trainingSamplesTable, trainingDatasetsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
-import { logger } from "../lib/logger";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 

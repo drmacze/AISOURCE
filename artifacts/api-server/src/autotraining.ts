@@ -36,7 +36,7 @@ import {
   aiModelsTable,
 } from "@workspace/db";
 import { eq, desc, count } from "drizzle-orm";
-import { fetchWikipediaArticle, fetchHFDataset, isHFConfigured } from "./huggingface";
+import { fetchWikipediaArticle, fetchHFDataset, isHFConfigured } from "./huggingface.js";
 import {
   fetchTrendingWithREADME,
   fetchDatasetFromRepo,
@@ -49,7 +49,7 @@ import {
   isGitHubConfigured,
   hashText,
   type TrainingSample,
-} from "./github-datasets";
+} from "./github-datasets.js";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let autoTrainingRunning  = false;

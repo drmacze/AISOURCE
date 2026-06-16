@@ -113,15 +113,11 @@ router.post("/kimi/chat/stream", async (req: Request, res: Response) => {
             conversationId: convIdNum,
             role: "user",
             content: content.trim(),
-            createdAt: new Date(now.getTime() - 1),
-            updatedAt: new Date(now.getTime() - 1),
           },
           {
             conversationId: convIdNum,
             role: "assistant",
             content: fullText,
-            createdAt: now,
-            updatedAt: now,
           },
         ]);
         await db

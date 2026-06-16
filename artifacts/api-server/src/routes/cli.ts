@@ -6,7 +6,7 @@
 
 import { Router, type IRouter, type Request, type Response } from "express";
 import { spawn, execFile } from "child_process";
-import { OLLAMA_PATH, listOllamaModels } from "../ollama";
+import { OLLAMA_PATH, listOllamaModels } from "../ollama.js";
 
 const router: IRouter = Router();
 

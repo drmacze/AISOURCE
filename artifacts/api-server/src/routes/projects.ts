@@ -126,7 +126,7 @@ router.patch("/projects/:id", async (req, res) => {
     if (status === "completed") updates["completedAt"] = new Date();
 
     const [updated] = await db.update(agentProjectsTable)
-      .set(updates as Parameters<typeof db.update>[0] extends infer T ? T : never)
+      .set(updates as any)
       .where(eq(agentProjectsTable.id, id))
       .returning();
 

@@ -16,7 +16,7 @@ import {
   GetTrainingDatasetParams,
   GetTrainingJobParams,
 } from "@workspace/api-zod";
-import { OLLAMA_HOST, listOllamaModels } from "../ollama";
+import { OLLAMA_HOST, listOllamaModels } from "../ollama.js";
 import { spawn } from "child_process";
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
@@ -174,7 +174,7 @@ router.get("/training-datasets/:id/auto-config", async (req: Request, res: Respo
 });
 
 router.get("/training-datasets/:id/export", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const [ds] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, id));
@@ -319,7 +319,7 @@ router.get("/training-jobs/:id", async (req, res) => {
 });
 
 router.post("/training-jobs/:id/cancel", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const [row] = await db
     .select()
     .from(trainingJobsTable)
@@ -383,7 +383,7 @@ router.post("/ai-models", async (req, res) => {
 });
 
 router.patch("/ai-models/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const body = req.body as {
     status?: "active" | "inactive" | "training";
     ollamaName?: string;
@@ -414,7 +414,7 @@ router.patch("/ai-models/:id", async (req, res) => {
 });
 
 router.delete("/ai-models/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const [row] = await db
     .delete(aiModelsTable)
     .where(eq(aiModelsTable.id, id))
@@ -482,7 +482,7 @@ router.post("/ollama-models/pull", async (req, res) => {
 });
 
 router.delete("/ollama-models/:name", async (req, res) => {
-  const name = decodeURIComponent(req.params.name);
+  const name = decodeURIComponent((req.params['name'] as string));
   try {
     const response = await fetch("http://127.0.0.1:11434/api/delete", {
       method: "DELETE",
@@ -503,7 +503,7 @@ router.delete("/ollama-models/:name", async (req, res) => {
 // ─── Samples endpoint ─────────────────────────────────────────────────────────
 
 router.get("/training-datasets/:id/samples", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const { source, minLength, search, limit = "200", offset = "0" } = req.query as Record<string, string>;
@@ -549,7 +549,7 @@ router.get("/training-datasets/:id/samples", async (req: Request, res: Response)
 });
 
 router.post("/training-datasets/:id/deduplicate", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const samples = await db.select().from(trainingSamplesTable)
@@ -824,7 +824,7 @@ export async function runRealFineTuning(
 
     // Fire webhooks
     try {
-      const { fireWebhooks } = await import("./training-advanced");
+      const { fireWebhooks } = await import("./training-advanced.js");
       await fireWebhooks("job.completed", {
         jobId,
         modelId: model.id,
@@ -850,7 +850,7 @@ export async function runRealFineTuning(
 
     // Fire failure webhook
     try {
-      const { fireWebhooks } = await import("./training-advanced");
+      const { fireWebhooks } = await import("./training-advanced.js");
       await fireWebhooks("job.failed", { jobId, modelId: model.id, error: String(error) });
     } catch { /* ignore */ }
   }

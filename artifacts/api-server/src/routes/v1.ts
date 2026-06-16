@@ -21,13 +21,13 @@ import {
   documentsTable,
   aiModelsTable,
 } from "@workspace/db";
-import { eq, desc, count } from "drizzle-orm";
+import { eq, desc, count, sql } from "drizzle-orm";
 import {
   generateOllamaResponse,
   streamOllamaResponse,
   listOllamaModels,
   OllamaError,
-} from "../ollama";
+} from "../ollama.js";
 import {
   generateGroqResponse,
   streamGroqTokens,
@@ -35,7 +35,7 @@ import {
   resolveGroqModel,
   GROQ_MODELS,
   type GroqMessage,
-} from "../groq";
+} from "../groq.js";
 import {
   generateOpenRouterResponse,
   streamOpenRouterTokens,
@@ -43,9 +43,9 @@ import {
   resolveOpenRouterModel,
   OPENROUTER_FREE_MODELS,
   type OpenRouterMessage,
-} from "../openrouter";
-import { generateWithFallback, streamWithFallback } from "../lib/provider-chain";
-import { requireAuth } from "../lib/auth";
+} from "../openrouter.js";
+import { generateWithFallback, streamWithFallback } from "../lib/provider-chain.js";
+import { requireAuth } from "../lib/auth.js";
 
 const router: IRouter = Router();
 
@@ -176,7 +176,7 @@ async function generateUnified(
 
   if (provider === "kimi") {
     try {
-      const { generateKimiResponse } = await import("../kimi");
+      const { generateKimiResponse } = await import("../kimi.js");
       const kimiModel = model.replace(/^kimi\//i, "").replace(/^moonshotai\//i, "") || "kimi-k2-instruct";
       const text = await generateKimiResponse(message, kimiModel, ragContext);
       return { text, provider: "kimi", modelUsed: kimiModel };
@@ -187,7 +187,7 @@ async function generateUnified(
 
   if (provider === "hf") {
     try {
-      const { generateHFResponse, isHFConfigured } = await import("../huggingface");
+      const { generateHFResponse, isHFConfigured } = await import("../huggingface.js");
       if (!isHFConfigured()) throw new Error("HF_TOKEN not configured");
       const hfModel = model.replace(/^hf\//i, "").replace(/^huggingface\//i, "");
       const prompt = ragContext ? `Context:\n${ragContext}\n\nUser: ${message}` : message;
@@ -273,7 +273,7 @@ async function streamUnified(
 
   if (provider === "kimi") {
     try {
-      const { streamKimiResponse } = await import("../kimi");
+      const { streamKimiResponse } = await import("../kimi.js");
       const kimiModel = model.replace(/^kimi\//i, "").replace(/^moonshotai\//i, "") || "kimi-k2-instruct";
       await streamKimiResponse(message, kimiModel, ragContext, res);
       return { provider: "kimi", modelUsed: kimiModel };
@@ -284,7 +284,7 @@ async function streamUnified(
 
   if (provider === "hf") {
     try {
-      const { streamHFResponse, isHFConfigured } = await import("../huggingface");
+      const { streamHFResponse, isHFConfigured } = await import("../huggingface.js");
       if (isHFConfigured()) {
         const hfModel = model.replace(/^hf\//i, "").replace(/^huggingface\//i, "");
         const prompt = ragContext ? `Context:\n${ragContext}\n\nUser: ${message}\nAssistant:` : `User: ${message}\nAssistant:`;
@@ -322,7 +322,7 @@ function pgVectorV1(vec: number[]): string { return "[" + vec.join(",") + "]"; }
 async function retrieveRAGContext(query: string): Promise<string | undefined> {
   try {
     // 1. Try real vector search via HuggingFace embeddings + pgvector
-    const { generateEmbedding } = await import("./documents");
+    const { generateEmbedding } = await import("./documents.js");
     const queryVec = await generateEmbedding(query);
     if (queryVec && queryVec.length === EMBED_DIMS_V1) {
       try {
@@ -553,9 +553,9 @@ router.get("/openapi.json", (_req, res) => {
 
 // ─── GET /api/v1/health ───────────────────────────────────────────────────────
 router.get("/health", async (_req, res) => {
-  const { isOllamaOnline } = await import("../ollama");
-  const { isHFConfigured } = await import("../huggingface");
-  const { isKimiConfigured } = await import("../kimi");
+  const { isOllamaOnline } = await import("../ollama.js");
+  const { isHFConfigured } = await import("../huggingface.js");
+  const { isKimiConfigured } = await import("../kimi.js");
   const { freemem, totalmem } = await import("os");
   const ollamaOnline = await isOllamaOnline();
   const groqOk = isGroqConfigured();
@@ -612,8 +612,8 @@ router.get("/models", async (_req, res) => {
 
 // ─── GET /api/v1/models/catalogue ────────────────────────────────────────────
 router.get("/models/catalogue", async (_req, res) => {
-  const { isHFConfigured } = await import("../huggingface");
-  const { isKimiConfigured } = await import("../kimi");
+  const { isHFConfigured } = await import("../huggingface.js");
+  const { isKimiConfigured } = await import("../kimi.js");
   const ollamaModels = await listOllamaModels();
 
   const cloudModels = [
@@ -867,7 +867,7 @@ router.post("/embed", requireApiKey, rateLimit, async (req, res) => {
     }
 
     // Fallback: HuggingFace real embeddings
-    const { generateEmbedding, } = await import("./documents");
+    const { generateEmbedding, } = await import("./documents.js");
     const hfVec = await generateEmbedding(text);
     if (hfVec) {
       res.json({
@@ -904,7 +904,7 @@ router.post("/generate/image", requireApiKey, rateLimit, async (req, res) => {
   }
 
   try {
-    const { isHFConfigured } = await import("../huggingface");
+    const { isHFConfigured } = await import("../huggingface.js");
     if (!isHFConfigured()) {
       res.status(503).json({
         error: "ImageGenerationUnavailable",
@@ -1104,7 +1104,7 @@ router.post("/rag/search", requireApiKey, rateLimit, async (req, res) => {
   if (!query?.trim()) { res.status(400).json({ error: "query is required" }); return; }
 
   try {
-    const { generateEmbedding } = await import("./documents");
+    const { generateEmbedding } = await import("./documents.js");
     let results: Array<{ documentId: number; title: string; snippet: string; score: number; rank: number; searchMethod: string }> = [];
 
     // Vector search
@@ -1212,7 +1212,7 @@ async function getOrCreateSession(
  * Perfect for WhatsApp bots: sessionId = phone number.
  */
 router.post("/sessions/:sessionId/message", requireApiKey, rateLimit, async (req, res) => {
-  const sessionId = String(req.params.sessionId);
+  const sessionId = String((req.params['sessionId'] as string));
   const { message, model, systemPrompt, useRAG = true } = req.body as {
     message?: string;
     model?: string;
@@ -1300,7 +1300,7 @@ router.post("/sessions/:sessionId/message", requireApiKey, rateLimit, async (req
  * Get session info and recent message count.
  */
 router.get("/sessions/:sessionId", requireApiKey, rateLimit, async (req, res) => {
-  const sessionId = String(req.params.sessionId);
+  const sessionId = String((req.params['sessionId'] as string));
   const title = `session:${sessionId}`;
 
   const [conv] = await db
@@ -1340,7 +1340,7 @@ router.get("/sessions/:sessionId", requireApiKey, rateLimit, async (req, res) =>
  * Get full conversation history for a session.
  */
 router.get("/sessions/:sessionId/history", requireApiKey, rateLimit, async (req, res) => {
-  const sessionId = String(req.params.sessionId);
+  const sessionId = String((req.params['sessionId'] as string));
   const limit = Math.min(parseInt(String(req.query.limit || "50"), 10), 200);
   const title = `session:${sessionId}`;
 
@@ -1374,7 +1374,7 @@ router.get("/sessions/:sessionId/history", requireApiKey, rateLimit, async (req,
  * Reset (delete) a session — clears all history.
  */
 router.delete("/sessions/:sessionId", requireApiKey, rateLimit, async (req, res) => {
-  const sessionId = String(req.params.sessionId);
+  const sessionId = String((req.params['sessionId'] as string));
   const title = `session:${sessionId}`;
 
   const [conv] = await db
@@ -1445,7 +1445,7 @@ router.post("/conversations", requireApiKey, rateLimit, async (req, res) => {
 });
 
 router.get("/conversations/:id", requireApiKey, rateLimit, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [conv] = await db.select().from(conversationsTable).where(eq(conversationsTable.id, id));
   if (!conv) { res.status(404).json({ error: "Conversation not found" }); return; }
@@ -1456,7 +1456,7 @@ router.get("/conversations/:id", requireApiKey, rateLimit, async (req, res) => {
 });
 
 router.delete("/conversations/:id", requireApiKey, rateLimit, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   await db.delete(messagesTable).where(eq(messagesTable.conversationId, id));
   const [conv] = await db.delete(conversationsTable).where(eq(conversationsTable.id, id)).returning();
@@ -1509,10 +1509,10 @@ router.post("/benchmark", requireApiKey, rateLimit, async (req, res) => {
 
 // ─── GET /api/v1/stats ────────────────────────────────────────────────────────
 router.get("/stats", requireApiKey, rateLimit, async (_req, res) => {
-  const { isOllamaOnline } = await import("../ollama");
-  const { isHFConfigured } = await import("../huggingface");
-  const { isKimiConfigured } = await import("../kimi");
-  const { getAutoTrainingStatus } = await import("../autotraining");
+  const { isOllamaOnline } = await import("../ollama.js");
+  const { isHFConfigured } = await import("../huggingface.js");
+  const { isKimiConfigured } = await import("../kimi.js");
+  const { getAutoTrainingStatus } = await import("../autotraining.js");
   const [convs] = await db.select({ c: count() }).from(conversationsTable);
   const [msgs] = await db.select({ c: count() }).from(messagesTable);
   const [docs] = await db.select({ c: count() }).from(documentsTable);

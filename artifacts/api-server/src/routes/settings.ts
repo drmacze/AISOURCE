@@ -12,7 +12,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
-import { logger } from "../lib/logger";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
@@ -265,7 +265,7 @@ router.post("/settings/secrets", (req: Request, res: Response) => {
 
 // ─── DELETE /api/settings/secrets/:name ───────────────────────────────────────
 router.delete("/settings/secrets/:name", (req: Request, res: Response) => {
-  const name = req.params.name?.trim().toUpperCase();
+  const name = (req.params['name'] as string)?.trim().toUpperCase();
   if (!name) {
     res.status(400).json({ error: "name is required" });
     return;

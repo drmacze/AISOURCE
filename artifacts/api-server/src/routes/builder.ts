@@ -22,17 +22,17 @@ import {
   generateGroqResponse,
   isGroqConfigured,
   GROQ_MODELS,
-} from "../groq";
+} from "../groq.js";
 import {
   generateOpenRouterResponse,
   isOpenRouterConfigured,
-} from "../openrouter";
+} from "../openrouter.js";
 import {
   chatCompletionHFWithFallback,
   isHFConfigured,
   type ChatMessage,
-} from "../huggingface";
-import { generateOllamaResponse } from "../ollama";
+} from "../huggingface.js";
+import { generateOllamaResponse } from "../ollama.js";
 
 const router = Router();
 const WORKSPACE = process.env.REPL_HOME || process.env.HOME || "/home/runner/workspace";
@@ -731,7 +731,7 @@ router.get("/builder/tasks", async (_req, res) => {
 // GET /api/builder/tasks/:id
 router.get("/builder/tasks/:id", async (req, res) => {
   try {
-    const id = Number(req.params.id);
+    const id = Number((req.params['id'] as string));
     const [task] = await db.select().from(builderTasksTable).where(eq(builderTasksTable.id, id)).limit(1);
     if (!task) { res.status(404).json({ error: "Task not found" }); return; }
     res.json(task);
@@ -765,7 +765,7 @@ router.post("/builder/tasks", async (req: Request, res: Response) => {
 
 // PUT /api/builder/tasks/:id
 router.put("/builder/tasks/:id", async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   const { title, description, assignedAgent, priority, status } = req.body as {
     title?: string; description?: string; assignedAgent?: string;
     priority?: number; status?: string;
@@ -787,7 +787,7 @@ router.put("/builder/tasks/:id", async (req: Request, res: Response) => {
 
 // DELETE /api/builder/tasks/:id
 router.delete("/builder/tasks/:id", async (req, res) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   try {
     await db.delete(builderTasksTable).where(eq(builderTasksTable.id, id));
     res.json({ deleted: true });
@@ -818,7 +818,7 @@ router.post("/builder/decompose", async (req: Request, res: Response) => {
 
 // POST /api/builder/tasks/:id/execute — agent picks up and runs the task
 router.post("/builder/tasks/:id/execute", async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   try {
     const [task] = await db.select().from(builderTasksTable).where(eq(builderTasksTable.id, id)).limit(1);
     if (!task) { res.status(404).json({ error: "Task not found" }); return; }
@@ -844,7 +844,7 @@ router.post("/builder/tasks/:id/execute", async (req: Request, res: Response) =>
 
 // GET /api/builder/tasks/:id/stream — SSE stream of task execution
 router.get("/builder/tasks/:id/stream", async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   const [task] = await db.select().from(builderTasksTable).where(eq(builderTasksTable.id, id)).limit(1).catch(() => [null]);
   if (!task) { res.status(404).json({ error: "Task not found" }); return; }
 

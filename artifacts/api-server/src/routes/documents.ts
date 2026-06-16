@@ -7,8 +7,8 @@ import { createReadStream, readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { objectStorageClient } from "../replit_integrations/object_storage";
-import { getHFToken } from "../huggingface";
+import { objectStorageClient } from "../replit_integrations/object_storage/index.js";
+import { getHFToken } from "../huggingface.js";
 
 // ─── Object Storage helpers ────────────────────────────────────────────────────
 const BUCKET_ID = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID || "";
@@ -88,7 +88,8 @@ function pgVector(vec: number[]): string {
 // ─── Text extraction helpers ────────────────────────────────────────────────
 
 async function extractPDF(filePath: string): Promise<string> {
-  const pdfParse = (await import("pdf-parse")).default;
+  const pdfMod = await import("pdf-parse");
+  const pdfParse = (pdfMod as any).default ?? pdfMod;
   const buf = readFileSync(filePath);
   const data = await pdfParse(buf);
   return data.text || "";
@@ -374,7 +375,7 @@ router.post("/documents/import-url", async (req: Request, res: Response) => {
 });
 
 router.get("/documents/:id", async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "invalid id" }); return; }
   const [row] = await db.select().from(documentsTable).where(eq(documentsTable.id, id));
   if (!row) { res.status(404).json({ error: "Document not found" }); return; }
@@ -382,7 +383,7 @@ router.get("/documents/:id", async (req: Request, res: Response) => {
 });
 
 router.delete("/documents/:id", async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "invalid id" }); return; }
   const [row] = await db.delete(documentsTable).where(eq(documentsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Document not found" }); return; }
@@ -426,16 +427,7 @@ router.post("/documents/search", async (req: Request, res: Response) => {
 
         if (rows.length > 0) {
           results = rows.map((r) => ({
-            doc: {
-              id: r.id as number,
-              title: r.title as string,
-              content: r.content as string,
-              fileType: (r.file_type as string) || "text",
-              size: r.size as number,
-              chunkCount: r.chunk_count as number,
-              indexed: r.indexed as boolean,
-              createdAt: r.created_at as Date,
-              updatedAt: r.updated_at as Date,
+            doc: { id: r.id as number, title: r.title as string, content: r.content as string, fileType: (r.file_type as string) || "text", size: r.size as number, chunkCount: r.chunk_count as number, indexed: false, storageUrl: null, storageObjectPath: null, embeddingModel: null, embedding: null, updatedAt: null, createdAt: new Date(),
             },
             score: typeof r.vec_score === "number" ? r.vec_score : parseFloat(String(r.vec_score)) || 0,
             searchMethod: "vector",
@@ -535,7 +527,7 @@ router.post("/documents/reembed-all", async (_req: Request, res: Response) => {
 
 // ─── GET /documents/:id/preview ───────────────────────────────────────────────
 router.get("/documents/:id/preview", async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "invalid id" }); return; }
   const [row] = await db.select().from(documentsTable).where(eq(documentsTable.id, id));
   if (!row) { res.status(404).json({ error: "Document not found" }); return; }
@@ -572,7 +564,7 @@ router.get("/documents/:id/preview", async (req: Request, res: Response) => {
 
 // ─── POST /documents/:id/embed ────────────────────────────────────────────────
 router.post("/documents/:id/embed", async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "invalid id" }); return; }
   const [doc] = await db.select().from(documentsTable).where(eq(documentsTable.id, id));
   if (!doc) { res.status(404).json({ error: "Document not found" }); return; }

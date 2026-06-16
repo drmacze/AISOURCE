@@ -21,19 +21,19 @@ import {
   streamGroqResponse,
   isGroqConfigured,
   type GroqMessage,
-} from "../groq";
+} from "../groq.js";
 import {
   generateOpenRouterResponse,
   streamOpenRouterResponse,
   isOpenRouterConfigured,
   type OpenRouterMessage,
-} from "../openrouter";
+} from "../openrouter.js";
 import {
   generateOllamaResponse,
   streamOllamaResponse,
   isOllamaOnline,
-} from "../ollama";
-import { isHFConfigured } from "../huggingface";
+} from "../ollama.js";
+import { isHFConfigured } from "../huggingface.js";
 
 // ─── Provider definitions ─────────────────────────────────────────────────────
 
@@ -151,7 +151,7 @@ export async function generateWithFallback(
       }
 
       if (slot.name === "hf") {
-        const { generateHFResponse } = await import("../huggingface");
+        const { generateHFResponse } = await import("../huggingface.js");
         const prompt = ragContext
           ? `${systemMsg}\n\nContext:\n${ragContext}\n\nUser: ${message}\nAssistant:`
           : `${systemMsg}\n\nUser: ${message}\nAssistant:`;
@@ -213,7 +213,7 @@ export async function streamWithFallback(
       }
 
       if (slot.name === "hf") {
-        const { streamHFResponse, isHFConfigured: hfOk } = await import("../huggingface");
+        const { streamHFResponse, isHFConfigured: hfOk } = await import("../huggingface.js");
         if (!hfOk()) continue;
 
         res.setHeader("Content-Type", "text/event-stream");

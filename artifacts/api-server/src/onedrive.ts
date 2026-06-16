@@ -214,7 +214,7 @@ export async function uploadFile(
   const res = await fetch(url, {
     method: "PUT",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": mimeType },
-    body: content,
+    body: content as unknown as BodyInit,
   });
   if (!res.ok) throw new Error(`Upload error: ${res.status} ${await res.text()}`);
   return res.json() as Promise<DriveItem>;

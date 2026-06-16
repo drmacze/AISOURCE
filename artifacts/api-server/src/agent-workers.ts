@@ -170,10 +170,9 @@ export async function readContext(key: string): Promise<string | null> {
 export async function writeContext(agentId: string, key: string, value: string): Promise<void> {
   try {
     await db.insert(systemContextTable).values({
-      key, value, updatedBy: agentId, updatedAt: new Date(),
-    }).onConflictDoUpdate({
+      key, value, updatedBy: agentId, }).onConflictDoUpdate({
       target: systemContextTable.key,
-      set: { value, updatedBy: agentId, updatedAt: new Date() },
+      set: { value, updatedBy: agentId },
     });
     contextCache.set(key, { value, ts: Date.now() });
   } catch { /* non-fatal */ }
@@ -629,8 +628,7 @@ async function heartbeat(
     await db
       .insert(agentStatusTable)
       .values({ agentId, displayName, status, currentTask: currentTask ?? null, lastSeen: new Date(), tickCount: 1, metadata: meta ?? null })
-      .onConflictDoUpdate({
-        target: agentStatusTable.agentId,
+      .onConflictDoUpdate({ target: agentStatusTable.agentId,
         set: {
           status,
           currentTask: currentTask ?? null,
@@ -946,12 +944,12 @@ async function tickTrainer() {
       .limit(3);
 
     for (const job of pendingJobs) {
-      log("trainer", `▶️ Activating training job ${job.id}: ${job.jobName}`);
+      log("trainer", `▶️ Activating training job ${job.id}: ${`job#${job.id}`}`);
       await db
         .update(trainingJobsTable)
         .set({ status: "running", startedAt: new Date() })
         .where(eq(trainingJobsTable.id, job.id));
-      await recordMetric("trainer", "training_job_started", String(job.id), job.jobName);
+      await recordMetric("trainer", "training_job_started", String(job.id), `job#${job.id}`);
     }
 
     // 2. Check for completed jobs — run benchmark
@@ -966,14 +964,14 @@ async function tickTrainer() {
     if (completedJobs.length > 0 && Date.now() - state.lastBenchmark > benchmarkCooldown) {
       state.lastBenchmark = Date.now();
       const job = completedJobs[0]!;
-      log("trainer", `📊 Running benchmark on job ${job.id}: ${job.jobName}`);
+      log("trainer", `📊 Running benchmark on job ${job.id}: ${`job#${job.id}`}`);
       try {
         await api("/training/benchmark", "POST", {
           jobId: job.id,
-          modelName: job.modelName,
+          modelName: (job.baseModelName ?? "unknown"),
           metrics: ["perplexity", "bleu"],
         });
-        await recordMetric("trainer", "benchmark_completed", String(job.id), job.modelName);
+        await recordMetric("trainer", "benchmark_completed", String(job.id), (job.baseModelName ?? "unknown"));
       } catch { /* non-fatal */ }
     }
 
@@ -1054,9 +1052,7 @@ async function tickTrainer() {
           await db.insert(trainingSamplesTable).values({
             datasetId,
             input: pair.input,
-            output: pair.output,
-            instruction: "You are DLavie OS AI assistant. Answer helpfully and accurately.",
-            source: "auto-curated",
+            output: pair.output, source: "auto-curated",
           }).onConflictDoNothing();
         }
         log("trainer", `✅ Added ${pairs.length} QA pairs from conv ${conv.id}`);
@@ -1400,7 +1396,7 @@ async function tickAnalyst() {
       await sendMail(
         "analyst", "trainer",
         `${failedJobs.length} training jobs failed`,
-        `Failed jobs:\n${failedJobs.map((j) => `• #${j.id} ${j.jobName}: ${j.errorMessage || "unknown error"}`).join("\n")}`,
+        `Failed jobs:\n${failedJobs.map((j) => `• #${j.id} ${`job#${j.id}`}: ${(j.error ?? "unknown error") || "unknown error"}`).join("\n")}`,
         "high"
       );
     }
@@ -1631,9 +1627,7 @@ async function tickCurator() {
             await db.insert(trainingSamplesTable).values({
               datasetId: dsId,
               input: pair.input,
-              output: pair.output,
-              instruction: "Respond as DLavie OS AI: helpful, precise, and knowledgeable.",
-              source: "curator",
+              output: pair.output, source: "curator",
             }).onConflictDoNothing();
           }
           totalPairsAdded += qualityPairs.length;
@@ -2350,10 +2344,10 @@ async function tickCodeReviewer() {
       .limit(30);
 
     const lowQuality = recentSamples.filter(s =>
-      s.output.length < 25 ||
+      (s.output?.length ?? 0) < 25 ||
       s.input.length < 8 ||
-      s.output.toLowerCase().includes("i cannot") ||
-      s.output.toLowerCase().includes("i'm sorry, i")
+      (s.output ?? "").toLowerCase().includes("i cannot") ||
+      (s.output ?? "").toLowerCase().includes("i'm sorry, i")
     );
 
     await recordMetric("reviewer", "low_quality_samples", String(lowQuality.length));
@@ -2362,8 +2356,8 @@ async function tickCodeReviewer() {
       await sendMail("reviewer", "trainer",
         `⚠️ Training Data Quality Alert: ${lowQuality.length} low-quality samples`,
         `Code review of training corpus flagged ${lowQuality.length} samples that may harm model quality:\n\n` +
-        `• Very short outputs (<25 chars): ${lowQuality.filter(s => s.output.length < 25).length}\n` +
-        `• Refusal responses: ${lowQuality.filter(s => s.output.toLowerCase().includes("i cannot") || s.output.toLowerCase().includes("i'm sorry")).length}\n\n` +
+        `• Very short outputs (<25 chars): ${lowQuality.filter(s => (s.output?.length ?? 0) < 25).length}\n` +
+        `• Refusal responses: ${lowQuality.filter(s => (s.output ?? "").toLowerCase().includes("i cannot") || (s.output ?? "").toLowerCase().includes("i'm sorry")).length}\n\n` +
         `Recommend filtering these before next training run. Quality > quantity.`,
         "normal"
       );
@@ -2755,7 +2749,7 @@ async function tickQA() {
   // Check for agents in error state
   const agentStates = await db.select().from(agentStatusTable).catch(() => []);
   const errorAgents = agentStates.filter(a => a.status === "error");
-  const offlineAgents = agentStates.filter(a => a.status === "offline");
+  const offlineAgents = agentStates.filter(a => a.status === "sleeping");
 
   const task    = pickTask("qa");
   const thought = await agentThink("qa", "QA Engineer",
@@ -2856,7 +2850,7 @@ async function tickModelOps() {
 
     // Fire event if negative rate is high
     if (negRate > 40 && total >= 5) {
-      await eventBus.fire("quality_degradation", {
+      await eventBus.fire("quality_drop_detected", {
         agent: "modelops",
         negRate: negRate.toFixed(1),
         total,
@@ -2869,22 +2863,15 @@ async function tickModelOps() {
     await db.insert(agentStatusTable).values({
       agentId: "modelops",
       displayName: "🤖 ModelOps",
-      status: "active",
+      status: "working",
       currentTask: task,
-      lastThought: thought,
-      contextItems: [`Feedback: ${total}`, `Neg rate: ${negRate.toFixed(1)}%`, negRate > 40 ? "⚠️ Alert fired" : "✅ Nominal"],
-    }).onConflictDoUpdate({
-      target: agentStatusTable.agentId,
-      set: { status: "active", currentTask: task, lastThought: thought, updatedAt: new Date() },
-    });
+      metadata: { thought, negRate: negRate.toFixed(1), total },
+    }).onConflictDoUpdate({ target: agentStatusTable.agentId, set: { status: "working", currentTask: task } });
   } catch (err) {
     await db.insert(agentStatusTable).values({
       agentId: "modelops", displayName: "🤖 ModelOps", status: "idle",
-      currentTask: "Monitoring model quality", lastThought: "Awaiting feedback data", contextItems: [],
-    }).onConflictDoUpdate({
-      target: agentStatusTable.agentId,
-      set: { status: "idle", updatedAt: new Date() },
-    }).catch(() => {});
+      currentTask: "Monitoring model quality",
+    }).onConflictDoUpdate({ target: agentStatusTable.agentId, set: { status: "idle", currentTask: "Monitoring model quality" } }).catch(() => {});
   }
 }
 
@@ -2940,7 +2927,7 @@ async function tickKaggle() {
 
     // Check last sync time from worker memory
     const mem = await loadMemory("kaggle");
-    const lastSyncStr = mem.notes?.match(/lastSync:(\d+)/)?.[1];
+    const lastSyncStr = mem.memory.match(/lastSync:(\d+)/)?.[1];
     const lastSync    = lastSyncStr ? Number(lastSyncStr) : 0;
     const sinceSync   = Date.now() - lastSync;
     const shouldSync  = sinceSync > 25 * 60_000; // sync every 25 min

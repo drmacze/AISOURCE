@@ -10,12 +10,12 @@ import {
   ListMessagesParams,
   SendMessageParams,
 } from "@workspace/api-zod";
-import { generateOllamaResponse, streamOllamaResponse, OllamaError } from "../ollama";
-import { streamKimiResponse } from "../kimi";
-import { streamGroqResponse, generateGroqResponse, isGroqConfigured } from "../groq";
-import { streamOpenRouterResponse, generateOpenRouterResponse, isOpenRouterConfigured } from "../openrouter";
-import { generateEmbedding } from "./documents";
-import { ddgSearch } from "./search";
+import { generateOllamaResponse, streamOllamaResponse, OllamaError } from "../ollama.js";
+import { streamKimiResponse } from "../kimi.js";
+import { streamGroqResponse, generateGroqResponse, isGroqConfigured } from "../groq.js";
+import { streamOpenRouterResponse, generateOpenRouterResponse, isOpenRouterConfigured } from "../openrouter.js";
+import { generateEmbedding } from "./documents.js";
+import { ddgSearch } from "./search.js";
 
 /**
  * Detect which provider to use based on model name prefix.
@@ -75,7 +75,7 @@ async function generateToText(
     if (errMsg.includes("NO_MODELS") || errMsg.includes("ECONNREFUSED") || errMsg.includes("OFFLINE")) {
       console.warn("[conversations] Ollama unavailable, trying provider chain");
       try {
-        const { generateWithFallback } = await import("../lib/provider-chain");
+        const { generateWithFallback } = await import("../lib/provider-chain.js");
         const result = await generateWithFallback(message, ragContext, "You are DLavie OS, a helpful AI assistant.");
         return result.text;
       } catch (chainErr) {
@@ -355,7 +355,7 @@ router.get("/conversations/:id/messages", async (req, res) => {
 
 // Save a user+assistant message pair directly (used by cloud/Puter AI path)
 router.post("/conversations/:id/messages/pair", async (req: Request, res: Response) => {
-  const idNum = parseInt(req.params.id, 10);
+  const idNum = parseInt((req.params['id'] as string), 10);
   if (isNaN(idNum)) {
     res.status(400).json({ error: "Invalid conversation id" });
     return;
@@ -458,7 +458,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
 
 // STREAMING message endpoint — SSE real-time response
 router.post("/conversations/:id/messages/stream", async (req: Request, res: Response) => {
-  const idNum = parseInt(req.params.id, 10);
+  const idNum = parseInt((req.params['id'] as string), 10);
   if (isNaN(idNum)) {
     res.status(400).json({ error: "Invalid conversation id" });
     return;
@@ -569,7 +569,7 @@ router.post("/conversations/:id/messages/stream", async (req: Request, res: Resp
 
 // ─── GET /conversations/:id/export ────────────────────────────────────────────
 router.get("/conversations/:id/export", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const format = (req.query.format as string) || "json";
@@ -634,7 +634,7 @@ router.get("/conversations/:id/export", async (req, res) => {
 
 // GET /conversations/:id/summary — AI-generated conversation summary
 router.get("/conversations/:id/summary", async (req: Request, res: Response) => {
-  const idNum = parseInt(req.params.id, 10);
+  const idNum = parseInt((req.params['id'] as string), 10);
   if (isNaN(idNum)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const msgs = await db.select().from(messagesTable)
@@ -650,7 +650,7 @@ router.get("/conversations/:id/summary", async (req: Request, res: Response) => 
     .join("\n");
 
   try {
-    const { generateOllamaResponse, isOllamaOnline } = await import("../ollama");
+    const { generateOllamaResponse, isOllamaOnline } = await import("../ollama.js");
     const online = await isOllamaOnline().catch(() => false);
     if (!online) {
       res.json({ summary: `Conversation with ${msgs.length} messages.` });

@@ -34,7 +34,7 @@ import {
   listOllamaModels,
   pullOllamaModel,
   isOllamaOnline,
-} from "../ollama";
+} from "../ollama.js";
 import {
   chatCompletionHFWithFallback,
   isHFConfigured,
@@ -43,18 +43,18 @@ import {
   HF_AGENT_MODELS,
   hfHeaders,
   type ChatMessage,
-} from "../huggingface";
+} from "../huggingface.js";
 import {
   generateGroqResponse,
   isGroqConfigured,
   GROQ_MODELS,
-} from "../groq";
+} from "../groq.js";
 import {
   generateOpenRouterResponse,
   isOpenRouterConfigured,
   OPENROUTER_FREE_MODELS,
   type OpenRouterMessage,
-} from "../openrouter";
+} from "../openrouter.js";
 import crypto from "crypto";
 
 const router: IRouter = Router();
@@ -574,7 +574,7 @@ const TOOLS: AgentTool[] = [
       if (!datasetId || !input || !output) return { ok: false, error: "datasetId, input, output required" };
       const [ds] = await db.select().from(trainingDatasetsTable).where(eq(trainingDatasetsTable.id, datasetId));
       if (!ds) return { ok: false, error: `Dataset #${datasetId} not found` };
-      const [row] = await db.insert(trainingSamplesTable).values({ datasetId, input, expectedOutput: output, source }).returning();
+      const [row] = await db.insert(trainingSamplesTable).values({ datasetId, input, output: output, source }).returning();
       return { ok: true, data: row };
     },
   },
@@ -608,7 +608,7 @@ Return ONLY JSON array: [{"input":"specific question","output":"comprehensive ac
         const inserted = [];
         for (const s of valid) {
           const [row] = await db.insert(trainingSamplesTable).values({
-            datasetId, input: s.input, expectedOutput: s.output, source: "dlavie-agent-32b",
+            datasetId, input: s.input, output: s.output, source: "dlavie-agent-32b",
           }).returning();
           inserted.push(row);
         }
@@ -635,9 +635,9 @@ Return ONLY JSON array: [{"input":"specific question","output":"comprehensive ac
       const stats = {
         total: samples.length,
         avgInputLen: Math.round(samples.reduce((s, r) => s + r.input.length, 0) / Math.max(1, samples.length)),
-        avgOutputLen: Math.round(samples.reduce((s, r) => s + (r.expectedOutput || "").length, 0) / Math.max(1, samples.length)),
+        avgOutputLen: Math.round(samples.reduce((s, r) => s + (r.output || "").length, 0) / Math.max(1, samples.length)),
         sources: [...new Set(samples.map((s) => s.source))],
-        shortOutputs: samples.filter((s) => (s.expectedOutput || "").length < 50).length,
+        shortOutputs: samples.filter((s) => (s.output || "").length < 50).length,
       };
 
       try {
@@ -647,7 +647,7 @@ Return ONLY JSON array: [{"input":"specific question","output":"comprehensive ac
 "${ds.name}" | Task: ${ds.taskType} | Samples: ${stats.total}
 Avg input: ${stats.avgInputLen}c | Avg output: ${stats.avgOutputLen}c | Short outputs: ${stats.shortOutputs}
 Sources: ${stats.sources.join(", ")}
-Sample 1: "${samples[0]?.input.slice(0, 80)}" → "${(samples[0]?.expectedOutput || "").slice(0, 80)}"
+Sample 1: "${samples[0]?.input.slice(0, 80)}" → "${(samples[0]?.output || "").slice(0, 80)}"
 
 Give: quality score (0-10), top 3 specific issues, 3 improvement actions.` },
         ], { maxTokens: 1200 });
@@ -673,7 +673,7 @@ Give: quality score (0-10), top 3 specific issues, 3 improvement actions.` },
       try {
         const r = await agentLLMCall([
           { role: "system", content: "Generate diverse variations of training examples. Preserve the knowledge, vary the expression. Return ONLY valid JSON." },
-          { role: "user", content: `Create ${count} ${style} variations. Source:\n${samples.slice(0, 5).map((s, i) => `${i+1}. Q:${s.input.slice(0, 100)} A:${(s.expectedOutput||"").slice(0, 100)}`).join("\n")}\n\nReturn: [{"input":"...","output":"..."}]` },
+          { role: "user", content: `Create ${count} ${style} variations. Source:\n${samples.slice(0, 5).map((s, i) => `${i+1}. Q:${s.input.slice(0, 100)} A:${(s.output||"").slice(0, 100)}`).join("\n")}\n\nReturn: [{"input":"...","output":"..."}]` },
         ], { maxTokens: 3000, temperature: 0.8 });
         const s = r.text.indexOf("["), e = r.text.lastIndexOf("]");
         if (s === -1 || e === -1) throw new Error("No JSON");
@@ -681,7 +681,7 @@ Give: quality score (0-10), top 3 specific issues, 3 improvement actions.` },
         const valid = parsed.filter((p) => p.input && p.output).slice(0, count);
         const inserted = [];
         for (const p of valid) {
-          const [row] = await db.insert(trainingSamplesTable).values({ datasetId, input: p.input, expectedOutput: p.output, source: `agent-augment-${style}` }).returning();
+          const [row] = await db.insert(trainingSamplesTable).values({ datasetId, input: p.input, output: p.output, source: `agent-augment-${style}` }).returning();
           inserted.push(row);
         }
         return { ok: true, data: { augmented: inserted.length, style, dataset: ds?.name } };
@@ -708,7 +708,7 @@ Give: quality score (0-10), top 3 specific issues, 3 improvement actions.` },
           const output = String(row.answer || row.output || row.response || row.label || "");
           if (!input || !output) continue;
           const [s] = await db.insert(trainingSamplesTable).values({
-            datasetId: localDatasetId, input: input.slice(0, 1000), expectedOutput: output.slice(0, 2000), source: `hf:${hfDataset}`,
+            datasetId: localDatasetId, input: input.slice(0, 1000), output: output.slice(0, 2000), source: `hf:${hfDataset}`,
           }).returning();
           inserted.push(s);
         }
@@ -791,7 +791,7 @@ Include: description, intended use, limitations, training data, evaluation, usag
       try {
         const r = await agentLLMCall([
           { role: "system", content: "You evaluate AI model quality objectively based on sample data. Score precisely." },
-          { role: "user", content: `Evaluate model "${model.name}" on:\n${samples.map((s, i) => `${i+1}. IN: ${s.input.slice(0, 120)}\nEXP: ${(s.expectedOutput||"").slice(0, 120)}`).join("\n\n")}\n\nProvide: accuracy estimate (%), quality score (0-10), strengths, weaknesses, recommendation.` },
+          { role: "user", content: `Evaluate model "${model.name}" on:\n${samples.map((s, i) => `${i+1}. IN: ${s.input.slice(0, 120)}\nEXP: ${(s.output||"").slice(0, 120)}`).join("\n\n")}\n\nProvide: accuracy estimate (%), quality score (0-10), strengths, weaknesses, recommendation.` },
         ], { maxTokens: 1200 });
         return { ok: true, data: { model: model.name, evaluation: r.text, samplesEvaluated: samples.length, aiModel: r.model } };
       } catch (e) { return { ok: false, error: String(e) }; }
@@ -1286,24 +1286,24 @@ router.get("/agent/sessions", (_req, res) => {
 });
 
 router.get("/agent/sessions/:id", (req, res) => {
-  const s = sessions.get(req.params.id);
+  const s = sessions.get((req.params['id'] as string));
   if (!s) { res.status(404).json({ error: "Session not found" }); return; }
   res.json(s);
 });
 
 router.post("/agent/sessions/:id/stop", (req, res) => {
-  const s = sessions.get(req.params.id);
+  const s = sessions.get((req.params['id'] as string));
   if (!s) { res.status(404).json({ error: "Session not found" }); return; }
   if (s.status === "running") { s.status = "stopped"; s.summary = "Stopped by user."; addEvent(s, { type: "done", summary: "Stopped by user.", steps: s.totalSteps }); }
   res.json({ id: s.id, status: s.status });
 });
 
 router.delete("/agent/sessions/:id", (req, res) => {
-  res.json({ deleted: sessions.delete(req.params.id) });
+  res.json({ deleted: sessions.delete((req.params['id'] as string)) });
 });
 
 router.get("/agent/sessions/:id/stream", (req, res) => {
-  const session = sessions.get(req.params.id);
+  const session = sessions.get((req.params['id'] as string));
   if (!session) { res.status(404).json({ error: "Session not found" }); return; }
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -1346,7 +1346,7 @@ router.get("/agent/memories", async (_req, res) => {
 
 router.delete("/agent/memories/:id", async (req, res) => {
   try {
-    await db.delete(agentMemoriesTable).where(eq(agentMemoriesTable.id, Number(req.params.id)));
+    await db.delete(agentMemoriesTable).where(eq(agentMemoriesTable.id, Number((req.params['id'] as string))));
     res.json({ deleted: true });
   } catch (e) { res.status(500).json({ error: String(e) }); }
 });
@@ -1425,7 +1425,7 @@ router.get("/agent/chat/conversations", async (_req, res) => {
 
 router.get("/agent/chat/conversations/:id/messages", async (req, res) => {
   try {
-    const id = Number(req.params.id);
+    const id = Number((req.params['id'] as string));
     if (!id) { res.status(400).json({ error: "invalid id" }); return; }
     const msgs = await db.select()
       .from(messagesTable)
@@ -1437,7 +1437,7 @@ router.get("/agent/chat/conversations/:id/messages", async (req, res) => {
 
 router.delete("/agent/chat/conversations/:id", async (req, res) => {
   try {
-    const id = Number(req.params.id);
+    const id = Number((req.params['id'] as string));
     if (!id) { res.status(400).json({ error: "invalid id" }); return; }
     await db.delete(messagesTable).where(eq(messagesTable.conversationId, id));
     await db.delete(conversationsTable).where(eq(conversationsTable.id, id));

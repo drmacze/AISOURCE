@@ -16,8 +16,8 @@
  */
 
 import { Router, type IRouter } from "express";
-import { getHFToken } from "../huggingface";
-import { generateOllamaResponse, isOllamaOnline } from "../ollama";
+import { getHFToken } from "../huggingface.js";
+import { generateOllamaResponse, isOllamaOnline } from "../ollama.js";
 
 const router: IRouter = Router();
 

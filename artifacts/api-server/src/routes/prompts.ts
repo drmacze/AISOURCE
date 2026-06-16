@@ -64,7 +64,7 @@ router.post("/prompts", async (req, res) => {
 
 // ─── GET /api/prompts/:id ────────────────────────────────────────────────────
 router.get("/prompts/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [row] = await db.select().from(promptsTable).where(eq(promptsTable.id, id));
   if (!row) { res.status(404).json({ error: "Prompt not found" }); return; }
@@ -73,7 +73,7 @@ router.get("/prompts/:id", async (req, res) => {
 
 // ─── PATCH /api/prompts/:id ───────────────────────────────────────────────────
 router.patch("/prompts/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const { name, content, category, tags, description } = req.body as Record<string, unknown>;
@@ -91,7 +91,7 @@ router.patch("/prompts/:id", async (req, res) => {
 
 // ─── DELETE /api/prompts/:id ──────────────────────────────────────────────────
 router.delete("/prompts/:id", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [deleted] = await db.delete(promptsTable).where(eq(promptsTable.id, id)).returning();
   if (!deleted) { res.status(404).json({ error: "Prompt not found" }); return; }
@@ -100,7 +100,7 @@ router.delete("/prompts/:id", async (req, res) => {
 
 // ─── POST /api/prompts/:id/use ────────────────────────────────────────────────
 router.post("/prompts/:id/use", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   await db.update(promptsTable)
     .set({ useCount: sql`use_count + 1`, updatedAt: new Date() })

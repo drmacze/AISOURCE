@@ -26,8 +26,8 @@ import {
   STORAGE_CONFIG_FILE,
   loadStorageConfig,
   restartOllamaServer,
-} from "../ollama";
-import { listHFModels } from "../huggingface";
+} from "../ollama.js";
+import { listHFModels } from "../huggingface.js";
 import { db } from "@workspace/db";
 import { aiModelsTable } from "@workspace/db";
 

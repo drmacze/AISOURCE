@@ -1,13 +1,13 @@
 import "dotenv/config";
 import { mkdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
-import app from "./app";
-import { logger } from "./lib/logger";
-import { startOllamaServer } from "./ollama";
-import { startAutoTraining, startMicroTraining } from "./autotraining";
-import { startGateway as startOpenClaw } from "./openclaw-manager";
-import { startWorkers, stopWorkers } from "./agent-workers";
-import { isHFConfigured, HF_STATUS, probeHFToken } from "./huggingface";
+import app from "./app.js";
+import { logger } from "./lib/logger.js";
+import { startOllamaServer } from "./ollama.js";
+import { startAutoTraining, startMicroTraining } from "./autotraining.js";
+import { startGateway as startOpenClaw } from "./openclaw-manager.js";
+import { startWorkers, stopWorkers } from "./agent-workers.js";
+import { isHFConfigured, HF_STATUS, probeHFToken } from "./huggingface.js";
 
 // ─── Load saved secrets from config file on startup ──────────────────────────
 // (The settings route module applies them too, but we need them before routes load)
@@ -66,7 +66,7 @@ try {
 } catch { /* ignore */ }
 
 // ─── Ollama (background) ──────────────────────────────────────────────────────
-startOllamaServer().catch((err) => {
+startOllamaServer().catch((err: unknown) => {
   logger.warn({ err }, "Ollama server failed to start — HuggingFace fallback active");
 });
 
@@ -74,13 +74,13 @@ startOllamaServer().catch((err) => {
 if (isHFConfigured()) {
   logger.info({ token: HF_STATUS.tokenPrefix() }, "HuggingFace connected — probing token validity…");
   // Probe in background — no need to await startup on this
-  probeHFToken().then((ok) => {
+  probeHFToken().then((ok: boolean) => {
     if (ok) {
       logger.info("HuggingFace token valid ✅ — using HF GPU inference");
     } else {
       logger.warn("HuggingFace token invalid/expired ⚠️ — skipping HF, using Groq+OpenRouter");
     }
-  }).catch(() => {
+  }).catch((_e: unknown) => {
     logger.warn("HuggingFace probe timed out — will retry on first use");
   });
 } else {
@@ -112,7 +112,7 @@ setTimeout(async () => {
 }, 3000);
 
 // ─── OpenClaw Gateway (background) ───────────────────────────────────────────
-startOpenClaw().catch((err) => {
+startOpenClaw().catch((err: unknown) => {
   logger.warn({ err }, "OpenClaw gateway failed to start — will retry automatically");
 });
 

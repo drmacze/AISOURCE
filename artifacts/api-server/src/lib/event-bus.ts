@@ -41,8 +41,8 @@ export interface SystemEventPayload {
 class DLavieEventBus extends EventEmitter {
   private persistEnabled = true;
 
-  async emit(event: SystemEventType, payload: Record<string, unknown>, source = "system"): Promise<boolean> {
-    // Persist to DB for audit trail
+  /** Persist to DB + emit in-process. Returns false if no listeners. */
+  async dispatch(event: SystemEventType, payload: Record<string, unknown>, source = "system"): Promise<boolean> {
     if (this.persistEnabled) {
       try {
         await db.insert(systemEventsTable).values({
@@ -55,14 +55,12 @@ class DLavieEventBus extends EventEmitter {
         console.warn("[EventBus] Failed to persist event:", String(e));
       }
     }
-
-    // Emit in-process to all listeners
     return super.emit(event, payload);
   }
 
-  /** Emit without awaiting DB persist (fire-and-forget) */
+  /** Fire-and-forget: dispatch without awaiting DB persist */
   fire(event: SystemEventType, payload: Record<string, unknown>, source = "system"): void {
-    void this.emit(event, payload, source);
+    void this.dispatch(event, payload, source);
   }
 
   disablePersist() { this.persistEnabled = false; }

@@ -87,7 +87,7 @@ router.get("/chatgpt/conversations", chatgptAuth, async (_req: Request, res: Res
 
 // GET /api/chatgpt/conversations/:id
 router.get("/chatgpt/conversations/:id", chatgptAuth, async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
   try {
     const [conv] = await db.select().from(conversationsTable).where(eq(conversationsTable.id, id));
@@ -119,7 +119,7 @@ router.post("/chatgpt/conversations", chatgptAuth, async (req: Request, res: Res
 
 // POST /api/chatgpt/conversations/:id/messages — add message
 router.post("/chatgpt/conversations/:id/messages", chatgptAuth, async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
   const { role, content } = req.body as { role?: string; content?: string };
   if (!content) { res.status(400).json({ error: "content is required" }); return; }
@@ -137,7 +137,7 @@ router.post("/chatgpt/conversations/:id/messages", chatgptAuth, async (req: Requ
 
 // DELETE /api/chatgpt/conversations/:id
 router.delete("/chatgpt/conversations/:id", chatgptAuth, async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
   try {
     await db.delete(messagesTable).where(eq(messagesTable.conversationId, id));
@@ -166,7 +166,7 @@ router.post("/chatgpt/documents", chatgptAuth, async (req: Request, res: Respons
   try {
     const [doc] = await db
       .insert(documentsTable)
-      .values({ title, content, type: type || "text", createdAt: new Date(), updatedAt: new Date() })
+      .values({ title, content, fileType: type || "text" })
       .returning();
     res.status(201).json({ document: doc });
   } catch (e) {
@@ -176,7 +176,7 @@ router.post("/chatgpt/documents", chatgptAuth, async (req: Request, res: Respons
 
 // PATCH /api/chatgpt/documents/:id — edit document
 router.patch("/chatgpt/documents/:id", chatgptAuth, async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
   const { title, content } = req.body as { title?: string; content?: string };
   try {
@@ -193,7 +193,7 @@ router.patch("/chatgpt/documents/:id", chatgptAuth, async (req: Request, res: Re
 
 // DELETE /api/chatgpt/documents/:id
 router.delete("/chatgpt/documents/:id", chatgptAuth, async (req: Request, res: Response) => {
-  const id = Number(req.params.id);
+  const id = Number((req.params['id'] as string));
   if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
   try {
     await db.delete(documentsTable).where(eq(documentsTable.id, id));
@@ -245,12 +245,12 @@ router.post("/chatgpt/training", chatgptAuth, async (req: Request, res: Response
       dsId = ds?.id;
     }
     if (!dsId) {
-      const [ds] = await db.insert(trainingDatasetsTable).values({ name: "ChatGPT Samples", description: "Added via ChatGPT Actions", createdAt: new Date(), updatedAt: new Date() }).returning();
-      dsId = ds.id;
+      const [ds] = await db.insert(trainingDatasetsTable).values({ name: "ChatGPT Samples", description: "Added via ChatGPT Actions", taskType: "chat" }).returning();
+      dsId = ds!.id;
     }
     const [sample] = await db
       .insert(trainingSamplesTable)
-      .values({ datasetId: dsId, input, output, createdAt: new Date() })
+      .values({ datasetId: dsId as number, input: input as string, output: output as string })
       .returning();
     res.status(201).json({ sample });
   } catch (e) {

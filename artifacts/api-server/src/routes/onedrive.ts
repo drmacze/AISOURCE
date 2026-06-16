@@ -20,10 +20,10 @@ import {
   uploadFile,
   deleteFile,
   createFolder,
-} from "../onedrive";
+} from "../onedrive.js";
 import { desc, sql } from "drizzle-orm";
 import crypto from "crypto";
-import { generateEmbedding } from "./documents";
+import { generateEmbedding } from "./documents.js";
 
 /** Convert number[] to PostgreSQL vector literal, matching documents.ts format */
 function pgVector(vec: number[]): string {
@@ -131,7 +131,7 @@ router.post("/onedrive/auth/start", async (req: Request, res: Response) => {
 
 // Check status of server-side background polling by deviceCode
 router.get("/onedrive/auth/poll-status", (req: Request, res: Response) => {
-  const deviceCode = req.query.deviceCode as string | undefined;
+  const deviceCode = String(req.query['deviceCode'] ?? '') as string | undefined;
   if (!deviceCode) { res.status(400).json({ error: "deviceCode required" }); return; }
   const entry = bgPollStatus.get(deviceCode);
   if (!entry) { res.json({ status: "pending" }); return; }
@@ -166,7 +166,7 @@ router.post("/onedrive/auth/disconnect", (_req: Request, res: Response) => {
 router.get("/onedrive/files", async (req: Request, res: Response) => {
   if (!isOneDriveConfigured()) { res.status(401).json({ error: "OneDrive not connected" }); return; }
   try {
-    const folderId = req.query.folderId as string | undefined;
+    const folderId = String(req.query['folderId'] ?? '') as string | undefined;
     const files = await listFiles(folderId);
     res.json({ files, count: files.length });
   } catch (e) { res.status(500).json({ error: String(e) }); }
@@ -174,7 +174,7 @@ router.get("/onedrive/files", async (req: Request, res: Response) => {
 
 router.get("/onedrive/search", async (req: Request, res: Response) => {
   if (!isOneDriveConfigured()) { res.status(401).json({ error: "OneDrive not connected" }); return; }
-  const q = String(req.query.q || "").trim();
+  const q = String(String(req.query['q'] ?? '') || "").trim();
   if (!q) { res.status(400).json({ error: "q required" }); return; }
   try {
     const files = await searchFiles(q);
@@ -185,7 +185,7 @@ router.get("/onedrive/search", async (req: Request, res: Response) => {
 router.delete("/onedrive/files/:id", async (req: Request, res: Response) => {
   if (!isOneDriveConfigured()) { res.status(401).json({ error: "OneDrive not connected" }); return; }
   try {
-    await deleteFile(req.params.id);
+    await deleteFile((req.params['id'] as string));
     res.json({ deleted: true });
   } catch (e) { res.status(500).json({ error: String(e) }); }
 });
@@ -255,7 +255,7 @@ router.post("/onedrive/sync-to-rag", async (req: Request, res: Response) => {
             .values({
               title: `[OneDrive] ${file.name}`,
               content: chunk,
-              source: `onedrive:${file.id}`,
+              storageObjectPath: `onedrive:${file.id}`,
             })
             .onConflictDoNothing()
             .returning({ id: documentsTable.id });
@@ -349,7 +349,7 @@ router.post("/onedrive/re-embed", async (_req: Request, res: Response) => {
 router.get("/onedrive/download/:id", async (req: Request, res: Response) => {
   if (!isOneDriveConfigured()) { res.status(401).json({ error: "OneDrive not connected" }); return; }
   try {
-    const content = await downloadFileContent(req.params.id);
+    const content = await downloadFileContent((req.params['id'] as string));
     res.setHeader("Content-Type", "application/octet-stream");
     res.send(content);
   } catch (e) { res.status(500).json({ error: String(e) }); }

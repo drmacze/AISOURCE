@@ -10,11 +10,11 @@ import {
   trainingSamplesTable,
 } from "@workspace/db";
 import { count, eq, desc, sql } from "drizzle-orm";
-import { isOllamaOnline, listOllamaModels } from "../ollama";
-import { isHFConfigured } from "../huggingface";
-import { isGroqConfigured, GROQ_MODELS } from "../groq";
-import { isOpenRouterConfigured, OPENROUTER_FREE_MODELS } from "../openrouter";
-import { getAutoTrainingStatus } from "../autotraining";
+import { isOllamaOnline, listOllamaModels } from "../ollama.js";
+import { isHFConfigured } from "../huggingface.js";
+import { isGroqConfigured, GROQ_MODELS } from "../groq.js";
+import { isOpenRouterConfigured, OPENROUTER_FREE_MODELS } from "../openrouter.js";
+import { getAutoTrainingStatus } from "../autotraining.js";
 
 const router: IRouter = Router();
 

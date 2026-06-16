@@ -131,7 +131,7 @@ router.get("/workers/mail/all", async (req: Request, res: Response) => {
 
 router.delete("/workers/mail/:id", async (req: Request, res: Response) => {
   try {
-    const id = Number(req.params.id);
+    const id = Number((req.params['id'] as string));
     await db.update(agentMailTable).set({ read: true }).where(eq(agentMailTable.id, id));
     res.json({ ok: true });
   } catch (e) {
@@ -146,7 +146,7 @@ router.post("/workers/mail/send", async (req: Request, res: Response) => {
     };
     const fromAgent = fromRaw || "dlavie";
     const [inserted] = await db.insert(agentMailTable).values({
-      fromAgent, toAgent: to, subject, body, priority, read: false,
+      fromAgent, toAgent: to, subject, body, priority: (priority || "normal") as "low" | "normal" | "high" | "critical", read: false,
     }).returning();
     res.json({ ok: true, id: inserted?.id });
   } catch (e) {
@@ -179,7 +179,7 @@ router.get("/workers/threads", (_req: Request, res: Response) => {
 });
 
 router.post("/workers/:id/nudge", async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = req.params["id"] as string;
   const ok = await nudgeWorker(id);
   if (!ok) { res.status(404).json({ error: `Worker "${id}" not found` }); return; }
   res.json({ ok: true, workerId: id, message: `Worker "${id}" triggered` });
@@ -294,7 +294,7 @@ router.post("/workers/missions", (req: Request, res: Response) => {
 
 router.patch("/workers/missions/:id", (req: Request, res: Response) => {
   try {
-    const mission = MISSIONS.get(req.params.id!);
+    const mission = MISSIONS.get((req.params['id'] as string)!);
     if (!mission) { res.status(404).json({ error: "not found" }); return; }
     const update = req.body as Partial<Mission>;
     if (update.status)      mission.status      = update.status;
@@ -311,7 +311,7 @@ router.patch("/workers/missions/:id", (req: Request, res: Response) => {
 });
 
 router.delete("/workers/missions/:id", (req: Request, res: Response) => {
-  MISSIONS.delete(req.params.id!);
+  MISSIONS.delete((req.params['id'] as string)!);
   res.json({ ok: true });
 });
 
@@ -390,7 +390,7 @@ router.get("/workers/memories", async (_req: Request, res: Response) => {
 router.get("/workers/memories/:agentId", async (req: Request, res: Response) => {
   try {
     const memories = await getAllMemories();
-    const mem = memories.find(m => m.agentId === req.params.agentId);
+    const mem = memories.find(m => m.agentId === (req.params['agentId'] as string));
     if (!mem) return void res.status(404).json({ error: "No memory found for agent" });
     res.json(mem);
   } catch (e) {
@@ -427,8 +427,8 @@ router.get("/workers/subtasks", async (_req: Request, res: Response) => {
 /** GET /workers/subtasks/:agentId — subtasks assigned to a specific agent */
 router.get("/workers/subtasks/:agentId", async (req: Request, res: Response) => {
   try {
-    const subtasks = await getSubtasksForAgent(req.params.agentId!, 20);
-    res.json({ agentId: req.params.agentId, subtasks, count: subtasks.length });
+    const subtasks = await getSubtasksForAgent((req.params['agentId'] as string)!, 20);
+    res.json({ agentId: (req.params['agentId'] as string), subtasks, count: subtasks.length });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

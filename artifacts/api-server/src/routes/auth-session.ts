@@ -9,7 +9,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, systemConfigTable, apiKeysTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { requireAuth } from "../lib/auth";
+import { requireAuth } from "../lib/auth.js";
 
 const router: IRouter = Router();
 

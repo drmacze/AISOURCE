@@ -11,9 +11,9 @@ import {
   trainingSamplesTable, trainingJobsTable, aiModelsTable,
 } from "@workspace/db";
 import { count, sql, desc } from "drizzle-orm";
-import { listOllamaModels, isOllamaOnline } from "../ollama";
-import { isHFConfigured } from "../huggingface";
-import { getAutoTrainingStatus } from "../autotraining";
+import { listOllamaModels, isOllamaOnline } from "../ollama.js";
+import { isHFConfigured } from "../huggingface.js";
+import { getAutoTrainingStatus } from "../autotraining.js";
 
 const router: IRouter = Router();
 

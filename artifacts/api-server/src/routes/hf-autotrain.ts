@@ -107,13 +107,13 @@ router.get("/hf/autotrain/info", async (_req: Request, res: Response) => {
   }
 
   // whoami succeeded
-  if (whoData?.name) {
+  if ((whoData as unknown as Record<string, unknown>)?.["name"]) { const wData = whoData as unknown as Record<string, unknown>;
     return res.json({
       configured: true,
-      username:   whoData.name,
-      fullname:   whoData.fullname ?? whoData.name,
-      plan:       whoData.plan?.type ?? "free",
-      orgs:       (whoData.orgs ?? []).map((o) => o.name),
+      username:   (wData["name"] as string),
+      fullname:   (wData["fullname"] as string) ?? (wData["name"] as string),
+      plan:       ((wData["plan"] as Record<string, unknown>)?.["type"] as string) ?? "free",
+      orgs:       ((wData["orgs"] as Array<Record<string, unknown>> ?? []).map((o) => o["name"] as string)),
     });
   }
 
@@ -173,8 +173,8 @@ router.post("/hf/dataset/push", async (req: Request, res: Response) => {
     // 3. Convert to JSONL format (standard for HF instruction fine-tuning)
     const jsonlLines = samples.map((s) => JSON.stringify({
       instruction: s.input,
-      output: s.expectedOutput,
-      quality: s.quality ?? 0.8,
+      output: s.output,
+      quality: (s.qualityScore ?? 0.8) ?? 0.8,
       source: s.source ?? "dlavie",
     }));
     const jsonlContent = jsonlLines.join("\n");
@@ -283,7 +283,7 @@ async function pushViaLFS(
       await fetch(fileInfo.upload_url, {
         method: "PUT",
         headers: { "Content-Type": "text/plain" },
-        body: contentBytes,
+        body: contentBytes as unknown as BodyInit,
       });
 
       // Commit with LFS pointer

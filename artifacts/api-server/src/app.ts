@@ -1,9 +1,9 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
-import router from "./routes";
-import { logger } from "./lib/logger";
-import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
+import router from "./routes/index.js";
+import { logger } from "./lib/logger.js";
+import { registerObjectStorageRoutes } from "./replit_integrations/object_storage/index.js";
 import path from "path";
 import { existsSync } from "fs";
 
@@ -11,13 +11,14 @@ const app: Express = express();
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
 app.use(
-  pinoHttp({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (pinoHttp as unknown as (opts: unknown) => import("express").RequestHandler)({
     logger,
     serializers: {
-      req(req) {
+      req(req: { id: unknown; method: string; url?: string }) {
         return { id: req.id, method: req.method, url: req.url?.split("?")[0] };
       },
-      res(res) {
+      res(res: { statusCode: number }) {
         return { statusCode: res.statusCode };
       },
     },

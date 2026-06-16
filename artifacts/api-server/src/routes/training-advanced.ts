@@ -21,7 +21,7 @@ import {
   conversationsTable,
 } from "@workspace/db";
 import { eq, desc, and, gte, sql, inArray, isNotNull } from "drizzle-orm";
-import { generateWithFallback } from "../lib/provider-chain";
+import { generateWithFallback } from "../lib/provider-chain.js";
 import { spawn } from "child_process";
 import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
@@ -68,7 +68,7 @@ export async function fireWebhooks(event: string, payload: Record<string, unknow
 // ─── Feature 1: Data Quality Report ─────────────────────────────────────────
 
 router.get("/training-datasets/:id/quality-report", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const samples = await db.select().from(trainingSamplesTable)
@@ -142,7 +142,7 @@ router.get("/training-datasets/:id/quality-report", async (req: Request, res: Re
 // ─── Feature 2: Data Augmentation Pipeline ──────────────────────────────────
 
 router.post("/training-datasets/:id/augment", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const { sampleIds, strategy = "paraphrase", count = 3 } = req.body as {
@@ -207,7 +207,7 @@ router.post("/training-datasets/:id/augment", async (req: Request, res: Response
 // ─── Feature 3: Conversation-to-Sample Converter ─────────────────────────────
 
 router.post("/training-datasets/:id/import-conversations", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const { conversationIds, minMessageLen = 20, maxPairs = 100 } = req.body as {
@@ -263,7 +263,7 @@ router.post("/training-datasets/:id/import-conversations", async (req: Request, 
 // ─── Feature 4: Active Learning Prioritizer ─────────────────────────────────
 
 router.get("/training-datasets/:id/active-learning", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const samples = await db.select().from(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
@@ -336,7 +336,7 @@ router.get("/training-datasets/:id/active-learning", async (req: Request, res: R
 // ─── Feature 5: Dataset Version Snapshots ───────────────────────────────────
 
 router.get("/training-datasets/:id/snapshots", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
   const snaps = await db.select().from(datasetSnapshotsTable)
     .where(eq(datasetSnapshotsTable.datasetId, id))
@@ -345,7 +345,7 @@ router.get("/training-datasets/:id/snapshots", async (req: Request, res: Respons
 });
 
 router.post("/training-datasets/:id/snapshots", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
   const { notes } = req.body as { notes?: string };
 
@@ -366,9 +366,10 @@ router.post("/training-datasets/:id/snapshots", async (req: Request, res: Respon
   // Try to save to Object Storage if available
   let storageKey: string | undefined;
   try {
-    const { objectStorageClient } = await import("../replit_integrations/object_storage");
+    const { objectStorageClient: _osc } = await import("../replit_integrations/object_storage/index.js");
+    const objectStorage = _osc as unknown as { uploadFromText(k: string, d: string): Promise<void>; downloadAsText(k: string): Promise<string>; };
     const key = `dataset-snapshots/${id}/v${version}.jsonl`;
-    await objectStorageClient.uploadFromText(key, jsonlData);
+    await objectStorage.uploadFromText(key, jsonlData);
     storageKey = key;
   } catch {
     // Fall back to storing in DB (truncated for very large datasets)
@@ -387,8 +388,8 @@ router.post("/training-datasets/:id/snapshots", async (req: Request, res: Respon
 });
 
 router.post("/training-datasets/:id/snapshots/:snapId/restore", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  const snapId = parseInt(req.params.snapId, 10);
+  const id = parseInt((req.params['id'] as string), 10);
+  const snapId = parseInt((req.params['snapId'] as string), 10);
   if (isNaN(id) || isNaN(snapId)) { res.status(400).json({ error: "Invalid ids" }); return; }
 
   const [snap] = await db.select().from(datasetSnapshotsTable)
@@ -398,8 +399,9 @@ router.post("/training-datasets/:id/snapshots/:snapId/restore", async (req: Requ
   let jsonlData = snap.snapshotData;
   if (!jsonlData && snap.storageKey) {
     try {
-      const { objectStorageClient } = await import("../replit_integrations/object_storage");
-      jsonlData = await objectStorageClient.downloadAsText(snap.storageKey);
+      const { objectStorageClient: _osc2 } = await import("../replit_integrations/object_storage/index.js");
+      const objectStorage2 = _osc2 as unknown as { downloadAsText(k: string): Promise<string>; };
+      jsonlData = await objectStorage2.downloadAsText(snap.storageKey);
     } catch (e) {
       res.status(500).json({ error: "Could not retrieve snapshot data from storage" }); return;
     }
@@ -430,8 +432,8 @@ router.post("/training-datasets/:id/snapshots/:snapId/restore", async (req: Requ
 });
 
 router.delete("/training-datasets/:id/snapshots/:snapId", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
-  const snapId = parseInt(req.params.snapId, 10);
+  const id = parseInt((req.params['id'] as string), 10);
+  const snapId = parseInt((req.params['snapId'] as string), 10);
   await db.delete(datasetSnapshotsTable)
     .where(and(eq(datasetSnapshotsTable.id, snapId), eq(datasetSnapshotsTable.datasetId, id)));
   res.status(204).send();
@@ -440,7 +442,7 @@ router.delete("/training-datasets/:id/snapshots/:snapId", async (req: Request, r
 // ─── Feature 6: Loss Curve Data ──────────────────────────────────────────────
 
 router.get("/training-jobs/:id/loss-curve", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid job id" }); return; }
   const [job] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, id));
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
@@ -513,7 +515,7 @@ router.post("/training/hp-sweeps", async (req: Request, res: Response) => {
 });
 
 router.get("/training/hp-sweeps/:id", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const [sweep] = await db.select().from(hpSweepsTable).where(eq(hpSweepsTable.id, id));
   if (!sweep) { res.status(404).json({ error: "Sweep not found" }); return; }
   let runs: unknown[] = [];
@@ -560,7 +562,7 @@ async function runHpSweep(
             }).returning();
 
             // Import and run training
-            const { runRealFineTuning } = await import("./training");
+            const { runRealFineTuning } = await import("./training.js");
             await runRealFineTuning(job.id, model, dataset, {
               backend: "local_cpu", epochs, loraRank: rank, learningRate: lr, batchSize, maxSeqLength: 256,
             });
@@ -612,7 +614,7 @@ router.get("/training/queue", async (_req, res) => {
 });
 
 router.patch("/training-jobs/:id/priority", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const { priority } = req.body as { priority: number };
   if (isNaN(id) || priority === undefined) { res.status(400).json({ error: "Invalid id or priority" }); return; }
 
@@ -627,7 +629,7 @@ router.patch("/training-jobs/:id/priority", async (req: Request, res: Response) 
 // ─── Feature 9: Curriculum Learning Sort ────────────────────────────────────
 
 router.post("/training-datasets/:id/curriculum-sort", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const samples = await db.select().from(trainingSamplesTable).where(eq(trainingSamplesTable.datasetId, id));
@@ -736,7 +738,7 @@ router.get("/training/benchmarks", async (_req, res) => {
 });
 
 router.get("/training/benchmarks/:id", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const [result] = await db.select().from(benchmarkResultsTable).where(eq(benchmarkResultsTable.id, id));
   if (!result) { res.status(404).json({ error: "Benchmark not found" }); return; }
   let results = [];
@@ -764,7 +766,7 @@ router.post("/training/compare-models", async (req: Request, res: Response) => {
 
       let text = "";
       if (provider === "ollama") {
-        const { generateOllamaResponse } = await import("../ollama");
+        const { generateOllamaResponse } = await import("../ollama.js");
         text = await generateOllamaResponse(prompt, modelName, undefined, sys);
       } else {
         const result = await generateWithFallback(prompt, undefined, sys, { maxTokens: 512 });
@@ -787,7 +789,7 @@ router.post("/training/compare-models", async (req: Request, res: Response) => {
 // ─── Feature 14: Perplexity Calculator ──────────────────────────────────────
 
 router.get("/training-jobs/:id/perplexity", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid job id" }); return; }
 
   const [job] = await db.select().from(trainingJobsTable).where(eq(trainingJobsTable.id, id));
@@ -906,7 +908,7 @@ router.post("/training/score-bleu-rouge", async (req: Request, res: Response) =>
 // ─── Feature 16: Model Export Hub ───────────────────────────────────────────
 
 router.post("/ai-models/:id/export", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid model id" }); return; }
 
   const { format = "adapter", uploadToHF = false, hfRepoId } = req.body as {
@@ -984,7 +986,7 @@ print("UPLOADED_OK")
 // ─── Feature 17: Model Card Generator ───────────────────────────────────────
 
 router.get("/ai-models/:id/model-card", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const [model] = await db.select().from(aiModelsTable).where(eq(aiModelsTable.id, id));
   if (!model) { res.status(404).json({ error: "Model not found" }); return; }
 
@@ -1065,7 +1067,7 @@ This model was fine-tuned for **${dataset?.taskType || "general"} tasks** using 
 });
 
 router.put("/ai-models/:id/model-card", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const { modelCard } = req.body as { modelCard: string };
   if (!modelCard) { res.status(400).json({ error: "modelCard required" }); return; }
   await db.update(aiModelsTable).set({ modelCard, updatedAt: new Date() }).where(eq(aiModelsTable.id, id));
@@ -1146,7 +1148,7 @@ router.post("/training/merge-models", async (req: Request, res: Response) => {
 // ─── Feature 19: Checkpoint Manager ─────────────────────────────────────────
 
 router.get("/training-jobs/:id/checkpoints", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const checkpoints = await db.select().from(trainingCheckpointsTable)
     .where(eq(trainingCheckpointsTable.jobId, id))
     .orderBy(trainingCheckpointsTable.epoch);
@@ -1167,7 +1169,7 @@ router.get("/training-jobs/:id/checkpoints", async (req: Request, res: Response)
 });
 
 router.post("/training-jobs/:jobId/checkpoints", async (req: Request, res: Response) => {
-  const jobId = parseInt(req.params.jobId, 10);
+  const jobId = parseInt((req.params['jobId'] as string), 10);
   const { epoch, step, loss, accuracy, checkpointPath, metadata } = req.body as {
     epoch: number; step?: number; loss?: number; accuracy?: number;
     checkpointPath?: string; metadata?: string;
@@ -1209,7 +1211,7 @@ router.post("/training/preferences", async (req: Request, res: Response) => {
 });
 
 router.patch("/training/preferences/:id", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const { feedback, rating, rejectedResponse, notes } = req.body;
   const [updated] = await db.update(preferenceDataTable)
     .set({ feedback, rating, rejectedResponse, notes })
@@ -1220,7 +1222,7 @@ router.patch("/training/preferences/:id", async (req: Request, res: Response) =>
 });
 
 router.delete("/training/preferences/:id", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   await db.delete(preferenceDataTable).where(eq(preferenceDataTable.id, id));
   res.status(204).send();
 });
@@ -1695,7 +1697,7 @@ router.get("/training/recipes", async (_req, res) => {
 // ─── Feature 30: Bulk Sample Import ─────────────────────────────────────────
 
 router.post("/training-datasets/:id/bulk-import", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const { data, format = "auto", inputField = "input", outputField = "output", source = "bulk_import" } = req.body as {
@@ -1781,7 +1783,7 @@ router.post("/training/webhooks", async (req: Request, res: Response) => {
 });
 
 router.patch("/training/webhooks/:id", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const { name, url, events, secret, active } = req.body;
   const [updated] = await db.update(trainingWebhooksTable).set({
     ...(name ? { name } : {}),
@@ -1795,13 +1797,13 @@ router.patch("/training/webhooks/:id", async (req: Request, res: Response) => {
 });
 
 router.delete("/training/webhooks/:id", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   await db.delete(trainingWebhooksTable).where(eq(trainingWebhooksTable.id, id));
   res.status(204).send();
 });
 
 router.post("/training/webhooks/:id/test", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   const [hook] = await db.select().from(trainingWebhooksTable).where(eq(trainingWebhooksTable.id, id));
   if (!hook) { res.status(404).json({ error: "Webhook not found" }); return; }
   await fireWebhooks("test", { message: "DLavie OS webhook test", timestamp: new Date().toISOString() });
@@ -1811,7 +1813,7 @@ router.post("/training/webhooks/:id/test", async (req: Request, res: Response) =
 // ─── Feature 33: Synthetic Data Generator ───────────────────────────────────
 
 router.post("/training-datasets/:id/synthetic", async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid dataset id" }); return; }
 
   const { topic, count = 10, style = "qa", difficulty = "medium", language = "English" } = req.body as {
@@ -2036,7 +2038,7 @@ router.post("/training/multi-task", async (req: Request, res: Response) => {
   }).returning();
 
   // Import and start training
-  const { runRealFineTuning } = await import("./training");
+  const { runRealFineTuning } = await import("./training.js");
   runRealFineTuning(job.id, model, mergedDs, {
     backend: "local_cpu", epochs, loraRank, learningRate, batchSize: 2, maxSeqLength: 512,
   }).then(() => fireWebhooks("job.completed", { jobId: job.id, type: "multi-task" }))

@@ -14,7 +14,7 @@ import { randomBytes } from "crypto";
 import { db } from "@workspace/db";
 import { apiKeysTable } from "@workspace/db";
 import { eq, desc, count } from "drizzle-orm";
-import { getPrimaryKey, setPrimaryKey } from "./auth-session";
+import { getPrimaryKey, setPrimaryKey } from "./auth-session.js";
 
 const router: IRouter = Router();
 
@@ -170,7 +170,7 @@ router.post("/keys", requireAdmin, async (req, res) => {
 
 // ─── PATCH /api/keys/:id ──────────────────────────────────────────────────────
 router.patch("/keys/:id", requireAdmin, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "BadRequest", message: "Invalid key id." });
     return;
@@ -224,7 +224,7 @@ router.patch("/keys/:id", requireAdmin, async (req, res) => {
 
 // ─── DELETE /api/keys/:id ─────────────────────────────────────────────────────
 router.delete("/keys/:id", requireAdmin, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "BadRequest", message: "Invalid key id." });
     return;
@@ -249,7 +249,7 @@ router.delete("/keys/:id", requireAdmin, async (req, res) => {
 
 // ─── GET /api/keys/:id/stats ──────────────────────────────────────────────────
 router.get("/keys/:id/stats", requireAdmin, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseInt((req.params['id'] as string), 10);
   if (isNaN(id)) {
     res.status(400).json({ error: "BadRequest", message: "Invalid key id." });
     return;

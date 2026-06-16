@@ -6,11 +6,11 @@
  */
 
 import { Router, type IRouter } from "express";
-import { isOllamaOnline, listOllamaModels } from "../ollama";
-import { isHFConfigured, HF_CHAT_MODELS } from "../huggingface";
-import { isGroqConfigured, GROQ_MODELS } from "../groq";
-import { isOpenRouterConfigured, OPENROUTER_FREE_MODELS } from "../openrouter";
-import { isKimiConfigured, getKimiConfig } from "../kimi";
+import { isOllamaOnline, listOllamaModels } from "../ollama.js";
+import { isHFConfigured, HF_CHAT_MODELS } from "../huggingface.js";
+import { isGroqConfigured, GROQ_MODELS } from "../groq.js";
+import { isOpenRouterConfigured, OPENROUTER_FREE_MODELS } from "../openrouter.js";
+import { isKimiConfigured, getKimiConfig } from "../kimi.js";
 
 const router: IRouter = Router();
 

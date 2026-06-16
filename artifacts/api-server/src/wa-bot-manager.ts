@@ -21,7 +21,8 @@ import makeWASocket, {
   jidNormalizedUser,
   type WASocket,
 } from "@whiskeysockets/baileys";
-import { Boom } from "@hapi/boom";
+// @hapi/boom stub — avoid external dep
+class Boom extends Error { output: { statusCode: number } = { statusCode: 500 }; constructor(msg: string, o?: { statusCode?: number }) { super(msg); this.output.statusCode = o?.statusCode ?? 500; } }
 import { join } from "path";
 import {
   mkdirSync, existsSync, readFileSync, writeFileSync,
@@ -216,7 +217,7 @@ function getBrowser(type: DeviceType): [string, string, string] {
   switch (type) {
     case "business": return Browsers.appropriate("Chrome");
     case "mac":      return Browsers.macOS("Desktop");
-    case "windows":  return Browsers.windows();
+    case "windows":  return Browsers.windows("Chrome") as [string, string, string];
     default:         return Browsers.ubuntu("Chrome");
   }
 }
@@ -652,7 +653,7 @@ class WaBotManager {
 
           this.status.messageCount = (this.status.messageCount || 0) + 1;
           const logEntry: WaBotLog = {
-            ts: Date.now(), from: jid, name: senderName, isGroup,
+            ts: Date.now(), from: jid, name: senderName, isGroup: isGroup ?? false,
             message: text, reply: finalReply,
             model: modelInfo,
           };

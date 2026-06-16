@@ -10,7 +10,7 @@ import {
   generateHFResponse,
   streamHFResponse,
   HF_CHAT_MODELS,
-} from "../huggingface";
+} from "../huggingface.js";
 
 const router: IRouter = Router();
 

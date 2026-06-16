@@ -177,7 +177,7 @@ export class ReportAgent extends BaseAgent {
     ].join("\n");
 
     try {
-      const { text } = await this.think(prompt, "You are a support ticket analyzer. Return ONLY valid JSON.");
+      const text     = await this.think(prompt, "You are a support ticket analyzer. Return ONLY valid JSON.");
       const jsonStr  = text.match(/\{[\s\S]*\}/)?.[0] ?? text;
       const parsed   = JSON.parse(jsonStr) as TicketAnalysis;
 
