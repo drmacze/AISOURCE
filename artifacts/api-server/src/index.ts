@@ -9,6 +9,7 @@ import { startAutoTraining, startMicroTraining } from "./autotraining.js";
 import { startGateway as startOpenClaw } from "./openclaw-manager.js";
 import { startWorkers, stopWorkers } from "./agent-workers.js";
 import { isHFConfigured, HF_STATUS, probeHFToken } from "./huggingface.js";
+import { startAlwaysOn, stopAlwaysOn } from "./always-on.js";
 
 // ─── Load saved secrets from config file on startup ──────────────────────────
 // (The settings route module applies them too, but we need them before routes load)
@@ -160,16 +161,26 @@ app.listen(port, "0.0.0.0", (err?: Error) => {
   // Autonomous agent disabled — replaced by OpenClaw gateway.
 });
 
+// ─── Always-On Engine ─────────────────────────────────────────────────────────
+// Starts after the HTTP server is listening so all services are ready.
+// Detects Replit public URL automatically.
+const replDomain =
+  process.env.REPL_DEV_DOMAIN ||
+  process.env.REPLIT_DEV_DOMAIN ||
+  process.env.REPL_SLUG
+    ? `https://${process.env.REPL_DEV_DOMAIN || process.env.REPLIT_DEV_DOMAIN}`
+    : `http://localhost:${port}`;
+
+startAlwaysOn(replDomain);
+
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 function shutdown(signal: string) {
   logger.info({ signal }, "Graceful shutdown initiated");
+  stopAlwaysOn();
+  stopWorkers();
   process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT",  () => shutdown("SIGINT"));
-process.on("uncaughtException", (err) => {
-  logger.error({ err }, "Uncaught exception — server continues");
-});
-process.on("unhandledRejection", (reason) => {
-  logger.warn({ reason }, "Unhandled promise rejection");
-});
+// Note: uncaughtException and unhandledRejection are managed by always-on.ts
+// (Process Hardener replaces these handlers and keeps the server alive)

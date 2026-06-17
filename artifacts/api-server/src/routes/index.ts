@@ -44,6 +44,7 @@ import kaggleRouter from "./kaggle.js";
 import chatgptActionsRouter from "./chatgpt-actions.js";
 import providersHealthRouter from "./providers-health.js";
 import mcpRouter from "./mcp.js";
+import uptimeRouter from "./uptime.js";
 
 
 const router: IRouter = Router();
@@ -171,5 +172,8 @@ router.use(providersHealthRouter);
 
 // MCP (Model Context Protocol) server — connect Claude Desktop, Cursor, ChatGPT, etc.
 router.use(mcpRouter);
+
+// Always-On uptime monitoring — /api/uptime, /api/uptime/ping, /api/uptime/services
+router.use(uptimeRouter);
 
 export default router;
