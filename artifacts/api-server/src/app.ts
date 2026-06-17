@@ -5,6 +5,7 @@ import router from "./routes/index.js";
 import wellKnownRouter from "./routes/well-known.js";
 import { logger } from "./lib/logger.js";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage/index.js";
+import { setupAuth } from "./lib/replit-auth.js";
 import path from "path";
 import { existsSync } from "fs";
 
@@ -74,6 +75,11 @@ app.options("/{*path}", cors());
 // ─── Body parsing ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+// ─── Auth (session + OIDC) — MUST be before all routes ───────────────────────
+// setupAuth is synchronous — sessions ready immediately, OIDC discovery runs
+// in background (non-blocking). Safe for production cold-starts.
+setupAuth(app);
 
 // ─── .well-known — ChatGPT Actions plugin manifest + OpenAPI spec ─────────────
 // Fully dynamic: URL injected from request host so it works on dev + deployed.

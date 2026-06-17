@@ -45,7 +45,8 @@ import chatgptActionsRouter from "./chatgpt-actions.js";
 import providersHealthRouter from "./providers-health.js";
 import mcpRouter from "./mcp.js";
 import uptimeRouter from "./uptime.js";
-
+import oauthRouter from "./oauth.js";
+import nativeAuthRouter from "./native-auth.js";
 
 const router: IRouter = Router();
 
@@ -175,5 +176,11 @@ router.use(mcpRouter);
 
 // Always-On uptime monitoring — /api/uptime, /api/uptime/ping, /api/uptime/services
 router.use(uptimeRouter);
+
+// OAuth + user auth — /api/auth/me, /api/auth/status, /api/auth/users
+router.use(oauthRouter);
+
+// Native DLavie auth — /api/auth/register, /api/auth/login/native
+router.use(nativeAuthRouter);
 
 export default router;

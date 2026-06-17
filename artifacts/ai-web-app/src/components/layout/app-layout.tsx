@@ -29,10 +29,14 @@ import {
   Rabbit,
   Plug,
   ServerIcon,
+  LogIn,
+  LogOut,
+  UserCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/hooks/use-auth";
 
 // ─── OpenClaw status hook ─────────────────────────────────────────────────────
 function useOpenClawRunning() {
@@ -286,6 +290,54 @@ function StatusDot({ active = true }: { active?: boolean }) {
 }
 
 // ── Sidebar Content ───────────────────────────────────────────────────────────
+// ─── User Profile Widget ──────────────────────────────────────────────────────
+function SidebarUserProfile() {
+  const { user, isLoading, isAuthenticated, displayName, login, logout } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-muted/20 animate-pulse">
+        <div className="w-6 h-6 rounded-full bg-muted/60" />
+        <div className="h-3 w-20 bg-muted/60 rounded" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <button
+        onClick={login}
+        className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary transition-colors text-xs font-medium"
+      >
+        <LogIn className="w-3.5 h-3.5 flex-shrink-0" />
+        <span>Sign in with Replit</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-muted/30 group">
+      {user?.profileImageUrl ? (
+        <img
+          src={user.profileImageUrl}
+          alt={displayName ?? "User"}
+          className="w-6 h-6 rounded-full flex-shrink-0 object-cover"
+        />
+      ) : (
+        <UserCircle className="w-5 h-5 text-muted-foreground/60 flex-shrink-0" />
+      )}
+      <span className="text-xs text-foreground flex-1 truncate">{displayName}</span>
+      <button
+        onClick={logout}
+        title="Sign out"
+        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-muted-foreground/60 hover:text-foreground transition-all"
+      >
+        <LogOut className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 function SidebarContent({ location, onClose }: { location: string; onClose?: () => void }) {
   const openClawRunning = useOpenClawRunning();
 
@@ -365,6 +417,7 @@ function SidebarContent({ location, onClose }: { location: string; onClose?: () 
 
       {/* Footer */}
       <div className="px-3 py-3 border-t border-border/60 space-y-2">
+        {/* System status */}
         <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-muted/30">
           <StatusDot active />
           <span className="text-xs text-muted-foreground flex-1">System Online</span>
@@ -375,6 +428,8 @@ function SidebarContent({ location, onClose }: { location: string; onClose?: () 
             <circle cx="7" cy="7" r="1.5" fill="currentColor" />
           </svg>
         </div>
+        {/* User profile / login */}
+        <SidebarUserProfile />
         <a href="/privacy" className="block text-center text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors py-0.5">
           Kebijakan Privasi
         </a>

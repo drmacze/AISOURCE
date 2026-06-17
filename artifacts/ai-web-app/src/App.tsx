@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -27,11 +27,11 @@ import WhatsAppPage from "@/pages/whatsapp";
 import WaBotPage from "@/pages/wa-bot";
 import BotsPage from "@/pages/bots";
 import BrandKitPage from "@/pages/brand-kit";
-import OpenClawPage from "@/pages/openclaw";
 import AgentCommandCenter from "@/pages/agent";
 import ChatGPTIntegrationPage from "@/pages/chatgpt";
 import McpPage from "@/pages/mcp";
 import PrivacyPolicyPage from "@/pages/privacy";
+import LoginPage from "@/pages/login";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,7 +42,13 @@ const queryClient = new QueryClient({
   },
 });
 
-function Router() {
+// Login page renders without AppLayout (full-screen)
+function LoginRoute() {
+  return <LoginPage />;
+}
+
+// All other routes wrapped in AppLayout
+function AppRoutes() {
   return (
     <AppLayout>
       <Switch>
@@ -81,6 +87,15 @@ function Router() {
         <Route component={NotFound} />
       </Switch>
     </AppLayout>
+  );
+}
+
+function Router() {
+  return (
+    <Switch>
+      <Route path="/login" component={LoginRoute} />
+      <Route component={AppRoutes} />
+    </Switch>
   );
 }
 

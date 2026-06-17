@@ -13,3 +13,4 @@ export * from "./feedback.js";
 export * from "./benchmarks.js";
 export * from "./projects.js";
 export * from "./knowledge-graph.js";
+export * from "./auth.js";

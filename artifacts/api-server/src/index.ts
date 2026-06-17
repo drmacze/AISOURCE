@@ -163,13 +163,9 @@ app.listen(port, "0.0.0.0", (err?: Error) => {
 
 // ─── Always-On Engine ─────────────────────────────────────────────────────────
 // Starts after the HTTP server is listening so all services are ready.
-// Detects Replit public URL automatically.
-const replDomain =
-  process.env.REPL_DEV_DOMAIN ||
-  process.env.REPLIT_DEV_DOMAIN ||
-  process.env.REPL_SLUG
-    ? `https://${process.env.REPL_DEV_DOMAIN || process.env.REPLIT_DEV_DOMAIN}`
-    : `http://localhost:${port}`;
+// Detect Replit public URL — fix: evaluate ternary AFTER resolving domain
+const devDomain = process.env.REPL_DEV_DOMAIN || process.env.REPLIT_DEV_DOMAIN;
+const replDomain = devDomain ? `https://${devDomain}` : `http://localhost:${port}`;
 
 startAlwaysOn(replDomain);
 
