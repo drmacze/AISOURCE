@@ -364,7 +364,7 @@ function SidebarContent({ location, onClose }: { location: string; onClose?: () 
       </nav>
 
       {/* Footer */}
-      <div className="px-3 py-3 border-t border-border/60">
+      <div className="px-3 py-3 border-t border-border/60 space-y-2">
         <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-muted/30">
           <StatusDot active />
           <span className="text-xs text-muted-foreground flex-1">System Online</span>
@@ -375,6 +375,9 @@ function SidebarContent({ location, onClose }: { location: string; onClose?: () 
             <circle cx="7" cy="7" r="1.5" fill="currentColor" />
           </svg>
         </div>
+        <a href="/privacy" className="block text-center text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors py-0.5">
+          Kebijakan Privasi
+        </a>
       </div>
     </div>
   );

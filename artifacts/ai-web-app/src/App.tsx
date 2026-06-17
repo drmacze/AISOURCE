@@ -31,6 +31,7 @@ import OpenClawPage from "@/pages/openclaw";
 import AgentCommandCenter from "@/pages/agent";
 import ChatGPTIntegrationPage from "@/pages/chatgpt";
 import McpPage from "@/pages/mcp";
+import PrivacyPolicyPage from "@/pages/privacy";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -73,6 +74,7 @@ function Router() {
         <Route path="/wa-bot" component={WaBotPage} />
         <Route path="/chatgpt" component={ChatGPTIntegrationPage} />
         <Route path="/mcp" component={McpPage} />
+        <Route path="/privacy" component={PrivacyPolicyPage} />
         <Route path="/openclaw">
           <Redirect to="/agent" />
         </Route>

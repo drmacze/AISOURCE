@@ -4,7 +4,7 @@ modules = ["nodejs-20", "python-3.12", "web", "bash", "postgresql-16"]
 router = "application"
 deploymentTarget = "autoscale"
 run = ["bash", "-c", "NODE_ENV=production PORT=5000 node --enable-source-maps artifacts/api-server/dist/index.mjs"]
-build = ["bash", "-c", "pnpm install && pnpm --filter @workspace/ai-web-app run build && pnpm --filter @workspace/api-server run build"]
+build = ["bash", "-c", "pnpm install && PORT=5000 BASE_PATH=/ pnpm --filter @workspace/ai-web-app run build && pnpm --filter @workspace/api-server run build"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
