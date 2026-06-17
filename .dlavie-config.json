@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-16T20:14:05.918Z",
+  "updatedAt": "2026-06-16T20:20:02.462Z",
   "secrets": {
     "SPOTIFY_REFRESH_TOKEN": "AQDhmbTu8UedSZ1JBcdgpwVeXxLyBKMqwGekwtDc9KmsntJ0f5rGlB50EZbdYBqpJPN86E5wBLALnh6UtoOwBFB421fl5uY4NTm-P1v4scmTy_D-wQgTZ92Q3SG2bATXqE8",
     "ONEDRIVE_REFRESH_TOKEN": "M.C524_SN1.0.U.MsaArtifacts.-CjyiEaIeZlh5Z8E6uqdHT3Zr03SfDNT!8QsodbaUKbpbxmJtrfeERn8C466VDaWWKjGB!p7s1jnzflx856G781J3u7YdlW3oABGfgupnF1hhbLCunfm53NJFnXSOlhWe!jycWpFUt3fFkPmzkQUqvccGkIKZ9FLG6zmvTRqbedwe1WUBCZNO!yTT37mlCetFJqsrz4qBVJgxDQ5Ou3N!m94MT5kxki6TnmHoiscZguiabMD4A1dYd7Xj8jItyMY5rjWHw4j4I8CnnzIb0HtoCFJpY2NTd*tsp37TYHmsNqA0S!g5SjoxX!KD8qRlYf3Emo2iiVyYIpqewOSo3cdTbLU1ZFhnJ3GFZRKN1BrvUcdy*7HhO7HR4Ugw7vicJdjxMQ$$",
@@ -7,7 +7,7 @@
     "OPENROUTER_API_KEY": "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",
     "GROQ_API_KEY": "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",
     "GITHUB_TOKEN": "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",
-    "HF_TOKEN": "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"
+    "HF_TOKEN": "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"
   },
   "spotify": {
     "pinnedTrackId": "4wCiTliB8X4GioUQW0nupW",
