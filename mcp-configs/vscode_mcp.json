@@ -1,0 +1,15 @@
+{
+  "_comment": "DLavie OS MCP Integration untuk VS Code (dengan ekstensi Copilot/Cline/Continue)",
+  "_instructions": [
+    "1. Di root project VS Code Anda, buat folder .vscode/ (kalau belum ada)",
+    "2. Simpan file ini sebagai .vscode/mcp.json",
+    "3. Atau tambahkan ke settings.json VS Code Anda",
+    "4. Restart ekstensi AI Anda"
+  ],
+  "servers": {
+    "dlavie-os": {
+      "url": "https://33935269-8014-42f9-9220-03ad777c8b0e-00-1eoqqeshb7880.pike.replit.dev/api/mcp",
+      "type": "http"
+    }
+  }
+}

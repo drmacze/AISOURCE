@@ -43,6 +43,7 @@ import intentRouter from "./intent.js";
 import kaggleRouter from "./kaggle.js";
 import chatgptActionsRouter from "./chatgpt-actions.js";
 import providersHealthRouter from "./providers-health.js";
+import mcpRouter from "./mcp.js";
 
 
 const router: IRouter = Router();
@@ -167,5 +168,8 @@ router.use(chatgptActionsRouter);
 
 // Real-time provider health check — probes Groq, OpenRouter, HuggingFace, Ollama
 router.use(providersHealthRouter);
+
+// MCP (Model Context Protocol) server — connect Claude Desktop, Cursor, ChatGPT, etc.
+router.use(mcpRouter);
 
 export default router;

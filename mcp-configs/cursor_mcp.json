@@ -1,0 +1,14 @@
+{
+  "_comment": "DLavie OS MCP Integration untuk Cursor IDE",
+  "_instructions": [
+    "1. Di root project Cursor Anda, buat folder .cursor/ (kalau belum ada)",
+    "2. Simpan file ini sebagai .cursor/mcp.json",
+    "3. Atau: Cursor → Settings → MCP → Add Server → masukkan URL di bawah",
+    "4. Restart Cursor — DLavie OS tools akan tersedia di Cursor Agent"
+  ],
+  "mcpServers": {
+    "dlavie-os": {
+      "url": "https://33935269-8014-42f9-9220-03ad777c8b0e-00-1eoqqeshb7880.pike.replit.dev/api/mcp"
+    }
+  }
+}

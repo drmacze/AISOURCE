@@ -1,0 +1,16 @@
+{
+  "_comment": "DLavie OS MCP Integration untuk Claude Desktop",
+  "_instructions": [
+    "1. Buka Claude Desktop → Settings → Developer → Edit Config",
+    "2. Tambahkan bagian 'mcpServers' di bawah ini ke dalam claude_desktop_config.json Anda",
+    "3. Simpan dan restart Claude Desktop",
+    "4. Cek ikon palu (🔨) di pojok kanan bawah chat — DLavie OS tools akan muncul"
+  ],
+  "mcpServers": {
+    "dlavie-os": {
+      "url": "https://33935269-8014-42f9-9220-03ad777c8b0e-00-1eoqqeshb7880.pike.replit.dev/api/mcp",
+      "name": "DLavie OS",
+      "description": "AI Command Center — Chat, RAG, Training, Models"
+    }
+  }
+}
