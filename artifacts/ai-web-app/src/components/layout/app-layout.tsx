@@ -28,6 +28,7 @@ import {
   Palette,
   Rabbit,
   Plug,
+  ServerIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
@@ -89,7 +90,8 @@ const NAV_GROUPS = [
       { href: "/bots",      label: "Bot Center",     icon: Bot      },
       { href: "/brand-kit", label: "Brand Kit",      icon: Palette  },
       { href: "/storage",   label: "OneDrive",       icon: HardDrive},
-      { href: "/chatgpt",   label: "ChatGPT Actions", icon: Plug     },
+      { href: "/chatgpt",   label: "ChatGPT Actions", icon: Plug       },
+      { href: "/mcp",       label: "MCP Server",      icon: ServerIcon },
     ],
   },
   {
